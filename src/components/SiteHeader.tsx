@@ -34,7 +34,7 @@ export default function SiteHeader() {
               Chequered Flag
             </div>
             <div className="text-xs font-medium uppercase tracking-[0.18em] text-neutral-500">
-              Established 1975 · Nairobi
+              Established 1975
             </div>
           </div>
         </a>

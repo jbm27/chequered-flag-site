@@ -2,11 +2,11 @@ export default function SiteFooter() {
   return (
     <footer className="border-t border-neutral-200">
       <div className="mx-auto max-w-6xl px-5 py-10 text-sm text-neutral-600">
-        <div className="grid gap-8 md:grid-cols-4 md:items-start">
+        <div className="grid gap-8 md:grid-cols-4 md:items-start md:gap-12">
           {/* Company */}
           <div>
             <div className="font-semibold text-neutral-900">Chequered Flag Ltd</div>
-            <div className="mt-1">Established 1975 · Nairobi, Kenya</div>
+            <div className="mt-1">Established 1975</div>
 
             <div className="mt-4 inline-block rounded-md border border-neutral-200 bg-white px-2 py-1">
               <img
@@ -20,12 +20,22 @@ export default function SiteFooter() {
 
           {/* Navigation */}
           <div>
-            <div className="space-y-1">
-              <a className="block hover:text-neutral-800" href="/workshop">Workshop</a>
-              <a className="block hover:text-neutral-800" href="/vehicle-hire">Vehicle Hire</a>
-              <a className="block hover:text-neutral-800" href="/fabrication">Fabrication</a>
-              <a className="block hover:text-neutral-800" href="/about">About</a>
-              <a className="block hover:text-neutral-800" href="/contact">Contact</a>
+            <div className="flex flex-col gap-1">
+              <a className="hover:text-neutral-800" href="/workshop">
+                Workshop
+              </a>
+              <a className="hover:text-neutral-800" href="/vehicle-hire">
+                Vehicle Hire
+              </a>
+              <a className="hover:text-neutral-800" href="/fabrication">
+                Fabrication
+              </a>
+              <a className="hover:text-neutral-800" href="/about">
+                About
+              </a>
+              <a className="hover:text-neutral-800" href="/contact">
+                Contact
+              </a>
             </div>
           </div>
 
@@ -34,11 +44,14 @@ export default function SiteFooter() {
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
               Workshop location
             </div>
+            <div className="mt-1 text-sm text-neutral-700">
+              Ngong Road, Karen, Nairobi
+            </div>
             <a
-              href="https://www.google.com/maps/search/?api=1&query=Chequered+Flag+Nairobi"
+              href="https://www.google.com/maps/search/?api=1&query=Chequered+Flag+Ngong+Road+Karen+Nairobi"
               target="_blank"
               rel="noreferrer"
-              className="mt-1 inline-flex items-center gap-2 text-sm text-neutral-700 hover:text-neutral-900"
+              className="mt-1 inline-flex items-center gap-2 text-sm font-medium text-neutral-800 hover:text-neutral-900"
             >
               <span>View on Google Maps</span>
             </a>

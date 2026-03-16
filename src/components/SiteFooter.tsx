@@ -1,0 +1,64 @@
+export default function SiteFooter() {
+  return (
+    <footer className="border-t border-neutral-200">
+      <div className="mx-auto max-w-6xl px-5 py-10 text-sm text-neutral-600">
+        <div className="flex flex-col gap-8 md:flex-row md:items-start md:justify-between">
+          {/* Company */}
+          <div className="md:w-1/4">
+            <div className="font-semibold text-neutral-900">Chequered Flag Ltd</div>
+            <div className="mt-1">Established 1975 · Nairobi, Kenya</div>
+
+            <div className="mt-4 inline-block rounded-md border border-neutral-200 bg-white px-2 py-1">
+              <img
+                src="/images/logo.png"
+                alt="Chequered Flag logo"
+                className="w-full object-contain"
+                style={{ width: 160, height: "auto", maxWidth: 160 }}
+              />
+            </div>
+          </div>
+
+          {/* Navigation */}
+          <div className="md:w-1/4">
+            <div className="grid grid-cols-1 gap-y-1">
+              <a className="hover:text-neutral-800" href="/workshop">Workshop</a>
+              <a className="hover:text-neutral-800" href="/vehicle-hire">Vehicle Hire</a>
+              <a className="hover:text-neutral-800" href="/fabrication">Fabrication</a>
+              <a className="hover:text-neutral-800" href="/about">About</a>
+              <a className="hover:text-neutral-800" href="/contact">Contact</a>
+            </div>
+          </div>
+
+          {/* Workshop location */}
+          <div className="md:w-1/4">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
+              Workshop location
+            </div>
+            <a
+              href="https://www.google.com/maps/search/?api=1&query=Chequered+Flag+Nairobi"
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 inline-flex items-center gap-2 text-sm text-neutral-700 hover:text-neutral-900"
+            >
+              <span>View on Google Maps</span>
+            </a>
+          </div>
+
+          {/* Hours */}
+          <div className="md:w-1/4">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
+              Hours of operation
+            </div>
+            <div className="mt-1 text-sm">
+              <div>Mon–Fri: 8:00am – 5:00pm</div>
+              <div>Sat: 8:00am – 1:00pm</div>
+              <div>Sun & public holidays: Closed</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </footer>
+  );
+}
+
+

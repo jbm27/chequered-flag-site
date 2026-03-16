@@ -2,9 +2,9 @@ export default function SiteFooter() {
   return (
     <footer className="border-t border-neutral-200">
       <div className="mx-auto max-w-6xl px-5 py-10 text-sm text-neutral-600">
-        <div className="flex flex-col gap-8 md:flex-row md:items-start md:justify-between">
+        <div className="grid gap-8 md:grid-cols-4 md:items-start">
           {/* Company */}
-          <div className="md:w-1/4">
+          <div>
             <div className="font-semibold text-neutral-900">Chequered Flag Ltd</div>
             <div className="mt-1">Established 1975 · Nairobi, Kenya</div>
 
@@ -19,18 +19,18 @@ export default function SiteFooter() {
           </div>
 
           {/* Navigation */}
-          <div className="md:w-1/4">
-            <div className="grid grid-cols-1 gap-y-1">
-              <a className="hover:text-neutral-800" href="/workshop">Workshop</a>
-              <a className="hover:text-neutral-800" href="/vehicle-hire">Vehicle Hire</a>
-              <a className="hover:text-neutral-800" href="/fabrication">Fabrication</a>
-              <a className="hover:text-neutral-800" href="/about">About</a>
-              <a className="hover:text-neutral-800" href="/contact">Contact</a>
+          <div>
+            <div className="space-y-1">
+              <a className="block hover:text-neutral-800" href="/workshop">Workshop</a>
+              <a className="block hover:text-neutral-800" href="/vehicle-hire">Vehicle Hire</a>
+              <a className="block hover:text-neutral-800" href="/fabrication">Fabrication</a>
+              <a className="block hover:text-neutral-800" href="/about">About</a>
+              <a className="block hover:text-neutral-800" href="/contact">Contact</a>
             </div>
           </div>
 
           {/* Workshop location */}
-          <div className="md:w-1/4">
+          <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
               Workshop location
             </div>
@@ -45,7 +45,7 @@ export default function SiteFooter() {
           </div>
 
           {/* Hours */}
-          <div className="md:w-1/4">
+          <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
               Hours of operation
             </div>

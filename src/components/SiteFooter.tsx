@@ -20,22 +20,32 @@ export default function SiteFooter() {
 
           {/* Navigation */}
           <div>
-            <div className="flex flex-col gap-1">
-              <a className="hover:text-neutral-800" href="/workshop">
-                Workshop
-              </a>
-              <a className="hover:text-neutral-800" href="/vehicle-hire">
-                Vehicle Hire
-              </a>
-              <a className="hover:text-neutral-800" href="/fabrication">
-                Fabrication
-              </a>
-              <a className="hover:text-neutral-800" href="/about">
-                About
-              </a>
-              <a className="hover:text-neutral-800" href="/contact">
-                Contact
-              </a>
+            <div className="space-y-1">
+              <p>
+                <a className="hover:text-neutral-800" href="/workshop">
+                  Workshop
+                </a>
+              </p>
+              <p>
+                <a className="hover:text-neutral-800" href="/vehicle-hire">
+                  Vehicle Hire
+                </a>
+              </p>
+              <p>
+                <a className="hover:text-neutral-800" href="/fabrication">
+                  Fabrication
+                </a>
+              </p>
+              <p>
+                <a className="hover:text-neutral-800" href="/about">
+                  About
+                </a>
+              </p>
+              <p>
+                <a className="hover:text-neutral-800" href="/contact">
+                  Contact
+                </a>
+              </p>
             </div>
           </div>
 

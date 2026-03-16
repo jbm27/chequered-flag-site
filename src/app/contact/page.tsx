@@ -86,9 +86,14 @@ export default function ContactPage() {
           <div className="mt-8 rounded-xl border border-neutral-200 p-6">
             <div className="text-sm font-semibold">Location</div>
             <div className="mt-2 text-sm text-neutral-700">{CONTACT.locationShort}</div>
-            <p className="mt-3 text-sm text-neutral-600">
-              (We can add the exact address and a Google Map embed once you confirm the preferred pin location.)
-            </p>
+            <a
+              href="https://www.google.com/maps/search/?api=1&query=Chequered+Flag+Nairobi"
+              target="_blank"
+              rel="noreferrer"
+              className="mt-3 inline-flex items-center text-sm font-medium text-neutral-800 underline underline-offset-4 hover:text-neutral-900"
+            >
+              View on Google Maps
+            </a>
           </div>
         </div>
       </section>

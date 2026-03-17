@@ -43,8 +43,8 @@ export default function Home() {
             style={{ aspectRatio: "3/2", maxHeight: "min(70vh, 420px)" }}
           >
             <img
-              src="/images/hero.png"
-              alt="Chequered Flag workshop"
+              src="/images/HERO.jpg"
+              alt="Chequered Flag workshop vehicles"
               className="absolute inset-0 h-full w-full object-cover"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />

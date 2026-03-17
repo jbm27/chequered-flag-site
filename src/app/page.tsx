@@ -2,8 +2,18 @@ export default function Home() {
   return (
     <main>
       <section className="border-b border-neutral-200">
-        <div className="mx-auto grid max-w-6xl gap-10 px-5 py-16 md:grid-cols-2 md:py-20">
-          <div>
+        {/* Full-bleed hero image */}
+        <div className="w-full">
+          <img
+            src="/images/HERO.jpg"
+            alt="Chequered Flag workshop vehicles"
+            className="h-[260px] w-full object-cover sm:h-[300px] md:h-[360px] lg:h-[420px]"
+          />
+        </div>
+
+        {/* Intro content below hero */}
+        <div className="mx-auto max-w-6xl px-5 py-16 md:py-20">
+          <div className="max-w-3xl">
             <p className="mb-3 text-xs font-semibold tracking-[0.2em] text-neutral-500">
               NAIROBI · AUTOMOTIVE · FABRICATION
             </p>
@@ -35,19 +45,6 @@ export default function Home() {
                 Vehicle Hire
               </a>
             </div>
-          </div>
-
-          {/* Hero Image – strict max size so it never dominates the page */}
-          <div
-            className="relative min-h-0 overflow-hidden rounded-xl border border-neutral-200"
-            style={{ aspectRatio: "3/2", maxHeight: "min(70vh, 420px)" }}
-          >
-            <img
-              src="/images/HERO.jpg"
-              alt="Chequered Flag workshop vehicles"
-              className="absolute inset-0 h-full w-full object-cover"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
           </div>
         </div>
       </section>

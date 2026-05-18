@@ -350,6 +350,31 @@ export default function NaturalFibrePage() {
             export-grade natural fibre using locally developed engineering capability.
           </p>
 
+          <figure className="mt-10 overflow-hidden rounded-xl border border-neutral-200 bg-white p-4 sm:p-6">
+            <figcaption className="sr-only">
+              Mananasi Fibre process flow: pineapple farming to fruit, fibre for textiles, and pulp
+              for silage and animal feed
+            </figcaption>
+            <p className="text-xs font-semibold tracking-[0.18em] text-neutral-500">
+              PROCESS OVERVIEW
+            </p>
+            <h3 className="mt-2 text-lg font-semibold tracking-tight">
+              From plantation waste to fibre and silage
+            </h3>
+            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-neutral-700">
+              After fruit harvest, pineapple leaves are collected and decorticated. The extracted fibre
+              is refined for textile markets; the pulp is ensiled as a stable livestock feed — replacing
+              leaf burning with circular, export-oriented manufacturing.
+            </p>
+            <img
+              src="/images/natural-fibre/process-flow.jpg"
+              alt="Mananasi Fibre process diagram: leaf harvest and decortication branch to refined fibre for textiles and pulp for ensiling as animal feed, with benefits for farmers, employment, food security, and environmental protection"
+              className="mt-6 w-full rounded-lg"
+              loading="lazy"
+              decoding="async"
+            />
+          </figure>
+
           <div className="mt-10 space-y-8">
             {FACILITY_STAGES.map((stage, index) => (
               <FacilityStage key={stage.title} stage={stage} reverse={index % 2 === 1} />

@@ -46,6 +46,11 @@ export default function SiteFooter() {
                   Contact
                 </a>
               </p>
+              <p>
+                <a className="hover:text-neutral-800" href="/natural-fibre">
+                  Natural Fibre R&amp;D
+                </a>
+              </p>
             </div>
           </div>
 

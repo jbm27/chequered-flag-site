@@ -17,6 +17,7 @@ const IMPACT_STATS = [
   { value: "2,700+", label: "Tonnes of pineapple leaves processed" },
   { value: "40+", label: "Tonnes of export-grade fibre produced" },
   { value: "4+", label: "International export markets" },
+  { value: "$1M+", label: "Grant-backed development aid raised" },
 ];
 
 const INNOVATIONS = [
@@ -173,7 +174,7 @@ export default function NaturalFibrePage() {
 
       <section className="border-b border-neutral-200 bg-neutral-50">
         <div className="mx-auto max-w-6xl px-6 md:px-8 py-10">
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
             {IMPACT_STATS.map((stat) => (
               <div key={stat.label} className="rounded-xl border border-neutral-200 bg-white p-5">
                 <div className="text-2xl font-semibold tracking-tight md:text-3xl">{stat.value}</div>

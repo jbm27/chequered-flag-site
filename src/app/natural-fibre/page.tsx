@@ -551,6 +551,29 @@ export default function NaturalFibrePage() {
               processing capability that can compete in regional and export markets. We are actively
               seeking partners and investment to accelerate this next phase of development.
             </p>
+
+            <figure className="mt-8 overflow-hidden rounded-lg border border-neutral-200 bg-white p-4 sm:p-6">
+              <figcaption className="sr-only">
+                Banana stem processing solution: stem harvest and decortication produce fibre for
+                textiles and pulp for silage and animal feed
+              </figcaption>
+              <p className="text-xs font-semibold tracking-[0.18em] text-neutral-500">
+                OUR SOLUTION
+              </p>
+              <p className="mt-3 max-w-3xl text-sm leading-relaxed text-neutral-700">
+                Banana pseudostem follows the same valorisation model proven with pineapple leaves:
+                after fruit goes to market, stems are harvested, decorticated, and split into export-grade
+                fibre for textiles and ensiled pulp for livestock feed — generating farmer income, local
+                employment, food security, and foreign exchange from fibre exports.
+              </p>
+              <img
+                src="/images/natural-fibre/banana-process.jpg"
+                alt="Banana stem processing diagram: farming and fruit harvest, stem transport and decortication, fibre refined for textiles, pulp ensiled for animal feed, with benefits for agricultural resilience, local employment, food security, sustainable fibre, and export earnings"
+                className="mt-6 w-full rounded-md"
+                loading="lazy"
+                decoding="async"
+              />
+            </figure>
           </div>
 
           <h3 className="mt-10 text-lg font-semibold tracking-tight">

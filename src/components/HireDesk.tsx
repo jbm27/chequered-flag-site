@@ -21,6 +21,8 @@ export default function HireDesk() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("pending");
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
+  const [notice, setNotice] = useState("");
+  const [fees, setFees] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [team, setTeam] = useState<string[]>([]);
   const [memberName, setMemberName] = useState("");
@@ -175,18 +177,45 @@ export default function HireDesk() {
     setTeamNotice(body.username + " can now sign in on this page.");
   }
 
-  async function act(booking: StaffBooking, action: string, prompt: string) {
+  function needsDeliveryPrice(booking: StaffBooking) {
+    return booking.deliveryManual || booking.deliveryFee === null;
+  }
+
+  async function act(booking: StaffBooking, action: string, prompt: string, extra?: { deliveryFee?: string }) {
+    let deliveryFee = extra?.deliveryFee ?? "";
+    if ((action === "hold" || action === "settle") && needsDeliveryPrice(booking)) {
+      deliveryFee = deliveryFee.trim().replace(/,/g, "");
+      if (!/^\d+$/.test(deliveryFee) || Number(deliveryFee) > 500000) {
+        setNotice("");
+        setMessage("Enter the delivery charge as a whole number of shillings. Use 0 if there is no delivery charge.");
+        return;
+      }
+    }
     if (!window.confirm(prompt)) return;
     setMessage("");
+    setNotice("");
     const response = await fetch("/api/hire/staff/bookings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: booking.id, action, note: notes[booking.id] || "" }),
+      body: JSON.stringify({ id: booking.id, action, note: notes[booking.id] || "", deliveryFee }),
     });
     const body = await response.json();
     if (!response.ok) {
       setMessage(body.error || "The booking could not be updated.");
       return;
+    }
+    if (action === "hold") {
+      setNotice(booking.reference + " is held. It is waiting for the full payment.");
+      setFilter("pending");
+    } else if (action === "settle" || action === "confirm") {
+      setNotice(booking.reference + " is confirmed. The vehicle is held.");
+      setFilter("confirmed");
+    } else if (action === "dismiss") {
+      setNotice(booking.reference + " was rejected.");
+      setFilter("cancelled");
+    } else if (action === "release" || action === "cancel") {
+      setNotice(booking.reference + " was closed and the vehicle is free.");
+      setFilter("cancelled");
     }
     await loadBookings();
   }
@@ -361,6 +390,7 @@ export default function HireDesk() {
       )}
 
       {message && <p className="mt-4 text-sm text-red-700">{message}</p>}
+      {notice && <p className="mt-4 text-sm text-green-800">{notice}</p>}
 
       {deskView === "calendar" ? (
         <HireCalendar bookings={bookings} fleet={fleet} onAct={act} />
@@ -412,8 +442,8 @@ export default function HireDesk() {
             </p>
             {booking.staffNote && <p className="mt-1 text-sm text-neutral-600">Note: {booking.staffNote}</p>}
             {(booking.status === "pending" || booking.status === "confirmed" || booking.status === "quote") && (
-              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
-                <label className="block flex-1 text-sm">
+              <div className="mt-4 space-y-3">
+                <label className="block text-sm">
                   <span className="mb-1 block text-neutral-500">Note for the file (optional)</span>
                   <input
                     value={notes[booking.id] || ""}
@@ -421,42 +451,87 @@ export default function HireDesk() {
                     className="h-10 w-full rounded-md border border-neutral-300 px-3"
                   />
                 </label>
-                {booking.status === "pending" && (
-                  <button
-                    type="button"
-                    className="h-10 rounded-md bg-green-700 px-3 text-sm font-medium text-white"
-                    onClick={() => act(booking, "confirm", "Confirm that the full payment for " + booking.reference + " has arrived?")}
-                  >
-                    Confirm payment received
-                  </button>
+                {booking.status === "quote" && needsDeliveryPrice(booking) && (
+                  <label className="block max-w-xs text-sm">
+                    <span className="mb-1 block text-neutral-500">Delivery charge (KSh). Use 0 if there is none.</span>
+                    <input
+                      inputMode="numeric"
+                      value={fees[booking.id] || ""}
+                      onChange={(event) => setFees((current) => ({ ...current, [booking.id]: event.target.value }))}
+                      className="h-10 w-full rounded-md border border-neutral-300 px-3"
+                    />
+                  </label>
                 )}
-                {booking.status === "pending" && (
-                  <button
-                    type="button"
-                    className="h-10 rounded-md border border-neutral-300 px-3 text-sm"
-                    onClick={() => act(booking, "release", "Release the hold on " + (booking.plate || booking.model) + "?")}
-                  >
-                    Release hold
-                  </button>
-                )}
-                {booking.status === "confirmed" && (
-                  <button
-                    type="button"
-                    className="h-10 rounded-md border border-neutral-300 px-3 text-sm"
-                    onClick={() => act(booking, "cancel", "Cancel " + booking.reference + " and free the vehicle?")}
-                  >
-                    Cancel booking
-                  </button>
-                )}
-                {booking.status === "quote" && (
-                  <button
-                    type="button"
-                    className="h-10 rounded-md border border-neutral-300 px-3 text-sm"
-                    onClick={() => act(booking, "dismiss", "Close quote request " + booking.reference + "?")}
-                  >
-                    Close request
-                  </button>
-                )}
+                <div className="flex flex-wrap gap-2">
+                  {booking.status === "quote" && (
+                    <button
+                      type="button"
+                      className="h-10 rounded-md bg-neutral-900 px-3 text-sm font-medium text-white"
+                      onClick={() =>
+                        act(
+                          booking,
+                          "hold",
+                          "Hold a " + booking.model + " for " + booking.reference + "? It stays unpaid until you confirm the full amount.",
+                          { deliveryFee: fees[booking.id] || "" },
+                        )
+                      }
+                    >
+                      Hold the vehicle
+                    </button>
+                  )}
+                  {booking.status === "quote" && (
+                    <button
+                      type="button"
+                      className="h-10 rounded-md bg-green-700 px-3 text-sm font-medium text-white"
+                      onClick={() =>
+                        act(
+                          booking,
+                          "settle",
+                          "Confirm that the full payment for " + booking.reference + " has arrived, and hold a " + booking.model + "?",
+                          { deliveryFee: fees[booking.id] || "" },
+                        )
+                      }
+                    >
+                      Confirm payment received
+                    </button>
+                  )}
+                  {booking.status === "quote" && (
+                    <button
+                      type="button"
+                      className="h-10 rounded-md border border-neutral-300 px-3 text-sm"
+                      onClick={() => act(booking, "dismiss", "Reject " + booking.reference + "? The vehicle will not be held.")}
+                    >
+                      Reject request
+                    </button>
+                  )}
+                  {booking.status === "pending" && (
+                    <button
+                      type="button"
+                      className="h-10 rounded-md bg-green-700 px-3 text-sm font-medium text-white"
+                      onClick={() => act(booking, "confirm", "Confirm that the full payment for " + booking.reference + " has arrived?")}
+                    >
+                      Confirm payment received
+                    </button>
+                  )}
+                  {booking.status === "pending" && (
+                    <button
+                      type="button"
+                      className="h-10 rounded-md border border-neutral-300 px-3 text-sm"
+                      onClick={() => act(booking, "release", "Release the hold on " + (booking.plate || booking.model) + "?")}
+                    >
+                      Release hold
+                    </button>
+                  )}
+                  {booking.status === "confirmed" && (
+                    <button
+                      type="button"
+                      className="h-10 rounded-md border border-neutral-300 px-3 text-sm"
+                      onClick={() => act(booking, "cancel", "Cancel " + booking.reference + " and free the vehicle?")}
+                    >
+                      Cancel booking
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </article>

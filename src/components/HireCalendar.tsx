@@ -44,7 +44,7 @@ export default function HireCalendar({
 }: {
   bookings: StaffBooking[];
   fleet: DeskVehicle[];
-  onAct: (booking: StaffBooking, action: string, prompt: string) => void;
+  onAct: (booking: StaffBooking, action: string, prompt: string, extra?: { deliveryFee?: string }) => void;
 }) {
   const today = todayNairobi();
   const todayNum = dayNumber(today) ?? 0;
@@ -55,6 +55,7 @@ export default function HireCalendar({
   const [hideIdle, setHideIdle] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState("");
+  const [quoteFee, setQuoteFee] = useState("");
 
   const holds = useMemo(
     () => bookings.filter((booking) => (booking.status === "pending" || booking.status === "confirmed") && booking.vehicleId),
@@ -248,7 +249,18 @@ export default function HireCalendar({
           <p className="mt-1 text-sm text-neutral-600">{selected.customerName} · {selected.phone} · {selected.email}</p>
           <p className="mt-3 text-sm">{formatDay(selected.pickup)}, {selected.pickTime} to {formatDay(selected.returnOn)}, {selected.retTime} · {selected.location}</p>
           <p className="mt-1 text-sm">{selected.deliverySummary}</p>
-          <p className="mt-2 text-sm font-medium">{selected.status === "confirmed" ? "Paid in full" : selected.status === "pending" ? "Awaiting the full payment" : selected.status} · {ksh(selected.total)}{selected.mpesaCode ? " · M-Pesa " + selected.mpesaCode : ""}</p>
+          <p className="mt-2 text-sm font-medium">{selected.status === "confirmed" ? "Paid in full" : selected.status === "pending" ? "Awaiting the full payment" : "Quote, not held yet"} · {ksh(selected.total)}{selected.deliveryManual ? " plus delivery" : ""}{selected.mpesaCode ? " · M-Pesa " + selected.mpesaCode : ""}</p>
+          {selected.status === "quote" && (selected.deliveryManual || selected.deliveryFee === null) && (
+            <label className="mt-4 block max-w-xs text-sm">
+              <span className="mb-1 block text-neutral-500">Delivery charge (KSh). Use 0 if there is none.</span>
+              <input
+                inputMode="numeric"
+                value={quoteFee}
+                onChange={(event) => setQuoteFee(event.target.value)}
+                className="h-10 w-full rounded-md border border-neutral-300 px-3"
+              />
+            </label>
+          )}
           <div className="mt-4 flex flex-wrap gap-2">
             {selected.status === "pending" && (
               <button type="button" className="rounded-md bg-green-700 px-3 py-2 text-sm font-medium text-white" onClick={() => onAct(selected, "confirm", "Confirm that the full payment for " + selected.reference + " has arrived?")}>
@@ -266,8 +278,18 @@ export default function HireCalendar({
               </button>
             )}
             {selected.status === "quote" && (
-              <button type="button" className="rounded-md border border-neutral-300 px-3 py-2 text-sm" onClick={() => onAct(selected, "dismiss", "Close quote request " + selected.reference + "?")}>
-                Close request
+              <button type="button" className="rounded-md bg-neutral-900 px-3 py-2 text-sm font-medium text-white" onClick={() => onAct(selected, "hold", "Hold a " + selected.model + " for " + selected.reference + "? It stays unpaid until you confirm the full amount.", { deliveryFee: quoteFee })}>
+                Hold the vehicle
+              </button>
+            )}
+            {selected.status === "quote" && (
+              <button type="button" className="rounded-md bg-green-700 px-3 py-2 text-sm font-medium text-white" onClick={() => onAct(selected, "settle", "Confirm that the full payment for " + selected.reference + " has arrived, and hold a " + selected.model + "?", { deliveryFee: quoteFee })}>
+                Confirm payment received
+              </button>
+            )}
+            {selected.status === "quote" && (
+              <button type="button" className="rounded-md border border-neutral-300 px-3 py-2 text-sm" onClick={() => onAct(selected, "dismiss", "Reject " + selected.reference + "? The vehicle will not be held.")}>
+                Reject request
               </button>
             )}
           </div>

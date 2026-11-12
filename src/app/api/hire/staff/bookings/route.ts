@@ -41,7 +41,7 @@ export async function POST(request: Request) {
   if (!databaseConfigured()) {
     return NextResponse.json({ error: "Bookings are not connected yet." }, { status: 503 });
   }
-  let body: { id?: string; action?: string; note?: string };
+  let body: { id?: string; action?: string; note?: string; deliveryFee?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
   }
   try {
     await requireStaff();
-    const result = await updateBooking(String(body.id || ""), String(body.action || ""), String(body.note || ""));
+    const result = await updateBooking(String(body.id || ""), String(body.action || ""), String(body.note || ""), body.deliveryFee);
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return NextResponse.json({ error: publicError(error) }, { status: httpStatus(error) });

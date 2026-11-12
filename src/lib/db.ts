@@ -500,17 +500,108 @@ export async function listBookings() {
   return result.rows.map((row) => mapStaff(row));
 }
 
-export async function updateBooking(id: string, action: string, note: string) {
+function staffError(message: string, status: number) {
+  const error = new Error(message);
+  (error as Error & { status?: number }).status = status;
+  return error;
+}
+
+function wholeShillings(value: unknown) {
+  const text = String(value ?? "").trim().replace(/,/g, "");
+  if (!/^\d+$/.test(text)) return null;
+  const amount = Number(text);
+  if (amount > 500000) return null;
+  return amount;
+}
+
+async function decideQuote(db: Pool, id: string, staffNote: string, nextStatus: "pending" | "confirmed", deliveryFeeInput: unknown) {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query<{
+      model_name: string;
+      pickup_on: string;
+      return_on: string;
+      hire_total: number;
+      insurance_total: number;
+      delivery_fee: number | null;
+      delivery_manual: boolean;
+      status: string;
+    }>(
+      `SELECT model_name, pickup_on::text, return_on::text, hire_total, insurance_total,
+              delivery_fee, delivery_manual, status
+       FROM bookings
+       WHERE id = $1
+       FOR UPDATE`,
+      [id],
+    );
+    const row = current.rows[0];
+    if (!row || row.status !== "quote") throw staffError("That booking has already been updated.", 409);
+
+    let fee = row.delivery_fee === null || row.delivery_fee === undefined ? null : Number(row.delivery_fee);
+    if (row.delivery_manual || fee === null) {
+      fee = wholeShillings(deliveryFeeInput);
+      if (fee === null) {
+        throw staffError("Enter the delivery charge as a whole number of shillings. Use 0 if there is no delivery charge.", 400);
+      }
+    }
+
+    const end = exclusiveEnd(row.pickup_on, row.return_on);
+    const locked = await client.query<{ id: string }>(
+      `SELECT v.id
+       FROM vehicles v
+       WHERE v.active = true
+         AND v.model = $1
+         AND NOT EXISTS (
+           SELECT 1 FROM bookings b
+           WHERE b.vehicle_id = v.id
+             AND b.status IN ('pending', 'confirmed')
+             AND b.pickup_on < $3::date
+             AND $2::date < CASE WHEN b.return_on > b.pickup_on THEN b.return_on ELSE b.pickup_on + 1 END
+         )
+       ORDER BY v.id
+       FOR UPDATE OF v`,
+      [row.model_name, row.pickup_on, end],
+    );
+    const vehicleId = locked.rows[0]?.id;
+    if (!vehicleId) throw staffError("No " + row.model_name + " is free for those dates.", 409);
+
+    const total = Number(row.hire_total) + Number(row.insurance_total) + fee;
+    const saved = await client.query(
+      `UPDATE bookings
+       SET status = $2,
+           vehicle_id = $3,
+           delivery_fee = $4,
+           total_due = $5,
+           delivery_manual = false,
+           staff_note = CASE WHEN $6 = '' THEN staff_note ELSE $6 END,
+           confirmed_at = CASE WHEN $2 = 'confirmed' THEN now() ELSE confirmed_at END
+       WHERE id = $1 AND status = 'quote'`,
+      [id, nextStatus, vehicleId, fee, total, staffNote],
+    );
+    if (saved.rowCount !== 1) throw staffError("That booking has already been updated.", 409);
+    await client.query("COMMIT");
+    return { ok: true };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateBooking(id: string, action: string, note: string, deliveryFee?: unknown) {
   await ensureReady();
   const db = pool();
   if (!db) throw new Error("DATABASE_URL is not set");
   const staffNote = note.trim().slice(0, 500);
+  if (action === "hold" || action === "settle") {
+    return decideQuote(db, id, staffNote, action === "settle" ? "confirmed" : "pending", deliveryFee);
+  }
   const expected =
     action === "confirm" ? "pending" : action === "release" ? "pending" : action === "cancel" ? "confirmed" : action === "dismiss" ? "quote" : "";
   if (!expected) {
-    const error = new Error("That action is not available.");
-    (error as Error & { status?: number }).status = 400;
-    throw error;
+    throw staffError("That action is not available.", 400);
   }
   const nextStatus = action === "confirm" ? "confirmed" : "cancelled";
   const result = await db.query(

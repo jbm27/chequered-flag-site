@@ -13,7 +13,7 @@ export default function VehicleHirePage() {
           <img
             src="/images/vehicle-hire/Hero.jpg"
             alt="Chequered Flag self-drive vehicles outside the workshop"
-            className="h-[240px] w-full object-cover sm:h-[300px] md:h-[360px] lg:h-[400px]"
+            className="h-[280px] w-full object-cover object-[center_72%] sm:h-[340px] md:h-[420px] lg:h-[480px]"
           />
         </div>
 

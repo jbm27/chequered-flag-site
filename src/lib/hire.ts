@@ -413,11 +413,8 @@ export function assessBooking(model: QuoteModel | null, raw: Partial<BookingInpu
     directions,
     note,
   });
-  if (delivery !== "none" && !place && address.length < 3) {
-    return { ok: false, error: "Search for a delivery place, or type the address." };
-  }
-  if (quoted.manual && note.length < 5) {
-    return { ok: false, error: "Add the delivery details so we can price it before you pay." };
+  if (delivery !== "none" && address.length < 3) {
+    return { ok: false, error: "Enter the town or suburb for delivery." };
   }
 
   const name = cleanText(raw.name, 120);

@@ -13,8 +13,6 @@ import {
   ksh,
   outOfHours,
   PICKUP_LOCATIONS,
-  PLACES,
-  placeById,
   quoteDelivery,
   todayNairobi,
   type AvailabilityResponse,
@@ -63,9 +61,6 @@ export default function HireBooking() {
   const [type, setType] = useState("all");
   const [delivery, setDelivery] = useState<"none" | "deliver" | "both">("none");
   const [address, setAddress] = useState("");
-  const [placeId, setPlaceId] = useState("");
-  const [directions, setDirections] = useState("");
-  const [note, setNote] = useState("");
   const [oohNote, setOohNote] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [name, setName] = useState("");
@@ -121,26 +116,20 @@ export default function HireBooking() {
   }, [pickup, returnOn, calFrom, refreshToken]);
 
   const hours = outOfHours(pickup, returnOn, pickTime, retTime);
-  const place = placeId ? placeById(placeId) : null;
   const deliveryQuote = quoteDelivery({
     delivery,
-    place: delivery === "none" ? null : place,
+    place: null,
     address,
     location,
     ooh: hours,
-    directions,
-    note,
+    directions: "",
+    note: "",
   });
   const models = useMemo(() => {
     const list = availability?.models || [];
     return type === "all" ? list : list.filter((model) => model.group === type);
   }, [availability, type]);
   const selected = models.find((model) => model.id === selectedId) || null;
-  const suggestions =
-    delivery !== "none" && !placeId && address.trim().length >= 2
-      ? PLACES.filter((item) => (item.name + " " + item.area).toLowerCase().includes(address.trim().toLowerCase())).slice(0, 6)
-      : [];
-
   const hireTotal = selected && availability ? availability.days * selected.rate : 0;
   const insuranceTotal = selected && insure ? availability!.days * selected.addon : 0;
   const pricedDelivery = deliveryQuote.manual ? 0 : deliveryQuote.fee || 0;
@@ -169,10 +158,10 @@ export default function HireBooking() {
         retTime,
         location,
         delivery,
-        placeId,
+        placeId: "",
         address,
-        directions,
-        note,
+        directions: "",
+        note: "",
         insure,
         name,
         email,
@@ -200,10 +189,10 @@ export default function HireBooking() {
           retTime,
           location,
           delivery,
-          placeId,
+          placeId: "",
           address,
-          directions,
-          note,
+          directions: "",
+          note: "",
           insure,
           name,
           email,
@@ -406,56 +395,21 @@ export default function HireBooking() {
         )}
 
         {delivery !== "none" && (
-          <div className="relative mt-4 rounded-xl border border-neutral-200 bg-white p-4">
+          <div className="mt-4 rounded-xl border border-neutral-200 bg-white p-4">
             <label className="block text-sm">
-              <span className="mb-1 block text-neutral-600">
-                {delivery === "both" ? "Where should we deliver and collect?" : "Where should we deliver?"}
-              </span>
+              <span className="mb-1 block text-neutral-600">Town or suburb</span>
               <input
                 value={address}
-                onChange={(event) => {
-                  setAddress(event.target.value);
-                  setPlaceId("");
-                }}
-                placeholder="Search a place, or type an address"
+                onChange={(event) => setAddress(event.target.value)}
+                placeholder="For example, Kilimani"
                 className={fieldClass}
               />
             </label>
-            {suggestions.length > 0 && (
-              <div className="absolute z-10 mt-1 w-[min(100%,32rem)] overflow-hidden rounded-md border border-neutral-200 bg-white shadow-lg">
-                {suggestions.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className="block w-full px-3 py-2 text-left text-sm hover:bg-neutral-50"
-                    onClick={() => {
-                      setPlaceId(item.id);
-                      setAddress(item.name + ", " + item.area);
-                    }}
-                  >
-                    <span className="font-medium">{item.name}</span>
-                    <span className="text-neutral-500"> · {item.area}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            <label className="mt-3 block text-sm">
-              <span className="mb-1 block text-neutral-600">Directions for the driver (optional)</span>
-              <input value={directions} onChange={(event) => setDirections(event.target.value)} className={fieldClass} />
-            </label>
-            <label className="mt-3 block text-sm">
-              <span className="mb-1 block text-neutral-600">Delivery details {deliveryQuote.manual ? "" : "(optional)"}</span>
-              <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={2} className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm" />
-            </label>
-            {placeId || address.trim().length >= 3 ? (
-              <>
-                {deliveryQuote.kmText && <p className="mt-3 text-sm text-neutral-700">{deliveryQuote.kmText}</p>}
-                {deliveryQuote.breakdown && <p className="mt-1 text-sm text-neutral-700">{deliveryQuote.breakdown}</p>}
-                <p className="mt-1 text-sm text-neutral-700">{deliveryQuote.message}</p>
-              </>
-            ) : (
-              <p className="mt-3 text-sm text-neutral-600">Search a place to see the charge, or type an address and we will price it before you pay.</p>
-            )}
+            <p className="mt-3 text-sm text-neutral-700">
+              {address.trim().length >= 3
+                ? deliveryQuote.message
+                : "Enter the town or suburb. We will price the delivery and tell you the full amount before you pay."}
+            </p>
           </div>
         )}
 

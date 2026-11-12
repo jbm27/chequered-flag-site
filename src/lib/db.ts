@@ -537,6 +537,48 @@ export async function staffReady() {
   return count.rows[0].n > 0;
 }
 
+function checkedStaffCredentials(username: string, password: string) {
+  const name = username.trim().toLowerCase();
+  if (!/^[a-z0-9._-]{3,40}$/.test(name)) {
+    const error = new Error("Use 3 to 40 characters: letters, numbers, dots, underscores, or hyphens.");
+    (error as Error & { status?: number }).status = 400;
+    throw error;
+  }
+  if (password.length < 8 || password.length > 200) {
+    const error = new Error("Use a password of 8 to 200 characters.");
+    (error as Error & { status?: number }).status = 400;
+    throw error;
+  }
+  return name;
+}
+
+export async function listStaff() {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const result = await db.query<{ username: string }>("SELECT username FROM staff_users ORDER BY username");
+  return result.rows.map((row) => ({ username: row.username }));
+}
+
+export async function createStaff(username: string, password: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const name = checkedStaffCredentials(username, password);
+  const { salt, hash } = hashPassword(password);
+  try {
+    await db.query("INSERT INTO staff_users (username, password_hash, salt) VALUES ($1, $2, $3)", [name, hash, salt]);
+  } catch (error) {
+    if ((error as { code?: string }).code === "23505") {
+      const taken = new Error("That username is already in use.");
+      (taken as Error & { status?: number }).status = 409;
+      throw taken;
+    }
+    throw error;
+  }
+  return { username: name };
+}
+
 export async function loginStaff(username: string, password: string) {
   await ensureReady();
   const db = pool();

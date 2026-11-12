@@ -21,6 +21,13 @@ export default function HireDesk() {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [team, setTeam] = useState<string[]>([]);
+  const [memberName, setMemberName] = useState("");
+  const [memberPassword, setMemberPassword] = useState("");
+  const [memberPasswordAgain, setMemberPasswordAgain] = useState("");
+  const [teamError, setTeamError] = useState("");
+  const [teamNotice, setTeamNotice] = useState("");
+  const [addingMember, setAddingMember] = useState(false);
 
   async function loadSession() {
     const response = await fetch("/api/hire/session");
@@ -54,8 +61,25 @@ export default function HireDesk() {
     loadSession();
   }, []);
 
+  async function loadTeam() {
+    const response = await fetch("/api/hire/staff/team");
+    const body = await response.json();
+    if (response.status === 401) {
+      setSignedIn("");
+      return;
+    }
+    if (!response.ok) {
+      setTeamError(body.error || "The team list could not be loaded.");
+      return;
+    }
+    setTeam((body.team || []).map((member: { username: string }) => member.username));
+  }
+
   useEffect(() => {
-    if (signedIn) loadBookings();
+    if (signedIn) {
+      loadBookings();
+      loadTeam();
+    }
   }, [signedIn]);
 
   const counts = useMemo(() => {
@@ -86,6 +110,40 @@ export default function HireDesk() {
     await fetch("/api/hire/session", { method: "DELETE" });
     setSignedIn("");
     setBookings([]);
+    setTeam([]);
+    setTeamNotice("");
+    setTeamError("");
+  }
+
+  async function addMember(event: React.FormEvent) {
+    event.preventDefault();
+    setTeamError("");
+    setTeamNotice("");
+    if (memberPassword !== memberPasswordAgain) {
+      setTeamError("Type the same password in both boxes.");
+      return;
+    }
+    setAddingMember(true);
+    const response = await fetch("/api/hire/staff/team", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: memberName, password: memberPassword }),
+    });
+    const body = await response.json();
+    setAddingMember(false);
+    if (response.status === 401) {
+      setSignedIn("");
+      return;
+    }
+    if (!response.ok) {
+      setTeamError(body.error || "That team member could not be added.");
+      return;
+    }
+    setTeam((body.team || []).map((member: { username: string }) => member.username));
+    setMemberName("");
+    setMemberPassword("");
+    setMemberPasswordAgain("");
+    setTeamNotice(body.username + " can now sign in on this page.");
   }
 
   async function act(booking: StaffBooking, action: string, prompt: string) {
@@ -153,6 +211,64 @@ export default function HireDesk() {
           Sign out
         </button>
       </div>
+
+      <section className="mt-8 rounded-xl border border-neutral-200 p-5">
+        <h2 className="text-lg font-semibold">Team</h2>
+        <p className="mt-1 text-sm text-neutral-600">Add a username for someone else. They sign in on this same page and can confirm payments.</p>
+        {team.length > 0 && (
+          <ul className="mt-3 flex flex-wrap gap-2">
+            {team.map((name) => (
+              <li key={name} className="rounded-full border border-neutral-300 px-3 py-1 text-sm">
+                {name}
+                {name === signedIn ? " (you)" : ""}
+              </li>
+            ))}
+          </ul>
+        )}
+        <form onSubmit={addMember} className="mt-4 grid gap-3 sm:grid-cols-3">
+          <label className="block text-sm">
+            <span className="mb-1 block text-neutral-600">Username</span>
+            <input
+              value={memberName}
+              onChange={(event) => setMemberName(event.target.value)}
+              autoComplete="off"
+              className="h-10 w-full rounded-md border border-neutral-300 px-3"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-neutral-600">Password</span>
+            <input
+              type="password"
+              value={memberPassword}
+              onChange={(event) => setMemberPassword(event.target.value)}
+              autoComplete="new-password"
+              className="h-10 w-full rounded-md border border-neutral-300 px-3"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-neutral-600">Password again</span>
+            <input
+              type="password"
+              value={memberPasswordAgain}
+              onChange={(event) => setMemberPasswordAgain(event.target.value)}
+              autoComplete="new-password"
+              className="h-10 w-full rounded-md border border-neutral-300 px-3"
+            />
+          </label>
+          <div className="sm:col-span-3">
+            <p className="text-sm text-neutral-500">3 to 40 characters: letters, numbers, dots, underscores, or hyphens. Password at least 8 characters.</p>
+            {teamError && (
+              <p className="mt-2 text-sm text-red-700" role="alert">
+                {teamError}
+              </p>
+            )}
+            {teamNotice && <p className="mt-2 text-sm text-green-800">{teamNotice}</p>}
+            <button type="submit" disabled={addingMember} className="mt-3 rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
+              {addingMember ? "Adding…" : "Add team member"}
+            </button>
+          </div>
+        </form>
+      </section>
 
       <div className="mt-6 flex flex-wrap gap-2">
         {FILTERS.map((item) => (

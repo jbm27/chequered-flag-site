@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatDay, ksh, type StaffBooking } from "../lib/hire";
 
 const FILTERS = [
@@ -28,6 +28,9 @@ export default function HireDesk() {
   const [teamError, setTeamError] = useState("");
   const [teamNotice, setTeamNotice] = useState("");
   const [addingMember, setAddingMember] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showTeam, setShowTeam] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   async function loadSession() {
     const response = await fetch("/api/hire/session");
@@ -82,6 +85,22 @@ export default function HireDesk() {
     }
   }, [signedIn]);
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    function close(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
   const counts = useMemo(() => {
     const tally = { pending: 0, quote: 0, confirmed: 0, cancelled: 0 };
     for (const booking of bookings) tally[booking.status] += 1;
@@ -113,6 +132,8 @@ export default function HireDesk() {
     setTeam([]);
     setTeamNotice("");
     setTeamError("");
+    setMenuOpen(false);
+    setShowTeam(false);
   }
 
   async function addMember(event: React.FormEvent) {
@@ -207,14 +228,50 @@ export default function HireDesk() {
           <h1 className="text-3xl font-semibold tracking-tight">Hire desk</h1>
           <p className="mt-2 text-sm text-neutral-600">Signed in as {signedIn}. Confirm a booking only after the full amount is on the statement.</p>
         </div>
-        <button type="button" onClick={signOut} className="rounded-md border border-neutral-300 px-4 py-2 text-sm">
-          Sign out
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="relative" ref={menuRef}>
+            <button
+              type="button"
+              aria-expanded={menuOpen}
+              aria-haspopup="menu"
+              onClick={() => setMenuOpen((open) => !open)}
+              className="rounded-md border border-neutral-300 px-4 py-2 text-sm"
+            >
+              Menu
+            </button>
+            {menuOpen && (
+              <div role="menu" className="absolute right-0 z-10 mt-2 w-48 rounded-md border border-neutral-200 bg-white py-1 shadow-lg">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="block w-full px-4 py-2 text-left text-sm hover:bg-neutral-100"
+                  onClick={() => {
+                    setShowTeam(true);
+                    setMenuOpen(false);
+                  }}
+                >
+                  Add team member
+                </button>
+              </div>
+            )}
+          </div>
+          <button type="button" onClick={signOut} className="rounded-md border border-neutral-300 px-4 py-2 text-sm">
+            Sign out
+          </button>
+        </div>
       </div>
 
+      {showTeam && (
       <section className="mt-8 rounded-xl border border-neutral-200 p-5">
-        <h2 className="text-lg font-semibold">Team</h2>
-        <p className="mt-1 text-sm text-neutral-600">Add a username for someone else. They sign in on this same page and can confirm payments.</p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold">Team</h2>
+            <p className="mt-1 text-sm text-neutral-600">Add a username for someone else. They sign in on this same page and can confirm payments.</p>
+          </div>
+          <button type="button" onClick={() => setShowTeam(false)} className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm">
+            Close
+          </button>
+        </div>
         {team.length > 0 && (
           <ul className="mt-3 flex flex-wrap gap-2">
             {team.map((name) => (
@@ -269,6 +326,7 @@ export default function HireDesk() {
           </div>
         </form>
       </section>
+      )}
 
       <div className="mt-6 flex flex-wrap gap-2">
         {FILTERS.map((item) => (

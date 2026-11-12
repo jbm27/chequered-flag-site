@@ -10,7 +10,7 @@ export default function ContactPage() {
         {/* Full-bleed hero using the About hero image */}
         <div className="w-full">
           <img
-            src="/images/about/hero.png"
+            src="/images/about/hero.jpg"
             alt="Chequered Flag workshop and vehicles"
             className="h-[220px] w-full object-cover sm:h-[260px] md:h-[320px] lg:h-[360px]"
           />

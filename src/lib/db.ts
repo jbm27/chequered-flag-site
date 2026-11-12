@@ -458,6 +458,7 @@ function mapStaff(row: Record<string, unknown>): StaffBooking {
     status: row.status as StaffBooking["status"],
     createdAt: new Date(String(row.created_at)).toISOString(),
     model: String(row.model_name),
+    vehicleId: row.vehicle_id ? String(row.vehicle_id) : null,
     plate,
     customerName: String(row.customer_name),
     email: String(row.email),

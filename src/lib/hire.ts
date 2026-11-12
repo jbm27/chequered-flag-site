@@ -207,24 +207,30 @@ export function dateProblem(pickup: string, returnOn: string) {
   return "";
 }
 
+function hoursReason(date: string, time: string) {
+  const n = dayNumber(date);
+  const hm = time.slice(0, 5);
+  if (n === null || !/^\d{2}:\d{2}$/.test(hm)) return "";
+  const dow = new Date(n * 86400000).getUTCDay();
+  if (dow === 0) return "we are closed on Sunday";
+  if (dow === 6) {
+    if (hm < "08:00") return "we open at 08:00 on Saturday";
+    if (hm > "13:00") return "we close at 13:00 on Saturday";
+    return "";
+  }
+  if (hm < "08:00") return "we open at 08:00";
+  if (hm > "17:00") return "we close at 17:00";
+  return "";
+}
+
 export function outOfHours(pickup: string, returnOn: string, pickTime: string, retTime: string): OutOfHours {
-  const check = (date: string, time: string) => {
-    const n = dayNumber(date);
-    if (n === null || !time) return false;
-    const dow = new Date(n * 86400000).getUTCDay();
-    const hm = time.slice(0, 5);
-    if (dow === 0) return true;
-    if (dow === 6) return hm < "08:00" || hm > "13:00";
-    return hm < "08:00" || hm > "17:00";
-  };
-  const pick = check(pickup, pickTime);
-  const ret = check(returnOn, retTime);
-  const title =
-    pick && ret
-      ? "Your pick-up and return are outside our opening hours"
-      : pick
-        ? "Your pick-up time is outside our opening hours"
-        : "Your return time is outside our opening hours";
+  const pickReason = hoursReason(pickup, pickTime);
+  const retReason = hoursReason(returnOn, retTime);
+  const pick = Boolean(pickReason);
+  const ret = Boolean(retReason);
+  const pickText = "Your pick-up at " + pickTime.slice(0, 5) + " is outside our opening hours: " + pickReason + ".";
+  const retText = "Your return at " + retTime.slice(0, 5) + " is outside our opening hours: " + retReason + ".";
+  const title = pick && ret ? pickText + " " + retText : pick ? pickText : ret ? retText : "";
   return { any: pick || ret, pick, ret, title };
 }
 
@@ -538,6 +544,7 @@ export type StaffBooking = {
   status: "pending" | "confirmed" | "quote" | "cancelled";
   createdAt: string;
   model: string;
+  vehicleId: string | null;
   plate: string | null;
   customerName: string;
   email: string;

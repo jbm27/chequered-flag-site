@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { FLEET } from "../../../../../lib/fleet";
 import { databaseConfigured, httpStatus, listBookings, publicError, staffFromToken, updateBooking } from "../../../../../lib/db";
 
 export const runtime = "nodejs";
@@ -24,7 +25,13 @@ export async function GET() {
   try {
     await requireStaff();
     const bookings = await listBookings();
-    return NextResponse.json({ bookings }, { headers: { "Cache-Control": "no-store" } });
+    const fleet = FLEET.map((vehicle) => ({
+      id: vehicle.id,
+      model: vehicle.model,
+      plate: vehicle.plate,
+      category: vehicle.category,
+    }));
+    return NextResponse.json({ bookings, fleet }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return NextResponse.json({ error: publicError(error) }, { status: httpStatus(error) });
   }

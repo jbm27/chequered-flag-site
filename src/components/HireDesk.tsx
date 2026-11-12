@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import HireCalendar, { type DeskVehicle } from "./HireCalendar";
 import { formatDay, ksh, type StaffBooking } from "../lib/hire";
 
 const FILTERS = [
@@ -30,6 +31,8 @@ export default function HireDesk() {
   const [addingMember, setAddingMember] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
+  const [deskView, setDeskView] = useState<"bookings" | "calendar">("bookings");
+  const [fleet, setFleet] = useState<DeskVehicle[]>([]);
   const menuRef = useRef<HTMLDivElement>(null);
 
   async function loadSession() {
@@ -58,6 +61,7 @@ export default function HireDesk() {
       return;
     }
     setBookings(body.bookings || []);
+    setFleet(body.fleet || []);
   }
 
   useEffect(() => {
@@ -129,6 +133,10 @@ export default function HireDesk() {
     await fetch("/api/hire/session", { method: "DELETE" });
     setSignedIn("");
     setBookings([]);
+    setFleet([]);
+    setDeskView("bookings");
+    setShowTeam(false);
+    setMenuOpen(false);
     setTeam([]);
     setTeamNotice("");
     setTeamError("");
@@ -222,7 +230,7 @@ export default function HireDesk() {
   }
 
   return (
-    <main className="mx-auto max-w-5xl px-5 py-10">
+    <main className={deskView === "calendar" ? "mx-auto max-w-[1400px] px-5 py-10" : "mx-auto max-w-5xl px-5 py-10"}>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Hire desk</h1>
@@ -241,6 +249,30 @@ export default function HireDesk() {
             </button>
             {menuOpen && (
               <div role="menu" className="absolute right-0 z-10 mt-2 w-48 rounded-md border border-neutral-200 bg-white py-1 shadow-lg">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="block w-full px-4 py-2 text-left text-sm hover:bg-neutral-100"
+                  onClick={() => {
+                    setDeskView("bookings");
+                    setShowTeam(false);
+                    setMenuOpen(false);
+                  }}
+                >
+                  Bookings
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="block w-full px-4 py-2 text-left text-sm hover:bg-neutral-100"
+                  onClick={() => {
+                    setDeskView("calendar");
+                    setShowTeam(false);
+                    setMenuOpen(false);
+                  }}
+                >
+                  Calendar
+                </button>
                 <button
                   type="button"
                   role="menuitem"
@@ -328,6 +360,12 @@ export default function HireDesk() {
       </section>
       )}
 
+      {message && <p className="mt-4 text-sm text-red-700">{message}</p>}
+
+      {deskView === "calendar" ? (
+        <HireCalendar bookings={bookings} fleet={fleet} onAct={act} />
+      ) : (
+      <>
       <div className="mt-6 flex flex-wrap gap-2">
         {FILTERS.map((item) => (
           <button
@@ -343,8 +381,6 @@ export default function HireDesk() {
           </button>
         ))}
       </div>
-      {message && <p className="mt-4 text-sm text-red-700">{message}</p>}
-
       <div className="mt-6 space-y-4">
         {shown.length === 0 && <p className="rounded-xl border border-neutral-200 p-5 text-sm text-neutral-600">Nothing in this list.</p>}
         {shown.map((booking) => (
@@ -426,6 +462,8 @@ export default function HireDesk() {
           </article>
         ))}
       </div>
+      </>
+      )}
     </main>
   );
 }

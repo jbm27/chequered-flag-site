@@ -2,6 +2,7 @@ import HireBooking from "../../components/HireBooking";
 import ScrollReveal from "../../components/ScrollReveal";
 import { CONTACT } from "../../lib/contact";
 import { YARD } from "../../lib/hire";
+import { fleetModels } from "../../lib/fleet";
 
 // Layout and wording follow Homer's vehicle hire design (V1.5).
 // Payment wording follows the booking rules: paid in full, nothing charged on the website,
@@ -148,7 +149,7 @@ export default function VehicleHirePage() {
         </div>
       </section>
 
-      <HireBooking />
+      <HireBooking modelCount={fleetModels().length} />
       <ScrollReveal />
 
       <section id="terms" className={sectionWrap}>

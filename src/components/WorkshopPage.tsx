@@ -24,7 +24,7 @@ const SERVICES = [
     id: "servicing",
     title: "Servicing and maintenance",
     need: "Service",
-    img: "/images/workshop/land-cruiser-200.jpg",
+    img: "/images/workshop/land-cruiser-200-card.webp",
     text: "Scheduled servicing for saloons, SUVs and 4x4s, with the same care our own hire fleet gets before every hire.",
     items: ["Oil, filters and fluids", "Brake, steering and suspension checks", "Tyre and wheel condition", "A written note of anything we find"],
   },
@@ -32,7 +32,7 @@ const SERVICES = [
     id: "repairs",
     title: "Diagnostics and repairs",
     need: "Repair or fault",
-    img: "/images/workshop/land-cruiser-79.jpg",
+    img: "/images/workshop/land-cruiser-79-card.webp",
     text: "Warning light, strange noise or something that does not feel right? We find the cause first, explain it, and quote before we fix it.",
     items: ["Fault finding", "Engine, gearbox and clutch work", "Electrical faults", "Cooling and brake systems"],
   },
@@ -40,7 +40,7 @@ const SERVICES = [
     id: "fab",
     title: "Fabrication and welding",
     need: "Fabrication and welding",
-    img: "/images/workshop/welding.jpg",
+    img: "/images/workshop/welding-card.webp",
     text: "Repairs and custom metalwork made in-house, from a cracked bracket to a full bumper.",
     items: ["Chassis and body repairs", "Bumpers and brackets", "Roof racks and carriers", "One-off parts made to measure"],
   },
@@ -48,7 +48,7 @@ const SERVICES = [
     id: "offroad",
     title: "Off-road and 4x4 builds",
     need: "Off-road and 4x4 build",
-    img: "/images/workshop/wheel-arch-guard.jpg",
+    img: "/images/workshop/wheel-arch-guard-card.webp",
     text: "Protection and set-ups for Land Cruisers, Prados and other 4x4s that spend their lives on rough roads.",
     items: ["Wheel-arch guards and bash plates", "Recovery points", "Suspension and tyre upgrades", "Safari and game-viewer set-ups"],
   },
@@ -56,7 +56,7 @@ const SERVICES = [
     id: "trim",
     title: "Interior trim and upholstery",
     need: "Interior trim",
-    img: "/images/workshop/game-viewers.jpg",
+    img: "/images/workshop/game-viewers-card.webp",
     text: "Hand-finished interior work for game viewers and safari vehicles, built to stand up to dust and daily use.",
     items: ["Leather grab handles and bars", "Seat repairs and re-covering", "Canvas and side curtains", "Trim repairs"],
   },
@@ -421,7 +421,7 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
                 className="flex cursor-pointer flex-col overflow-hidden rounded-xl border-[3px] p-0 text-left"
                 style={{ borderColor: on ? "#171717" : "#e5e5e5", background: on ? "#f5f5f3" : "#ffffff", color: "#171717" }}
               >
-                <img src={item.img} alt="" loading="lazy" className="block h-[110px] w-full object-cover md:h-[170px]" />
+                <img src={item.img} alt="" loading="lazy" decoding="async" width={480} height={320} className="block h-[110px] w-full object-cover md:h-[170px]" />
                 <span className="block px-3.5 pb-3.5 pt-3">
                   <span className="block text-xs font-bold tracking-[1px] opacity-70">{String(index + 1).padStart(2, "0")}</span>
                   <span className="block text-base font-bold leading-[1.3]">{item.title}</span>
@@ -464,12 +464,14 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
             src="/images/workshop/game-viewers.jpg"
             alt="Three Chequered Flag game viewers lined up at a safari camp"
             loading="lazy"
+            decoding="async"
             className="col-span-2 row-span-2 block h-full w-full rounded-[14px] object-cover object-[center_45%]"
           />
           <img
             src="/images/workshop/land-cruiser-200.jpg"
             alt="A Land Cruiser 200 with snorkel and roof rack in the Chequered Flag yard"
             loading="lazy"
+            decoding="async"
             className="col-span-2 block h-full w-full rounded-[14px] object-cover object-[center_60%]"
           />
           <img

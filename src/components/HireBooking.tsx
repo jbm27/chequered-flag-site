@@ -103,7 +103,7 @@ function dayParts(iso: string) {
   return { dow: DOW[date.getUTCDay()], num: date.getUTCDate(), mon: MONTHS[date.getUTCMonth()] };
 }
 
-export default function HireBooking() {
+export default function HireBooking({ modelCount = 9 }: { modelCount?: number }) {
   const today = todayNairobi();
   const initialDates = useState(defaultWindow)[0];
   const [location, setLocation] = useState<(typeof PICKUP_LOCATIONS)[number]>(PICKUP_LOCATIONS[0]);
@@ -609,7 +609,9 @@ export default function HireBooking() {
             us.
           </p>
         )}
-        {loading && <p className="mb-4 text-sm text-[#595959]">Checking the fleet…</p>}
+        <p className="sr-only" role="status">
+          {loading ? "Checking the fleet…" : ""}
+        </p>
         {!loading && !loadError && !dateError && models.length === 0 && (
           <p className="rounded-xl border border-[#e5e5e5] bg-white p-5">
             No vehicles of this type are listed. Choose “All vehicles” to see the full fleet.
@@ -621,7 +623,34 @@ export default function HireBooking() {
           </p>
         )}
 
-        <div data-reveal-stagger className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(215px,1fr))]">
+        <div
+          data-reveal-stagger
+          aria-busy={loading}
+          className={
+            "grid gap-3.5 transition-opacity duration-200 [grid-template-columns:repeat(auto-fill,minmax(215px,1fr))]" +
+            (loading && availability ? " opacity-60" : "")
+          }
+        >
+          {/* Placeholders the same size as the real cards, so the page does not jump when they arrive */}
+          {loading &&
+            !availability &&
+            !dateError &&
+            Array.from({ length: modelCount }, (_, index) => (
+              <div
+                key={"ph" + index}
+                aria-hidden="true"
+                className="h-[427px] animate-pulse overflow-hidden rounded-xl border border-[#e5e5e5] bg-white"
+              >
+                <div className="h-[118px] bg-[#ececea]" />
+                <div className="space-y-3 px-3.5 pt-4">
+                  <div className="h-3 w-1/2 rounded bg-[#ececea]" />
+                  <div className="h-5 w-3/4 rounded bg-[#ececea]" />
+                  <div className="h-3 w-2/3 rounded bg-[#ececea]" />
+                  <div className="h-5 w-1/2 rounded bg-[#ececea]" />
+                  <div className="h-12 rounded bg-[#f3f3f1]" />
+                </div>
+              </div>
+            ))}
           {models.map((model) => (
             <VehicleCard
               key={model.id}
@@ -666,11 +695,20 @@ export default function HireBooking() {
           )}
         </div>
 
-        {!availability && (
+        {!availability && loading && !dateError && (
+          <div
+            aria-hidden="true"
+            className="flex h-[640px] animate-pulse flex-col gap-2 rounded-lg border border-[#e5e5e5] bg-white p-4"
+          >
+            <div className="mb-2 h-4 w-2/3 rounded bg-[#ececea]" />
+            {Array.from({ length: modelCount + 1 }, (_, index) => (
+              <div key={index} className="h-10 rounded bg-[#f3f3f1]" />
+            ))}
+          </div>
+        )}
+        {!availability && !(loading && !dateError) && (
           <p className="rounded-xl border border-[#e5e5e5] bg-white p-[18px]">
-            {loading
-              ? "Loading the calendar…"
-              : "Choose a valid pick-up and return date above to see which vehicles are free around that time."}
+            Choose a valid pick-up and return date above to see which vehicles are free around that time.
           </p>
         )}
 

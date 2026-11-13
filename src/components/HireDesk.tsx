@@ -112,6 +112,25 @@ function plural(n: number, word: string) {
   return n + " " + word + (n === 1 ? "" : "s");
 }
 
+// The four-week strip of days used by both desk calendars.
+function buildDays(first: number, todayNum: number) {
+  return Array.from({ length: WIN }, (_, index) => {
+    const n = first + index;
+    const date = new Date(n * 86400000);
+    return {
+      n,
+      dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getUTCDay()],
+      num: date.getUTCDate(),
+      mon:
+        index === 0 || date.getUTCDate() === 1
+          ? ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date.getUTCMonth()]
+          : "",
+      today: n === todayNum,
+      weekend: date.getUTCDay() === 0,
+    };
+  });
+}
+
 function chipFor(booking: StaffBooking, today: string): Chip {
   if (booking.status === "confirmed") return CHIP_PAID;
   if (booking.status === "quote") return CHIP_QUOTE;
@@ -182,6 +201,7 @@ export default function HireDesk() {
   const [selectedId, setSelectedId] = useState("");
   const [detailOpen, setDetailOpen] = useState(true);
   const [offset, setOffset] = useState(0);
+  const [availOffset, setAvailOffset] = useState(0);
   const [before, setBefore] = useState(1);
   const [after, setAfter] = useState(1);
   const [type, setType] = useState<(typeof TYPES)[number]["id"]>("all");
@@ -437,21 +457,7 @@ export default function HireDesk() {
   // Calendar
   const first = T - 2 + offset;
   const lastCol = first + WIN - 1;
-  const calDays = Array.from({ length: WIN }, (_, index) => {
-    const n = first + index;
-    const date = new Date(n * 86400000);
-    return {
-      n,
-      dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getUTCDay()],
-      num: date.getUTCDate(),
-      mon:
-        index === 0 || date.getUTCDate() === 1
-          ? ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date.getUTCMonth()]
-          : "",
-      today: n === T,
-      weekend: date.getUTCDay() === 0,
-    };
-  });
+  const calDays = buildDays(first, T);
   function bufferBox(s: number, len: number) {
     const a = Math.max(s, first);
     const b = Math.min(s + len, first + WIN);
@@ -482,11 +488,14 @@ export default function HireDesk() {
   // Availability by model: how many of each model are free each day in the same window.
   // Held (pending) and paid hires count as booked; quotes and prep or cleaning days do not,
   // which matches what the public booking page checks.
+  // It has its own Earlier / Later, independent of the job calendar above.
+  const availFirst = T - 2 + availOffset;
+  const availDays = buildDays(availFirst, T);
   const modelAvail = Array.from(
     new Set(fleet.filter((vehicle) => type === "all" || vehicle.category === type).map((vehicle) => vehicle.model)),
   ).map((model) => {
     const ids = fleet.filter((vehicle) => vehicle.model === model).map((vehicle) => vehicle.id);
-    const counts = calDays.map((day) => {
+    const counts = availDays.map((day) => {
       const iso = isoOf(day.n);
       const busy = ids.filter((id) =>
         holds.some((booking) => booking.vehicleId === id && booking.pickup <= iso && iso < exclusiveEnd(booking.pickup, booking.returnOn)),
@@ -1045,9 +1054,40 @@ export default function HireDesk() {
               <div className="mt-6">
                 <h3 className="text-lg font-bold">Availability by model</h3>
                 <p className="mb-3 mt-1 max-w-[760px] text-sm text-[#595959]">
-                  How many of each model are free on each day, for the same four weeks. Held and paid hires count as
-                  booked; quotes and prep or cleaning days do not. Customers no longer see this on the website.
+                  How many of each model are free on each day. Use Earlier, Later or Go to date to check any dates, for
+                  example while a customer is on the phone. Held and paid hires count as booked; quotes and prep or
+                  cleaning days do not. Customers do not see this on the website.
                 </p>
+                <div className="mb-3.5 flex flex-wrap items-center gap-2">
+                  <button type="button" className={btnLight + " rounded-full"} onClick={() => setAvailOffset((v) => v - 7)}>
+                    ‹ Earlier
+                  </button>
+                  <button
+                    type="button"
+                    className={btnLight + " rounded-full"}
+                    disabled={availOffset === 0}
+                    onClick={() => setAvailOffset(0)}
+                  >
+                    Today
+                  </button>
+                  <button type="button" className={btnLight + " rounded-full"} onClick={() => setAvailOffset((v) => v + 7)}>
+                    Later ›
+                  </button>
+                  <strong className="ml-1.5 text-sm">{range(availFirst, availFirst + WIN - 1)}</strong>
+                  <label className="ml-auto flex items-center gap-2 text-sm text-[#595959]">
+                    Go to date
+                    <input
+                      type="date"
+                      aria-label="Go to date in availability by model"
+                      value={isoOf(availFirst + 2)}
+                      onChange={(e) => {
+                        const n = dayNumber(e.target.value);
+                        if (n !== null) setAvailOffset(n - T);
+                      }}
+                      className="h-10 rounded-lg border border-[#c8c8c8] bg-white px-2 text-sm text-[#171717]"
+                    />
+                  </label>
+                </div>
                 <div className="mb-3 flex flex-wrap gap-x-[18px] gap-y-2 text-[13px]">
                   <Legend bg="#e6f4ea" h={16} label="All free" />
                   <Legend bg="#feefc3" h={16} label="Some free" />
@@ -1058,7 +1098,7 @@ export default function HireDesk() {
                     <div className="grid border-b border-[#dadce0] bg-white" style={{ gridTemplateColumns: "200px minmax(0, 1fr)" }}>
                       <div className="self-end px-2.5 pb-2 text-[13px] font-bold">Model</div>
                       <div className="grid" style={{ gridTemplateColumns: "repeat(" + WIN + ", minmax(0, 1fr))" }}>
-                        {calDays.map((day) => (
+                        {availDays.map((day) => (
                           <div key={day.n} className="pb-2 pt-1.5 text-center leading-tight">
                             <span className="block min-h-[15px] text-xs text-[#70757a]">{day.mon}</span>
                             <span className="block text-xs text-[#70757a]">{day.dow}</span>
@@ -1091,10 +1131,10 @@ export default function HireDesk() {
                             return (
                               <div
                                 key={index}
-                                title={short(isoOf(calDays[index].n)) + ": " + free + " of " + row.total + " free"}
+                                title={short(isoOf(availDays[index].n)) + ": " + free + " of " + row.total + " free"}
                                 className={
                                   "grid h-8 place-items-center rounded text-[13px] font-bold" +
-                                  (calDays[index].today ? " ring-2 ring-[#1a73e8]" : "")
+                                  (availDays[index].today ? " ring-2 ring-[#1a73e8]" : "")
                                 }
                                 style={{ background: bg, color: fg }}
                               >

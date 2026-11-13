@@ -291,12 +291,17 @@ function deliveryDetail(booking: { delivery: { kmText: string; breakdown: string
     .join("\n");
 }
 
-export async function createBooking(raw: Partial<BookingInput>): Promise<PublicBookingResult> {
+// Website bookings call this with no options. The staff desk passes options for bookings added by hand:
+// confirmed (payment already received), a staff note, and an optional email address.
+export async function createBooking(
+  raw: Partial<BookingInput>,
+  opts?: { confirmed?: boolean; staffNote?: string; emailOptional?: boolean },
+): Promise<PublicBookingResult> {
   await ensureReady();
   const db = pool();
   if (!db) throw new Error("DATABASE_URL is not set");
   const model = raw.modelId ? modelById(String(raw.modelId)) : null;
-  const assessed = assessBooking(model, raw);
+  const assessed = assessBooking(model, raw, { emailOptional: opts?.emailOptional });
   const problem = assessmentError(assessed);
   if (problem || !assessed.ok) {
     const error = new Error(problem || "The booking could not be checked.");
@@ -347,13 +352,13 @@ export async function createBooking(raw: Partial<BookingInput>): Promise<PublicB
              pickup_on, return_on, pickup_time, return_time, pickup_location,
              delivery_mode, delivery_summary, delivery_detail, delivery_manual,
              days, daily_rate, hire_total, insurance_total, delivery_fee, total_due,
-             ooh, ooh_note, mpesa_code, status
+             ooh, ooh_note, mpesa_code, status, staff_note, confirmed_at
            ) VALUES (
              $1, $2, $3, $4, $5, $6, $7,
              $8, $9, $10, $11, $12,
              $13, $14, $15, $16,
              $17, $18, $19, $20, $21, $22,
-             $23, $24, $25, $26
+             $23, $24, $25, $26, $27, $28
            )`,
           [
             id,
@@ -381,7 +386,9 @@ export async function createBooking(raw: Partial<BookingInput>): Promise<PublicB
             booking.ooh.any,
             booking.oohNote,
             booking.mpesaCode,
-            booking.manual ? "quote" : "pending",
+            booking.manual ? "quote" : opts?.confirmed ? "confirmed" : "pending",
+            (opts?.staffNote || "").slice(0, 500),
+            !booking.manual && opts?.confirmed ? new Date().toISOString() : null,
           ],
         );
         inserted = true;
@@ -395,7 +402,7 @@ export async function createBooking(raw: Partial<BookingInput>): Promise<PublicB
     await client.query("COMMIT");
     return {
       reference,
-      status: booking.manual ? "quote" : "pending",
+      status: booking.manual ? "quote" : opts?.confirmed ? "confirmed" : "pending",
       manual: booking.manual,
       model: booking.model.name,
       pickup: booking.pickup,

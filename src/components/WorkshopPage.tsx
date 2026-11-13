@@ -171,14 +171,8 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
       <ScrollReveal />
       {/* Hero and enquiry form */}
       <section id="enquiry" className="scroll-mt-20 bg-[#f7f7f5] pb-2 text-[#171717]">
-        <img
-          src="/images/workshop/land-cruiser-79.jpg"
-          alt="A green Land Cruiser safari vehicle in the Chequered Flag yard"
-          fetchPriority="high"
-          className="mx-auto mt-6 block h-[clamp(200px,32vw,420px)] w-[89%] max-w-[1022px] rounded-xl object-cover object-[center_58%]"
-        />
-        <div className="mx-auto mt-[34px] flex w-[89%] max-w-[1180px] flex-wrap items-start gap-9">
-          <div className="min-w-0 flex-[1_1_380px] pt-2">
+        <div className="mx-auto mt-6 flex w-[89%] max-w-[1180px] flex-wrap items-stretch gap-9">
+          <div className="flex min-w-0 flex-[1_1_380px] flex-col pt-2">
             <a href="/" className="mb-[18px] inline-flex min-h-[44px] items-center gap-2 text-base text-[#3f3f3f] no-underline hover:text-[#171717]">
               ← Back to home
             </a>
@@ -188,25 +182,11 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
             <h1 className="mb-[18px] mt-3 text-[42px] font-extrabold leading-[1.02] tracking-[-0.035em] md:text-[66px]">
               Workshop and servicing
             </h1>
-            <p className="mb-7 max-w-[520px] text-lg leading-[1.7] text-[#3f3f3f]">
+            <p className="mb-6 max-w-[520px] text-lg leading-[1.7] text-[#3f3f3f]">
               For {years} years our own mechanics have serviced, repaired and built vehicles in Karen. The same workshop keeps
               our hire fleet on the road.
             </p>
-            <div className="flex flex-wrap gap-7 border-t border-[#e0e0e0] pt-[22px]">
-              {[
-                { value: String(years), label: "years in business" },
-                { value: String(fleetSize), label: "hire vehicles we service" },
-                { value: "1975", label: "year we opened" },
-              ].map((stat) => (
-                <div key={stat.label}>
-                  <div className="text-[44px] font-extrabold leading-none tracking-[-0.03em] text-[#171717]">
-                    {stat.value}
-                  </div>
-                  <div className="mt-1.5 text-[13px] text-[#595959]">{stat.label}</div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-7 flex flex-wrap gap-2.5">
+            <div className="flex flex-wrap gap-2.5">
               <a
                 href={"https://wa.me/" + waNumber}
                 target="_blank"
@@ -225,9 +205,42 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
             <p className="mt-3 text-[13px] text-[#595959]">
               Open Mon to Fri 8am to 5pm, Sat 8am to 1pm. Closed Sundays and public holidays.
             </p>
+
+            {/* Photo fills the space beside the form so both columns end level, with the key figures laid over
+                a soft dark fade at the bottom. The photo is never shown larger than the file. */}
+            <figure className="relative mb-0 mt-6 min-h-[300px] flex-1 overflow-hidden rounded-xl bg-[#2b2b2b] shadow-[0_6px_18px_rgba(60,50,20,0.08)]">
+              <img
+                src="/images/workshop/land-cruiser-79-panel-1022.webp"
+                srcSet="/images/workshop/land-cruiser-79-panel-640.webp 640w, /images/workshop/land-cruiser-79-panel-1022.webp 1022w"
+                sizes="(min-width: 1000px) 560px, 89vw"
+                width={1022}
+                height={720}
+                alt="A green Land Cruiser safari vehicle, kept on the road by the Chequered Flag workshop"
+                fetchPriority="high"
+                decoding="async"
+                className="absolute inset-0 h-full w-full object-cover object-[center_58%]"
+              />
+              <div
+                aria-hidden="true"
+                className="absolute inset-x-0 bottom-0 h-[62%]"
+                style={{ background: "linear-gradient(to top, rgba(18,18,18,0.82) 0%, rgba(18,18,18,0.55) 45%, rgba(18,18,18,0) 100%)" }}
+              />
+              <figcaption className="absolute inset-x-0 bottom-0 grid grid-cols-3 gap-3 px-4 pb-4 text-white sm:flex sm:flex-wrap sm:gap-x-7 sm:px-5 sm:pb-5">
+                {[
+                  { value: String(years), label: "years in business" },
+                  { value: String(fleetSize), label: "hire vehicles we service" },
+                  { value: "1975", label: "year we opened" },
+                ].map((stat) => (
+                  <div key={stat.label}>
+                    <div className="text-[30px] font-extrabold leading-none tracking-[-0.03em] sm:text-[36px] md:text-[40px]">{stat.value}</div>
+                    <div className="mt-1.5 text-[12px] leading-tight text-white/85 sm:text-[13px]">{stat.label}</div>
+                  </div>
+                ))}
+              </figcaption>
+            </figure>
           </div>
 
-          <div className="box-border min-w-0 flex-[1_1_520px] rounded-xl border border-[#d9d1b8] bg-white px-5 py-[26px] text-[#171717] shadow-[0_6px_18px_rgba(60,50,20,0.08)] sm:px-7">
+          <div className="box-border min-w-0 flex-[1_1_520px] self-start rounded-xl border border-[#d9d1b8] bg-white px-5 py-[26px] text-[#171717] shadow-[0_6px_18px_rgba(60,50,20,0.08)] sm:px-7">
             {!sent ? (
               <div>
                 <h2 className="mb-1 text-2xl font-extrabold tracking-[-0.02em]">Book your vehicle in</h2>

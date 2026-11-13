@@ -894,6 +894,19 @@ export default function HireDesk() {
                   Later ›
                 </button>
                 <strong className="ml-1.5 text-sm">{range(first, lastCol)}</strong>
+                <label className="ml-auto flex items-center gap-2 text-sm text-[#595959]">
+                  Go to date
+                  <input
+                    type="date"
+                    aria-label="Go to date in the booking calendar"
+                    value={isoOf(first + 2)}
+                    onChange={(e) => {
+                      const n = dayNumber(e.target.value);
+                      if (n !== null) setOffset(n - T);
+                    }}
+                    className="h-10 rounded-lg border border-[#c8c8c8] bg-white px-2 text-sm text-[#171717]"
+                  />
+                </label>
               </div>
               <div className="mb-3.5">
                 <input

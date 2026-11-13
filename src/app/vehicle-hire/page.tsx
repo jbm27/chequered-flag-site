@@ -41,7 +41,7 @@ const KNOW = [
   },
   {
     title: "Fuel",
-    body: "Return the vehicle with at least the fuel it had when you collected it. Fuel above that level is not refunded.",
+    body: "All our hire vehicles run on petrol. Return the vehicle with at least the fuel it had when you collected it. Fuel above that level is not refunded.",
   },
   {
     title: "Hours and late returns",
@@ -80,7 +80,7 @@ const FAQ = [
   },
   {
     q: "What is the fuel policy?",
-    a: "Return the vehicle with at least the fuel it had when you collected it. Extra fuel is not refunded.",
+    a: "All our hire vehicles run on petrol. Return the vehicle with at least the fuel it had when you collected it. Extra fuel is not refunded.",
   },
   {
     q: "Can you deliver the vehicle to me?",

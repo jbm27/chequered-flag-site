@@ -83,7 +83,7 @@ function describe(vehicle: FleetVehicle, vehicleIds: string[]): FleetModel {
     tag,
     seatsText: vehicle.seats + " seats" + seatNote,
     gear: manual ? "Manual" : "Automatic",
-    fuel: "Petrol",
+    fuel: "Petrol", // every vehicle in the hire fleet runs on petrol (confirmed by Homer)
     mileage: vehicle.category === "saloon" ? "100 km/day, then KSh 15/km" : "Unlimited mileage",
     rate: vehicle.rate,
     addon: vehicle.addon,

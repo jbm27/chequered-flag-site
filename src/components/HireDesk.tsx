@@ -15,6 +15,7 @@ export type DeskVehicle = {
   plate: string;
   category: "saloon" | "suv" | "4x4";
   modelId?: string;
+  fuel?: string;
   seats?: number;
   rate?: number;
   addon?: number;
@@ -1678,6 +1679,7 @@ export default function HireDesk() {
                             {vehicle.category === "saloon" ? "Saloon" : vehicle.category === "suv" ? "SUV" : "4x4"}
                             {vehicle.seats ? " · " + vehicle.seats + " seats" : ""}
                           </Row>
+                          <Row label="Fuel">{vehicle.fuel || "Not entered"}</Row>
                           <Row label="Year">
                             {vehicle.year ? vehicle.year + " (" + plural(thisYear - vehicle.year, "year") + " old)" : "Not entered"}
                           </Row>

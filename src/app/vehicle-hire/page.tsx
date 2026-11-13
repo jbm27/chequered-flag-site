@@ -1,4 +1,5 @@
 import HireBooking from "../../components/HireBooking";
+import ScrollReveal from "../../components/ScrollReveal";
 import { CONTACT } from "../../lib/contact";
 import { YARD } from "../../lib/hire";
 
@@ -148,11 +149,12 @@ export default function VehicleHirePage() {
       </section>
 
       <HireBooking />
+      <ScrollReveal />
 
       <section id="terms" className={sectionWrap}>
-        <div className={eyebrow}>Before you book</div>
-        <h2 className={h2 + " mb-[18px]"}>What you need to know</h2>
-        <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
+        <div data-reveal className={eyebrow}>Before you book</div>
+        <h2 data-reveal className={h2 + " mb-[18px]"}>What you need to know</h2>
+        <div data-reveal-stagger className="grid gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
           {KNOW.map((item) => (
             <div key={item.title} className={card}>
               <strong>{item.title}</strong>
@@ -163,6 +165,7 @@ export default function VehicleHirePage() {
       </section>
 
       <section
+        data-reveal
         id="corporate"
         className={
           sectionWrap +
@@ -188,7 +191,7 @@ export default function VehicleHirePage() {
       </section>
 
       {/* CarClub trial, kept from the current page (not in the V1.5 design) */}
-      <section className={sectionWrap + " rounded-xl border border-[#e5e5e5] bg-white px-6 py-6 sm:px-[30px]"}>
+      <section data-reveal className={sectionWrap + " rounded-xl border border-[#e5e5e5] bg-white px-6 py-6 sm:px-[30px]"}>
         <div className="text-[13px] font-bold uppercase tracking-[2px] text-[#595959]">CarClub · Limited trial</div>
         <h2 className="my-2 text-xl font-bold tracking-[-0.02em]">
           Interested in self-drive access without the usual handover?
@@ -216,9 +219,9 @@ export default function VehicleHirePage() {
       </section>
 
       <section id="find-us" className={sectionWrap}>
-        <div className={eyebrow}>Collection and returns</div>
-        <h2 className={h2 + " mb-[18px]"}>Find our workshop</h2>
-        <div className="grid items-start gap-[18px] [grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))]">
+        <div data-reveal className={eyebrow}>Collection and returns</div>
+        <h2 data-reveal className={h2 + " mb-[18px]"}>Find our workshop</h2>
+        <div data-reveal-stagger className="grid items-start gap-[18px] [grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))]">
           <div className="overflow-hidden rounded-xl border border-[#e5e5e5] bg-white">
             <img
               src="/images/vehicle-hire/workshop.webp"
@@ -269,9 +272,9 @@ export default function VehicleHirePage() {
         </div>
       </section>
       <section id="faq" className={sectionWrap}>
-        <div className={eyebrow}>Good to know</div>
-        <h2 className={h2 + " mb-3"}>Frequently asked questions</h2>
-        <div className="rounded-xl border border-[#e5e5e5] bg-white px-5 py-1">
+        <div data-reveal className={eyebrow}>Good to know</div>
+        <h2 data-reveal className={h2 + " mb-3"}>Frequently asked questions</h2>
+        <div data-reveal className="rounded-xl border border-[#e5e5e5] bg-white px-5 py-1">
           {FAQ.map((item) => (
             <details key={item.q} className="border-b border-[#e5e5e5] last:border-b-0">
               <summary className="min-h-[24px] cursor-pointer px-1 py-4 text-base font-semibold">{item.q}</summary>

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CONTACT } from "../lib/contact";
+import ScrollReveal from "./ScrollReveal";
 
 // Workshop page laid out from Homer's "Design B, Bold" workshop design (light version).
 // The enquiry form has no inbox behind it yet, so sending opens WhatsApp with the details filled in.
@@ -167,6 +168,7 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
 
   return (
     <main id="top" className="bg-[#f7f7f5] pb-16 text-[15px] leading-normal text-[#171717]">
+      <ScrollReveal />
       {/* Hero and enquiry form */}
       <section id="enquiry" className="scroll-mt-20 bg-[#f7f7f5] pb-2 text-[#171717]">
         <img
@@ -400,14 +402,14 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
 
       {/* Services */}
       <section id="services" className={wrap + " mt-[72px]"}>
-        <div className="mb-[22px] flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+        <div data-reveal className="mb-[22px] flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
           <div>
             <div className={eyebrow}>What we do</div>
             <h2 className={h2}>Five services, one workshop</h2>
           </div>
           <p className="text-sm text-[#595959]">Select a service to see what is involved</p>
         </div>
-        <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr))]">
+        <div data-reveal-stagger className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr))]">
           {SERVICES.map((item, index) => {
             const on = item.id === current.id;
             return (
@@ -428,7 +430,7 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
             );
           })}
         </div>
-        <div className="mt-3.5 flex flex-wrap items-start gap-x-10 gap-y-5 rounded-xl border border-[#e5e5e5] bg-white px-6 py-[26px] text-[#171717] sm:px-7">
+        <div data-reveal className="mt-3.5 flex flex-wrap items-start gap-x-10 gap-y-5 rounded-xl border border-[#e5e5e5] bg-white px-6 py-[26px] text-[#171717] sm:px-7">
           <div className="min-w-0 flex-[1_1_340px]">
             <div className="text-xs font-bold tracking-[2px] text-[#595959]">
               {String(currentIndex + 1).padStart(2, "0")} · SERVICE
@@ -457,7 +459,7 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
 
       {/* From our yard */}
       <section aria-label="From our yard" className={wrap + " mt-[72px]"}>
-        <div className="grid grid-cols-2 gap-2.5 [grid-auto-rows:clamp(120px,17vw,215px)] md:grid-cols-4">
+        <div data-reveal-stagger className="grid grid-cols-2 gap-2.5 [grid-auto-rows:clamp(120px,17vw,215px)] md:grid-cols-4">
           <img
             src="/images/workshop/game-viewers.jpg"
             alt="Three Chequered Flag game viewers lined up at a safari camp"
@@ -487,7 +489,7 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
 
       {/* Heritage */}
       <section id="heritage" className="mt-14 scroll-mt-28 border-y border-[#e5e5e5] bg-[#f5f5f3] px-[5.5%] py-16 text-[#171717]">
-        <div className="mx-auto flex max-w-[1180px] flex-wrap items-center gap-9">
+        <div data-reveal className="mx-auto flex max-w-[1180px] flex-wrap items-center gap-9">
           <div className="min-w-0 flex-[999_1_500px]">
             <div className="text-[13px] font-bold tracking-[3px] text-[#595959]">
               OUR STORY
@@ -537,9 +539,11 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
 
       {/* Promise */}
       <section id="promise" className={wrap + " mt-[72px]"}>
-        <div className={eyebrow}>Why customers leave their vehicles with us</div>
-        <h2 className={h2 + " mb-[22px]"}>Our workshop promise</h2>
-        <div className="grid border-t-2 border-[#171717] [grid-template-columns:repeat(auto-fit,minmax(250px,1fr))]">
+        <div data-reveal>
+          <div className={eyebrow}>Why customers leave their vehicles with us</div>
+          <h2 className={h2 + " mb-[22px]"}>Our workshop promise</h2>
+        </div>
+        <div data-reveal-stagger className="grid border-t-2 border-[#171717] [grid-template-columns:repeat(auto-fit,minmax(250px,1fr))]">
           {PROMISES.map((item, index) => (
             <div key={item.title} className="border-b border-[#e0e0e0] py-[22px] pr-[22px]">
               <div className="text-[28px] font-extrabold text-[#595959]">{String(index + 1).padStart(2, "0")}</div>
@@ -552,9 +556,11 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
 
       {/* Find us */}
       <section id="find-us" className={wrap + " mt-14"}>
+        <div data-reveal>
         <div className={eyebrow}>Drop-off and collection</div>
         <h2 className="mb-[18px] mt-1.5 text-[28px] font-bold tracking-[-0.02em] md:text-[34px]">Find our workshop</h2>
-        <div className="grid items-start gap-[18px] [grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))]">
+        </div>
+        <div data-reveal-stagger className="grid items-start gap-[18px] [grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))]">
           <div className="overflow-hidden rounded-xl border border-[#e5e5e5] bg-white">
             <img
               src="/images/vehicle-hire/workshop.webp"

@@ -586,7 +586,7 @@ export default function HireBooking() {
 
       {/* Available vehicles */}
       <section id="vehicles" className={sectionWrap + " mt-14 scroll-mt-28"}>
-        <div className="mb-[22px] flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+        <div data-reveal className="mb-[22px] flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
           <div>
             <div className={eyebrow}>Choose your drive</div>
             <h2 className={h2}>Available vehicles</h2>
@@ -621,7 +621,7 @@ export default function HireBooking() {
           </p>
         )}
 
-        <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(215px,1fr))]">
+        <div data-reveal-stagger className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(215px,1fr))]">
           {models.map((model) => (
             <VehicleCard
               key={model.id}
@@ -639,7 +639,7 @@ export default function HireBooking() {
       </section>
 
       {/* Availability calendar */}
-      <section id="calendar" className={sectionWrap + " mt-12 scroll-mt-28"}>
+      <section data-reveal id="calendar" className={sectionWrap + " mt-12 scroll-mt-28"}>
         <div className="mb-3.5 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
           <div>
             <div className={eyebrow}>Plan around your dates</div>

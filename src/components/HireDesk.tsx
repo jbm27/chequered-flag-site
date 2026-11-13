@@ -88,6 +88,24 @@ function range(a: number, b: number) {
   return a === b ? short(isoOf(a)) : short(isoOf(a)) + " to " + short(isoOf(b));
 }
 
+// Prep and cleaning time, in quarter days. A planning guide only: it never holds a vehicle.
+const STEP = 0.25;
+const MAX_BUFFER = 3;
+
+function spanText(len: number) {
+  if (len <= 0) return "None";
+  const whole = Math.floor(len);
+  const frac = Math.round((len - whole) * 4) / 4;
+  const sym = frac === 0.25 ? "¼" : frac === 0.5 ? "½" : frac === 0.75 ? "¾" : "";
+  if (whole === 0) return frac === 0.25 ? "Quarter day" : frac === 0.5 ? "Half day" : "Three-quarter day";
+  return whole + sym + " day" + (whole === 1 && !sym ? "" : "s");
+}
+
+// A buffer runs from day s (may be fractional) for len days.
+function bufferWhen(s: number, len: number) {
+  return range(Math.floor(s), Math.ceil(s + len) - 1) + " (" + spanText(len).toLowerCase() + ")";
+}
+
 function plural(n: number, word: string) {
   return n + " " + word + (n === 1 ? "" : "s");
 }
@@ -150,13 +168,13 @@ export default function HireDesk() {
   const [showTeam, setShowTeam] = useState(false);
 
   const [open, setOpen] = useState<Record<SectionKey, boolean>>({
-    overview: true,
+    overview: false,
     calendar: true,
-    table: true,
-    payments: true,
-    vehicles: true,
-    compare: true,
-    schedule: true,
+    table: false,
+    payments: false,
+    vehicles: false,
+    compare: false,
+    schedule: false,
   });
   const [selectedId, setSelectedId] = useState("");
   const [detailOpen, setDetailOpen] = useState(true);
@@ -170,6 +188,7 @@ export default function HireDesk() {
   const [tableQuery, setTableQuery] = useState("");
   const [payQuery, setPayQuery] = useState("");
   const [scheduleQuery, setScheduleQuery] = useState("");
+  const [hover, setHover] = useState<{ id: string; left: number; top: number; bottom: number } | null>(null);
   const [vehQuery, setVehQuery] = useState("");
   const [vehType, setVehType] = useState<(typeof TYPES)[number]["id"]>("all");
   const [vehOpen, setVehOpen] = useState<Record<string, boolean>>({});
@@ -322,6 +341,22 @@ export default function HireDesk() {
     await loadBookings();
   }
 
+  function showHover(id: string, element: HTMLElement) {
+    const rect = element.getBoundingClientRect();
+    setHover({ id, left: rect.left, top: rect.top, bottom: rect.bottom });
+  }
+
+  useEffect(() => {
+    if (!hover) return;
+    const hide = () => setHover(null);
+    window.addEventListener("scroll", hide, true);
+    window.addEventListener("resize", hide);
+    return () => {
+      window.removeEventListener("scroll", hide, true);
+      window.removeEventListener("resize", hide);
+    };
+  }, [hover]);
+
   function pick(id: string) {
     setSelectedId(id);
     setDetailOpen(true);
@@ -391,6 +426,12 @@ export default function HireDesk() {
       weekend: date.getUTCDay() === 0,
     };
   });
+  function bufferBox(s: number, len: number) {
+    const a = Math.max(s, first);
+    const b = Math.min(s + len, first + WIN);
+    if (b <= a) return null;
+    return { left: ((a - first) / WIN) * 100 + "%", width: ((b - a) / WIN) * 100 + "%" };
+  }
   function col(start: number, end: number) {
     const a = Math.max(start, first);
     const b = Math.min(end, lastCol);
@@ -438,12 +479,12 @@ export default function HireDesk() {
       const name = vehicle ? vehicle.plate + " " + vehicle.model : booking.model;
       const start = num(booking.pickup);
       const end = num(lastHireDay(booking.pickup, booking.returnOn));
-      const items: { name: string; kind: string; s: number; e: number; detail: string }[] = [];
-      if (before > 0) items.push({ name, kind: "Prep before hire", s: start - before, e: start - 1, detail: "for " + booking.customerName });
-      if (after > 0) items.push({ name, kind: "Clean and service after hire", s: end + 1, e: end + after, detail: "after " + booking.customerName });
+      const items: { name: string; kind: string; s: number; len: number; detail: string }[] = [];
+      if (before > 0) items.push({ name, kind: "Prep before hire", s: start - before, len: before, detail: "for " + booking.customerName });
+      if (after > 0) items.push({ name, kind: "Clean and service after hire", s: end + 1, len: after, detail: "after " + booking.customerName });
       return items;
     })
-    .filter((item) => item.e >= T && item.s <= T + 13)
+    .filter((item) => item.s + item.len > T && item.s < T + 14)
     .filter((item) => matches(scheduleQuery, [item.name, item.kind, item.detail]))
     .sort((a, b) => a.s - b.s);
 
@@ -761,14 +802,14 @@ export default function HireDesk() {
               <Stepper
                 label="Prep before hire"
                 value={before}
-                onLess={() => setBefore((v) => Math.max(0, v - 1))}
-                onMore={() => setBefore((v) => Math.min(3, v + 1))}
+                onLess={() => setBefore((v) => Math.max(0, v - STEP))}
+                onMore={() => setBefore((v) => Math.min(MAX_BUFFER, v + STEP))}
               />
               <Stepper
                 label="Clean and service after hire"
                 value={after}
-                onLess={() => setAfter((v) => Math.max(0, v - 1))}
-                onMore={() => setAfter((v) => Math.min(3, v + 1))}
+                onLess={() => setAfter((v) => Math.max(0, v - STEP))}
+                onMore={() => setAfter((v) => Math.min(MAX_BUFFER, v + STEP))}
               />
             </div>
           </div>
@@ -869,7 +910,7 @@ export default function HireDesk() {
                         <span className="text-xs text-[#595959]">{vehicle.plate}</span>
                       </div>
                       <div
-                        className="grid py-1.5"
+                        className="relative grid py-1.5"
                         style={{
                           gridTemplateColumns: "repeat(" + WIN + ", minmax(0, 1fr))",
                           gridTemplateRows: "30px 8px",
@@ -896,29 +937,11 @@ export default function HireDesk() {
                                 <button
                                   type="button"
                                   onClick={() => pick(booking.id)}
-                                  title={
-                                    booking.customerName +
-                                    "\n" +
-                                    vehicle.plate +
-                                    " " +
-                                    vehicle.model +
-                                    "\nPick-up: " +
-                                    short(booking.pickup) +
-                                    ", " +
-                                    booking.pickTime +
-                                    " · " +
-                                    booking.location +
-                                    "\nReturn: " +
-                                    short(booking.returnOn) +
-                                    ", " +
-                                    booking.retTime +
-                                    "\n" +
-                                    booking.phone +
-                                    "\n" +
-                                    ksh(booking.total) +
-                                    " · " +
-                                    chipFor(booking, today).label
-                                  }
+                                  aria-describedby={hover?.id === booking.id ? "cal-hover" : undefined}
+                                  onMouseEnter={(event) => showHover(booking.id, event.currentTarget)}
+                                  onMouseLeave={() => setHover(null)}
+                                  onFocus={(event) => showHover(booking.id, event.currentTarget)}
+                                  onBlur={() => setHover(null)}
                                   className="block h-[30px] w-full cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap rounded-md border-0 px-2 text-left text-[13px] font-bold leading-[30px]"
                                   style={{
                                     background: pal.bg,
@@ -932,25 +955,25 @@ export default function HireDesk() {
                               </div>,
                             );
                           }
-                          const prep = before > 0 ? col(start - before, start - 1) : null;
+                          const prep = before > 0 ? bufferBox(start - before, before) : null;
                           if (prep) {
                             parts.push(
                               <div
                                 key={booking.id + "p"}
-                                title={"Prep before hire for " + booking.customerName + ", " + range(start - before, start - 1)}
-                                className="mx-0.5 h-2 min-w-0 rounded"
-                                style={{ gridColumn: prep, gridRow: 2, background: BUFFER }}
+                                title={"Prep before hire for " + booking.customerName + ", " + bufferWhen(start - before, before)}
+                                className="absolute top-[40px] h-2 rounded border-x-2 border-white"
+                                style={{ left: prep.left, width: prep.width, background: BUFFER }}
                               />,
                             );
                           }
-                          const clean = after > 0 ? col(end + 1, end + after) : null;
+                          const clean = after > 0 ? bufferBox(end + 1, after) : null;
                           if (clean) {
                             parts.push(
                               <div
                                 key={booking.id + "c"}
-                                title={"Clean and service after " + booking.customerName + ", " + range(end + 1, end + after)}
-                                className="mx-0.5 h-2 min-w-0 rounded"
-                                style={{ gridColumn: clean, gridRow: 2, background: BUFFER }}
+                                title={"Clean and service after " + booking.customerName + ", " + bufferWhen(end + 1, after)}
+                                className="absolute top-[40px] h-2 rounded border-x-2 border-white"
+                                style={{ left: clean.left, width: clean.width, background: BUFFER }}
                               />,
                             );
                           }
@@ -1161,7 +1184,7 @@ export default function HireDesk() {
                         before > 0
                           ? {
                               name: "Prep before hire",
-                              when: range(num(selected.pickup) - before, num(selected.pickup) - 1),
+                              when: bufferWhen(num(selected.pickup) - before, before),
                               color: BUFFER,
                             }
                           : null,
@@ -1170,10 +1193,7 @@ export default function HireDesk() {
                         after > 0
                           ? {
                               name: "Clean and service after hire",
-                              when: range(
-                                num(lastHireDay(selected.pickup, selected.returnOn)) + 1,
-                                num(lastHireDay(selected.pickup, selected.returnOn)) + after,
-                              ),
+                              when: bufferWhen(num(lastHireDay(selected.pickup, selected.returnOn)) + 1, after),
                               color: BUFFER,
                             }
                           : null,
@@ -1593,7 +1613,7 @@ export default function HireDesk() {
                         <strong>{item.name}</strong> · {item.kind}
                         <br />
                         <span className="text-[13px] text-[#595959]">
-                          {range(item.s, item.e)} · {item.detail}
+                          {bufferWhen(item.s, item.len)} · {item.detail}
                         </span>
                       </span>
                     </div>
@@ -1609,6 +1629,56 @@ export default function HireDesk() {
           </div>
         </section>
       </main>
+      {hover && <HoverCard hover={hover} booking={bookings.find((b) => b.id === hover.id) || null} fleetById={fleetById} today={today} />}
+    </div>
+  );
+}
+
+function HoverCard({
+  hover,
+  booking,
+  fleetById,
+  today,
+}: {
+  hover: { left: number; top: number; bottom: number };
+  booking: StaffBooking | null;
+  fleetById: Record<string, DeskVehicle>;
+  today: string;
+}) {
+  if (!booking) return null;
+  const vehicle = booking.vehicleId ? fleetById[booking.vehicleId] : null;
+  const width = 300;
+  const left = Math.max(8, Math.min(hover.left, window.innerWidth - width - 8));
+  const below = hover.bottom + 190 < window.innerHeight;
+  const collect = booking.deliverySummary && !booking.deliverySummary.startsWith("Collect at");
+  return (
+    <div
+      id="cal-hover"
+      role="tooltip"
+      className="pointer-events-none fixed z-[60] rounded-[10px] border border-[#dadce0] bg-white px-3.5 py-3 text-[13px] leading-[1.55] text-[#171717] shadow-[0_8px_24px_rgba(0,0,0,0.18)]"
+      style={{ left, width, ...(below ? { top: hover.bottom + 6 } : { bottom: window.innerHeight - hover.top + 6 }) }}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <strong className="text-sm">{booking.customerName}</strong>
+        <ChipView chip={chipFor(booking, today)} />
+      </div>
+      <div className="text-[#595959]">
+        {vehicle ? vehicle.plate + " " + vehicle.model : booking.model} · {booking.reference}
+      </div>
+      <div className="mt-1.5">
+        <strong>Collection:</strong> {short(booking.pickup)}, {booking.pickTime}
+      </div>
+      <div>
+        <strong>Drop-off:</strong> {short(booking.returnOn)}, {booking.retTime}
+      </div>
+      <div>
+        <strong>Location:</strong> {booking.location}
+      </div>
+      {collect && <div className="text-[#595959]">{booking.deliverySummary}</div>}
+      <div className="mt-1">
+        <strong>{booking.status === "confirmed" ? "Paid in full" : "Due in full"}:</strong> {ksh(booking.total)}
+        {booking.deliveryManual ? " plus delivery" : ""}
+      </div>
     </div>
   );
 }
@@ -1636,16 +1706,16 @@ function Stepper({ label, value, onLess, onMore }: { label: string; value: numbe
       <span>{label}</span>
       <button
         type="button"
-        aria-label={"One day less: " + label}
+        aria-label={"Quarter day less: " + label}
         onClick={onLess}
         className="h-9 w-9 cursor-pointer rounded-full border border-[#dadce0] bg-white text-lg"
       >
         −
       </button>
-      <strong className="min-w-[54px] text-center">{plural(value, "day")}</strong>
+      <strong className="min-w-[96px] text-center">{spanText(value)}</strong>
       <button
         type="button"
-        aria-label={"One day more: " + label}
+        aria-label={"Quarter day more: " + label}
         onClick={onMore}
         className="h-9 w-9 cursor-pointer rounded-full border border-[#dadce0] bg-white text-lg"
       >

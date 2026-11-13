@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { addDays, dayNumber, formatDay, ksh, todayNairobi, type StaffBooking } from "../lib/hire";
+import { addDays, dayNumber, exclusiveEnd, formatDay, ksh, todayNairobi, type StaffBooking } from "../lib/hire";
 
 // Staff desk laid out like Homer's fleet dashboard design (V1.5).
 // It only uses the data and actions the desk already had: bookings, the fleet list, staff logins,
@@ -452,6 +452,23 @@ export default function HireDesk() {
     })
     .filter((row) => row.hit && !(hideIdle && !row.busy && !calQuery.trim()));
   const idleCount = fleet.filter((vehicle) => type === "all" || vehicle.category === type).length - calRows.length;
+
+  // Availability by model: how many of each model are free each day in the same window.
+  // Held (pending) and paid hires count as booked; quotes and prep or cleaning days do not,
+  // which matches what the public booking page checks.
+  const modelAvail = Array.from(
+    new Set(fleet.filter((vehicle) => type === "all" || vehicle.category === type).map((vehicle) => vehicle.model)),
+  ).map((model) => {
+    const ids = fleet.filter((vehicle) => vehicle.model === model).map((vehicle) => vehicle.id);
+    const counts = calDays.map((day) => {
+      const iso = isoOf(day.n);
+      const busy = ids.filter((id) =>
+        holds.some((booking) => booking.vehicleId === id && booking.pickup <= iso && iso < exclusiveEnd(booking.pickup, booking.returnOn)),
+      ).length;
+      return ids.length - busy;
+    });
+    return { model, total: ids.length, counts };
+  });
 
   // Table
   const tableCounts = {
@@ -982,6 +999,73 @@ export default function HireDesk() {
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+              {/* Availability by model */}
+              <div className="mt-6">
+                <h3 className="text-lg font-bold">Availability by model</h3>
+                <p className="mb-3 mt-1 max-w-[760px] text-sm text-[#595959]">
+                  How many of each model are free on each day, for the same four weeks. Held and paid hires count as
+                  booked; quotes and prep or cleaning days do not. Customers no longer see this on the website.
+                </p>
+                <div className="mb-3 flex flex-wrap gap-x-[18px] gap-y-2 text-[13px]">
+                  <Legend bg="#e6f4ea" h={16} label="All free" />
+                  <Legend bg="#feefc3" h={16} label="Some free" />
+                  <Legend bg="#dadce0" h={16} label="None free" />
+                </div>
+                <div className="overflow-x-auto">
+                  <div className="min-w-[980px] overflow-hidden rounded-lg border border-[#dadce0]">
+                    <div className="grid border-b border-[#dadce0] bg-white" style={{ gridTemplateColumns: "200px minmax(0, 1fr)" }}>
+                      <div className="self-end px-2.5 pb-2 text-[13px] font-bold">Model</div>
+                      <div className="grid" style={{ gridTemplateColumns: "repeat(" + WIN + ", minmax(0, 1fr))" }}>
+                        {calDays.map((day) => (
+                          <div key={day.n} className="pb-2 pt-1.5 text-center leading-tight">
+                            <span className="block min-h-[15px] text-xs text-[#70757a]">{day.mon}</span>
+                            <span className="block text-xs text-[#70757a]">{day.dow}</span>
+                            <strong
+                              className={
+                                "mt-0.5 inline-grid h-7 w-7 place-items-center rounded-full text-[13px] " +
+                                (day.today ? "bg-[#1a73e8] text-white" : "")
+                              }
+                            >
+                              {day.num}
+                            </strong>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    {modelAvail.map((row) => (
+                      <div
+                        key={row.model}
+                        className="grid border-b border-[#dadce0] bg-white last:border-b-0"
+                        style={{ gridTemplateColumns: "200px minmax(0, 1fr)" }}
+                      >
+                        <div className="flex flex-col justify-center border-r border-[#dadce0] px-2.5 py-1.5 text-sm leading-tight">
+                          <strong>{row.model}</strong>
+                          <span className="text-xs text-[#595959]">{plural(row.total, "vehicle")}</span>
+                        </div>
+                        <div className="grid gap-0.5 p-1" style={{ gridTemplateColumns: "repeat(" + WIN + ", minmax(0, 1fr))" }}>
+                          {row.counts.map((free, index) => {
+                            const bg = free === row.total ? "#e6f4ea" : free > 0 ? "#feefc3" : "#dadce0";
+                            const fg = free === row.total ? "#0d5a2a" : free > 0 ? "#5f4400" : "#3c4043";
+                            return (
+                              <div
+                                key={index}
+                                title={short(isoOf(calDays[index].n)) + ": " + free + " of " + row.total + " free"}
+                                className={
+                                  "grid h-8 place-items-center rounded text-[13px] font-bold" +
+                                  (calDays[index].today ? " ring-2 ring-[#1a73e8]" : "")
+                                }
+                                style={{ background: bg, color: fg }}
+                              >
+                                {free}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
               {quotes.length > 0 && (

@@ -15,7 +15,6 @@ const card = "rounded-xl border border-[#e5e5e5] bg-white p-4";
 
 const NAV = [
   { href: "#vehicles", label: "Vehicles" },
-  { href: "#calendar", label: "Availability" },
   { href: "#corporate", label: "Corporate hire" },
   { href: "#find-us", label: "Find us" },
   { href: "#faq", label: "FAQ" },

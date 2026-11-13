@@ -9,7 +9,6 @@ import {
   dateProblem,
   dayNumber,
   DELIVERY_LABELS,
-  exclusiveEnd,
   formatDay,
   HOURS,
   hoursReason,
@@ -94,15 +93,6 @@ function scrollToId(id: string) {
   }, 60);
 }
 
-const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-function dayParts(iso: string) {
-  const n = dayNumber(iso);
-  const date = new Date((n ?? 0) * 86400000);
-  return { dow: DOW[date.getUTCDay()], num: date.getUTCDate(), mon: MONTHS[date.getUTCMonth()] };
-}
-
 export default function HireBooking({ modelCount = 9 }: { modelCount?: number }) {
   const today = todayNairobi();
   const initialDates = useState(defaultWindow)[0];
@@ -127,7 +117,6 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const [insure, setInsure] = useState(false);
   const [mpesaCode, setMpesaCode] = useState("");
   const [terms, setTerms] = useState(false);
-  const [calFrom, setCalFrom] = useState<string | null>(null);
   const [availability, setAvailability] = useState<AvailabilityResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -151,7 +140,6 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       return;
     }
     const params = new URLSearchParams({ pickup, return: returnOn });
-    if (calFrom) params.set("from", calFrom);
     const controller = new AbortController();
     setLoading(true);
     fetch("/api/hire/availability?" + params.toString(), { signal: controller.signal })
@@ -170,7 +158,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [pickup, returnOn, calFrom, refreshToken, dateError]);
+  }, [pickup, returnOn, refreshToken, dateError]);
 
   const hours = outOfHours(pickup, returnOn, pickTime, retTime);
   // Every delivery stays a quote, as on the live page: staff set the delivery charge and the vehicle is
@@ -370,7 +358,6 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                   value={pickup}
                   onChange={(event) => {
                     const value = event.target.value;
-                    setCalFrom(null);
                     setPickup(value);
                     if (returnOn < value) setReturnOn(value);
                   }}
@@ -399,7 +386,6 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                   min={pickup || today}
                   value={returnOn}
                   onChange={(event) => {
-                    setCalFrom(null);
                     setReturnOn(event.target.value);
                   }}
                   className={fieldBox + " flex-[1_1_130px] px-2"}
@@ -593,10 +579,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
             <div className="mt-1 text-[13px] text-[#595959]">Daily rates include VAT.</div>
           </div>
           <p className="text-sm text-[#595959]">
-            {summaryLine} ·{" "}
-            <a href="#calendar" className="underline">
-              See the availability calendar
-            </a>
+            {summaryLine}
           </p>
         </div>
 
@@ -665,62 +648,6 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
           Our workshop cleans and checks every vehicle between hires. You choose a model; we assign the exact vehicle
           when you collect.
         </p>
-      </section>
-
-      {/* Availability calendar */}
-      <section data-reveal id="calendar" className={sectionWrap + " mt-12 scroll-mt-28"}>
-        <div className="mb-3.5 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-          <div>
-            <div className={eyebrow}>Plan around your dates</div>
-            <h2 className={h2}>Availability calendar</h2>
-          </div>
-          {availability && (
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className={btnLight + " min-h-[44px] px-[18px]"}
-                disabled={availability.calendar[0] <= availability.today}
-                onClick={() => setCalFrom(addDays(availability.calendar[0], -14))}
-              >
-                Earlier
-              </button>
-              <button
-                type="button"
-                className={btnLight + " min-h-[44px] px-[18px]"}
-                onClick={() => setCalFrom(addDays(availability.calendar[0], 14))}
-              >
-                Later
-              </button>
-            </div>
-          )}
-        </div>
-
-        {!availability && loading && !dateError && (
-          <div
-            aria-hidden="true"
-            className="flex h-[640px] animate-pulse flex-col gap-2 rounded-lg border border-[#e5e5e5] bg-white p-4"
-          >
-            <div className="mb-2 h-4 w-2/3 rounded bg-[#ececea]" />
-            {Array.from({ length: modelCount + 1 }, (_, index) => (
-              <div key={index} className="h-10 rounded bg-[#f3f3f1]" />
-            ))}
-          </div>
-        )}
-        {!availability && !(loading && !dateError) && (
-          <p className="rounded-xl border border-[#e5e5e5] bg-white p-[18px]">
-            Choose a valid pick-up and return date above to see which vehicles are free around that time.
-          </p>
-        )}
-
-        {availability && (
-          <AvailabilityCalendar
-            availability={availability}
-            models={models}
-            pickup={pickup}
-            returnOn={returnOn}
-            onPick={pickDay}
-          />
-        )}
       </section>
 
       {/* Checkout */}
@@ -1099,7 +1026,7 @@ function VehicleCard({
         {model.available ? (
           <div className="mt-auto flex flex-col gap-2">
             <div className="text-[13px] font-bold text-[#1d6b3a]">
-              {model.free} of {model.count} available for your dates
+              Available for your dates
             </div>
             <button type="button" onClick={onBook} className={btnDark + " min-h-[44px] w-full"}>
               Book this vehicle
@@ -1117,153 +1044,5 @@ function VehicleCard({
         )}
       </div>
     </article>
-  );
-}
-
-function AvailabilityCalendar({
-  availability,
-  models,
-  pickup,
-  returnOn,
-  onPick,
-}: {
-  availability: AvailabilityResponse;
-  models: PublicModelCard[];
-  pickup: string;
-  returnOn: string;
-  onPick: (day: string) => void;
-}) {
-  const days = availability.calendar;
-  const cols = days.length;
-  const end = exclusiveEnd(pickup, returnOn);
-  const reqIdx = days.map((day, index) => (day >= pickup && day < end ? index : -1)).filter((index) => index >= 0);
-  const span = returnOn === pickup ? 1 : Math.max(1, availability.days);
-  const gridCols = { gridTemplateColumns: "repeat(" + cols + ", minmax(0, 1fr))" };
-
-  return (
-    <div>
-      <p className="mb-3.5 max-w-[760px] text-sm text-[#3f3f3f]">
-        Your dates are outlined in blue. Grey bars are days when every vehicle of that model is booked. Green days have
-        at least one vehicle free. Select a free day to move your pick-up there; your trip stays at {plural(span)}.
-      </p>
-      <div className="mb-3 flex flex-wrap gap-x-[22px] gap-y-2 text-[13px]">
-        <span className="inline-flex items-center gap-2">
-          <span className="inline-block h-4 w-[22px] rounded border border-[#a8dab5] bg-[#e6f4ea]" />
-          Free
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <span className="inline-block h-4 w-[22px] rounded bg-[#dadce0]" />
-          Booked
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <span className="box-border inline-block h-4 w-[22px] rounded border-2 border-[#1a73e8] bg-[rgba(26,115,232,0.1)]" />
-          Your dates
-        </span>
-      </div>
-      <div className="overflow-x-auto">
-        <div className="min-w-[820px] overflow-hidden rounded-lg border border-[#dadce0] bg-white">
-          <div className="grid border-b border-[#dadce0]" style={{ gridTemplateColumns: "170px minmax(0, 1fr)" }}>
-            <div className="self-end px-2.5 pb-2 text-[13px] font-bold">Vehicle</div>
-            <div className="grid" style={gridCols}>
-              {days.map((day, index) => {
-                const parts = dayParts(day);
-                const isToday = day === availability.today;
-                return (
-                  <div key={day} className="pb-2 pt-1.5 text-center leading-tight">
-                    <span className="block min-h-[15px] text-xs text-[#70757a]">
-                      {index === 0 || parts.num === 1 ? parts.mon : ""}
-                    </span>
-                    <span className="block text-xs text-[#70757a]">{parts.dow}</span>
-                    <strong
-                      className={
-                        "mt-0.5 inline-grid h-7 w-7 place-items-center rounded-full text-[13px] " +
-                        (isToday ? "bg-[#1a73e8] text-white" : "text-[#3c4043]")
-                      }
-                    >
-                      {parts.num}
-                    </strong>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {models.map((model) => {
-            const cells: React.ReactNode[] = [];
-            let index = 0;
-            while (index < cols) {
-              const free = model.dayFree[index] || 0;
-              if (free > 0) {
-                const day = days[index];
-                const title = formatDay(day) + ": " + free + " of " + model.count + " free";
-                cells.push(
-                  <div key={"f" + index} className="min-w-0 px-px" style={{ gridColumn: index + 1, gridRow: 1 }}>
-                    <button
-                      type="button"
-                      aria-label={title}
-                      title={title}
-                      onClick={() => onPick(day)}
-                      className="block h-[34px] w-full cursor-pointer rounded border-0 bg-[#e6f4ea] p-0 hover:bg-[#cdebd6]"
-                    />
-                  </div>,
-                );
-                index += 1;
-              } else {
-                const start = index;
-                while (index < cols && !(model.dayFree[index] > 0)) index += 1;
-                cells.push(
-                  <div
-                    key={"b" + start}
-                    title={"Booked " + formatDay(days[start]) + " to " + formatDay(days[index - 1])}
-                    className="min-w-0 px-px"
-                    style={{ gridColumn: start + 1 + " / " + (index + 1), gridRow: 1 }}
-                  >
-                    <div className="box-border h-[34px] overflow-hidden whitespace-nowrap rounded bg-[#dadce0] px-2 text-[13px] font-bold leading-[34px] text-[#3c4043]">
-                      {index - start >= 2 ? "Booked" : ""}
-                    </div>
-                  </div>,
-                );
-              }
-            }
-            if (reqIdx.length) {
-              cells.push(
-                <div
-                  key="req"
-                  className="pointer-events-none min-w-0 px-px"
-                  style={{ gridColumn: reqIdx[0] + 1 + " / " + (reqIdx[reqIdx.length - 1] + 2), gridRow: 1 }}
-                >
-                  <div className="box-border h-[34px] rounded border-2 border-[#1a73e8] bg-[rgba(26,115,232,0.1)]" />
-                </div>,
-              );
-            }
-            return (
-              <div
-                key={model.id}
-                className="grid border-b border-[#dadce0] last:border-b-0"
-                style={{ gridTemplateColumns: "170px minmax(0, 1fr)" }}
-              >
-                <div className="flex flex-col justify-center border-r border-[#dadce0] px-2.5 py-1.5 text-sm leading-tight">
-                  <strong>{model.name}</strong>
-                  <span className={"text-xs font-bold " + (model.available ? "text-[#1e8e3e]" : "text-[#c5221f]")}>
-                    {model.available ? model.free + " of " + model.count + " free for your dates" : "Not free for your dates"}
-                  </span>
-                </div>
-                <div
-                  className="grid py-2"
-                  style={{
-                    ...gridCols,
-                    gridTemplateRows: "34px",
-                    backgroundImage: "linear-gradient(to right, #e8eaed 1px, transparent 1px)",
-                    backgroundSize: "calc(100% / " + cols + ") 100%",
-                  }}
-                >
-                  {cells}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
   );
 }

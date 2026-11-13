@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { FLEET } from "../../../../../lib/fleet";
+import { FLEET, modelSlug } from "../../../../../lib/fleet";
 import { VEHICLE_RECORDS } from "../../../../../lib/vehicleRecords";
 import { databaseConfigured, httpStatus, listBookings, publicError, staffFromToken, updateBooking } from "../../../../../lib/db";
 
@@ -31,6 +31,7 @@ export async function GET() {
       model: vehicle.model,
       plate: vehicle.plate,
       category: vehicle.category,
+      modelId: modelSlug(vehicle.model),
       seats: vehicle.seats,
       rate: vehicle.rate,
       addon: vehicle.addon,

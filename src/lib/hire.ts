@@ -377,7 +377,13 @@ export function assessmentError(result: BookingAssessment) {
   return "error" in result ? result.error : "";
 }
 
-export function assessBooking(model: QuoteModel | null, raw: Partial<BookingInput>): BookingAssessment {
+// opts.emailOptional is used only for bookings staff add on the desk (for example by phone),
+// where the customer may not have given an email address. Website bookings always need one.
+export function assessBooking(
+  model: QuoteModel | null,
+  raw: Partial<BookingInput>,
+  opts?: { emailOptional?: boolean },
+): BookingAssessment {
   if (!model) return { ok: false, error: "Choose a vehicle." };
   const pickup = cleanText(raw.pickup, 10);
   const returnOn = cleanText(raw.returnOn, 10);
@@ -427,7 +433,8 @@ export function assessBooking(model: QuoteModel | null, raw: Partial<BookingInpu
   const email = cleanText(raw.email, 160);
   const phone = cleanText(raw.phone, 40);
   if (name.length < 2) return { ok: false, error: "Please enter your full name." };
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "Please enter a valid email address." };
+  const emailSkipped = Boolean(opts?.emailOptional) && email === "";
+  if (!emailSkipped && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "Please enter a valid email address." };
   const digits = phone.replace(/\D/g, "");
   if (digits.length < 9 || digits.length > 15) return { ok: false, error: "Please enter a mobile number with at least 9 digits." };
   if (!raw.terms) return { ok: false, error: "Please confirm that you meet the driver requirements." };
@@ -519,7 +526,7 @@ export type AvailabilityResponse = {
 
 export type PublicBookingResult = {
   reference: string;
-  status: "pending" | "quote";
+  status: "pending" | "quote" | "confirmed";
   manual: boolean;
   model: string;
   pickup: string;

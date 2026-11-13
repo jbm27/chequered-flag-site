@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { addDays, dayNumber, exclusiveEnd, formatDay, ksh, todayNairobi, type StaffBooking } from "../lib/hire";
+import { addDays, dayNumber, exclusiveEnd, formatDay, ksh, todayNairobi, type PublicBookingResult, type StaffBooking } from "../lib/hire";
+import DeskAddBooking from "./DeskAddBooking";
 
 // Staff desk laid out like Homer's fleet dashboard design (V1.5).
 // It only uses the data and actions the desk already had: bookings, the fleet list, staff logins,
@@ -13,6 +14,7 @@ export type DeskVehicle = {
   model: string;
   plate: string;
   category: "saloon" | "suv" | "4x4";
+  modelId?: string;
   seats?: number;
   rate?: number;
   addon?: number;
@@ -166,6 +168,7 @@ export default function HireDesk() {
   const [teamNotice, setTeamNotice] = useState("");
   const [addingMember, setAddingMember] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
 
   const [open, setOpen] = useState<Record<SectionKey, boolean>>({
     overview: false,
@@ -207,19 +210,42 @@ export default function HireDesk() {
     setLoading(false);
   }
 
-  async function loadBookings() {
+  async function loadBookings(): Promise<StaffBooking[]> {
     const response = await fetch("/api/hire/staff/bookings");
     const body = await response.json();
     if (response.status === 401) {
       setSignedIn("");
-      return;
+      return [];
     }
     if (!response.ok) {
       setMessage(body.error || "Bookings could not be loaded.");
-      return;
+      return [];
     }
     setBookings(body.bookings || []);
     setFleet(body.fleet || []);
+    return body.bookings || [];
+  }
+
+  async function bookingAdded(result: PublicBookingResult) {
+    setShowAdd(false);
+    setMessage("");
+    setNotice(
+      result.reference +
+        " added: " +
+        result.model +
+        ", " +
+        short(result.pickup) +
+        " to " +
+        short(result.returnOn) +
+        (result.status === "confirmed"
+          ? ". Saved as paid in full."
+          : result.status === "quote"
+            ? ". Saved as a quote: set the delivery charge and hold the vehicle."
+            : ". The vehicle is held until you confirm the payment."),
+    );
+    const list = await loadBookings();
+    const added = list.find((booking) => booking.reference === result.reference);
+    if (added) pick(added.id);
   }
 
   async function loadTeam() {
@@ -650,6 +676,16 @@ export default function HireDesk() {
     <div className="bg-[#f7f7f5] text-[15px] leading-normal text-[#171717]">
       <DeskHeader today={today}>
         <span className="text-sm text-[#595959]">Signed in as {signedIn}</span>
+        <button
+          type="button"
+          onClick={() => {
+            setShowAdd((value) => !value);
+            setNotice("");
+          }}
+          className={btnDark}
+        >
+          + Add booking
+        </button>
         <button type="button" onClick={() => setShowTeam((value) => !value)} className={btnLight}>
           Team
         </button>
@@ -676,6 +712,10 @@ export default function HireDesk() {
           <p role="status" className="mb-4 rounded-lg border border-[#81c995] bg-[#ceead6] px-3.5 py-2.5 text-sm font-bold text-[#0d5a2a]">
             {notice}
           </p>
+        )}
+
+        {showAdd && fleet.length > 0 && (
+          <DeskAddBooking fleet={fleet} holds={holds} onDone={bookingAdded} onClose={() => setShowAdd(false)} />
         )}
 
         {showTeam && (
@@ -1122,9 +1162,13 @@ export default function HireDesk() {
                     </a>
                   </Row>
                   <Row label="Email">
-                    <a href={"mailto:" + selected.email} className="break-all underline">
-                      {selected.email}
-                    </a>
+                    {selected.email ? (
+                      <a href={"mailto:" + selected.email} className="break-all underline">
+                        {selected.email}
+                      </a>
+                    ) : (
+                      <span className="text-[#595959]">Not given</span>
+                    )}
                   </Row>
                   <Row label="Booked">{formatDay(selected.createdAt.slice(0, 10))}</Row>
                 </DetailBox>

@@ -207,7 +207,7 @@ export function dateProblem(pickup: string, returnOn: string) {
   return "";
 }
 
-function hoursReason(date: string, time: string) {
+export function hoursReason(date: string, time: string) {
   const n = dayNumber(date);
   const hm = time.slice(0, 5);
   if (n === null || !/^\d{2}:\d{2}$/.test(hm)) return "";

@@ -14,10 +14,9 @@ const card = "rounded-xl border border-[#e5e5e5] bg-white p-4";
 const NAV = [
   { href: "#vehicles", label: "Vehicles" },
   { href: "#calendar", label: "Availability" },
-  { href: "#how", label: "How it works" },
   { href: "#corporate", label: "Corporate hire" },
-  { href: "#faq", label: "FAQ" },
   { href: "#find-us", label: "Find us" },
+  { href: "#faq", label: "FAQ" },
   { href: "/contact", label: "Contact" },
 ];
 
@@ -50,22 +49,11 @@ const KNOW = [
   { title: "Prices", body: "All rates include VAT." },
 ];
 
-const STEPS = [
-  {
-    label: "01 · DATES AND VEHICLE",
-    title: "Pick your dates, then a vehicle",
-    body: "Only vehicles free on your dates can be booked, and each shows its total.",
-  },
-  {
-    label: "02 · YOUR DETAILS",
-    title: "Tell us who is driving",
-    body: "Name, email and mobile number. Licence and ID are checked at collection.",
-  },
-  {
-    label: "03 · PAY AND CONFIRM",
-    title: "Pay in full",
-    body: "We hold the vehicle. Pay by M-Pesa or bank transfer with your booking reference, and we confirm once the payment is checked.",
-  },
+const DIRECTIONS = [
+  "Head for Ngong Road in Karen, or tap one of the map links to navigate straight to us.",
+  "Coming down Ngong Road towards Karen, look out for the Rubis petrol station. Our turning is about 100 metres from it.",
+  "Turn in at the open gate. Our office is the building with chequered lines running up it.",
+  "Drive into the premises and the security guard will point you to parking.",
 ];
 
 const FAQ = [
@@ -174,20 +162,6 @@ export default function VehicleHirePage() {
         </div>
       </section>
 
-      <section id="how" className={sectionWrap}>
-        <div className={eyebrow}>Simple from start to finish</div>
-        <h2 className={h2 + " mb-[18px]"}>How booking works</h2>
-        <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">
-          {STEPS.map((item) => (
-            <div key={item.label} className="rounded-xl border border-[#e5e5e5] bg-white p-5">
-              <div className="text-[13px] font-bold tracking-[1px] text-[#595959]">{item.label}</div>
-              <h3 className="mb-1.5 mt-2.5 text-xl font-bold tracking-[-0.02em]">{item.title}</h3>
-              <p className="text-sm text-[#3f3f3f]">{item.body}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
       <section
         id="corporate"
         className={
@@ -241,6 +215,59 @@ export default function VehicleHirePage() {
         </div>
       </section>
 
+      <section id="find-us" className={sectionWrap}>
+        <div className={eyebrow}>Collection and returns</div>
+        <h2 className={h2 + " mb-[18px]"}>Find our workshop</h2>
+        <div className="grid items-start gap-[18px] [grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))]">
+          <div className="overflow-hidden rounded-xl border border-[#e5e5e5] bg-white">
+            <img
+              src="/images/vehicle-hire/workshop.webp"
+              alt="The Chequered Flag workshop on Ngong Road, Karen: the open gate on the left and the office building with chequered stripes"
+              loading="lazy"
+              className="block h-[240px] w-full object-cover object-[30%_55%]"
+            />
+            <div className="px-4 py-3.5">
+              <strong className="block text-base">Chequered Flag workshop</strong>
+              <span className="text-sm text-[#595959]">
+                {CONTACT.locationShort}. Look for the office with chequered stripes; the gate is on the left.
+              </span>
+              <div className="mb-2 mt-3 text-[13px] text-[#595959]">Open the pin in your map app:</div>
+              <div className="flex flex-wrap gap-2">
+                <MapLink href="https://maps.app.goo.gl/sHBMUxznsrspjmfX7" dot="#1a73e8" label="Google Maps" />
+                <MapLink
+                  href={"https://maps.apple.com/?ll=" + YARD.lat + "," + YARD.lng + "&q=Chequered%20Flag%20Karen"}
+                  dot="#171717"
+                  label="Apple Maps"
+                />
+                <MapLink href={"https://waze.com/ul?ll=" + pin + "&navigate=yes"} dot="#33ccff" label="Waze" />
+              </div>
+            </div>
+          </div>
+          <div className="rounded-xl border border-[#e5e5e5] bg-white p-5">
+            <strong className="mb-3.5 block text-lg">How to get in</strong>
+            <ol className="grid gap-3">
+              {DIRECTIONS.map((text, index) => (
+                <li key={index} className="flex items-start gap-3">
+                  <span className="grid h-7 w-7 flex-none place-items-center rounded-full bg-[#171717] text-sm font-bold text-white">
+                    {index + 1}
+                  </span>
+                  <p className="mt-[3px] text-[15px]">{text}</p>
+                </li>
+              ))}
+            </ol>
+            <div className="mt-4 rounded-lg bg-[#f5f5f3] px-3.5 py-3 text-sm leading-relaxed">
+              <strong>Opening hours:</strong> Monday to Friday 08:00–17:00, Saturday 08:00–13:00. Closed Sundays and
+              bank holidays.
+              <br />
+              <strong>Lost or running late?</strong> Call or WhatsApp{" "}
+              <a href={tel} className="text-[#171717] underline">
+                {CONTACT.phoneDisplay}
+              </a>
+              .
+            </div>
+          </div>
+        </div>
+      </section>
       <section id="faq" className={sectionWrap}>
         <div className={eyebrow}>Good to know</div>
         <h2 className={h2 + " mb-3"}>Frequently asked questions</h2>
@@ -265,53 +292,6 @@ export default function VehicleHirePage() {
         </p>
       </section>
 
-      <section id="find-us" className={sectionWrap}>
-        <div className={eyebrow}>Collection and returns</div>
-        <h2 className={h2 + " mb-[18px]"}>Find our workshop</h2>
-        <div className="grid items-start gap-[18px] [grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))]">
-          <div className="overflow-hidden rounded-xl border border-[#e5e5e5] bg-white">
-            <div className="relative h-[280px] bg-[#e8e4da]">
-              <iframe
-                title="Map showing the Chequered Flag workshop in Karen"
-                src={"https://maps.google.com/maps?q=" + YARD.lat + "," + YARD.lng + "&z=15&output=embed"}
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-                className="absolute inset-0 h-full w-full border-0"
-              />
-            </div>
-            <div className="px-4 py-3.5">
-              <strong className="block text-base">Chequered Flag workshop</strong>
-              <span className="text-sm text-[#595959]">{CONTACT.locationShort}</span>
-              <div className="mb-2 mt-3 text-[13px] text-[#595959]">Open the pin in your map app:</div>
-              <div className="flex flex-wrap gap-2">
-                <MapLink href={"https://www.google.com/maps/search/?api=1&query=" + pin} dot="#1a73e8" label="Google Maps" />
-                <MapLink
-                  href={"https://maps.apple.com/?ll=" + YARD.lat + "," + YARD.lng + "&q=Chequered%20Flag%20Karen"}
-                  dot="#171717"
-                  label="Apple Maps"
-                />
-                <MapLink href={"https://waze.com/ul?ll=" + pin + "&navigate=yes"} dot="#33ccff" label="Waze" />
-              </div>
-            </div>
-          </div>
-          <div className="rounded-xl border border-[#e5e5e5] bg-white p-5">
-            <strong className="mb-3.5 block text-lg">How to get here</strong>
-            <p className="text-[15px]">
-              Head for Ngong Road in Karen, or tap one of the map links to navigate straight to us.
-            </p>
-            <div className="mt-4 rounded-lg bg-[#f5f5f3] px-3.5 py-3 text-sm leading-relaxed">
-              <strong>Opening hours:</strong> Monday to Friday 08:00–17:00, Saturday 08:00–13:00. Closed Sundays and
-              bank holidays.
-              <br />
-              <strong>Lost or running late?</strong> Call or WhatsApp{" "}
-              <a href={tel} className="text-[#171717] underline">
-                {CONTACT.phoneDisplay}
-              </a>
-              .
-            </div>
-          </div>
-        </div>
-      </section>
     </main>
   );
 }

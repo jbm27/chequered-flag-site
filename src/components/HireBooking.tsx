@@ -12,6 +12,7 @@ import {
   exclusiveEnd,
   formatDay,
   HOURS,
+  hoursReason,
   ksh,
   outOfHours,
   PICKUP_LOCATIONS,
@@ -527,7 +528,18 @@ export default function HireBooking() {
 
           {hours.any && (
             <div role="status" className="mt-4 rounded-lg border border-[#f3d57a] bg-[#fef7e0] px-3.5 py-3 text-[#5f4b00]">
-              <strong className="block text-sm">⚠ {hours.title}</strong>
+              {hours.pick && (
+                <strong className="block text-sm">
+                  ⚠ Your pick-up on {formatDay(pickup)} at {pickTime} is outside our opening hours:{" "}
+                  {hoursReason(pickup, pickTime)}.
+                </strong>
+              )}
+              {hours.ret && (
+                <strong className="block text-sm">
+                  ⚠ Your return on {formatDay(returnOn)} at {retTime} is outside our opening hours:{" "}
+                  {hoursReason(returnOn, retTime)}.
+                </strong>
+              )}
               <p className="mb-2.5 mt-1 text-sm">
                 We are open Monday to Friday 08:00–17:00 and Saturday 08:00–13:00. Tell us what you need below and we will
                 arrange it with you.
@@ -569,12 +581,6 @@ export default function HireBooking() {
           >
             WhatsApp
           </a>
-          <a
-            href="#how"
-            className="inline-flex min-h-[48px] items-center rounded-lg border border-[#e0e0e0] bg-white px-[26px] text-base font-medium text-[#171717] no-underline"
-          >
-            How it works
-          </a>
         </div>
       </div>
 
@@ -584,6 +590,7 @@ export default function HireBooking() {
           <div>
             <div className={eyebrow}>Choose your drive</div>
             <h2 className={h2}>Available vehicles</h2>
+            <div className="mt-1 text-[13px] text-[#595959]">Daily rates include VAT.</div>
           </div>
           <p className="text-sm text-[#595959]">
             {summaryLine} ·{" "}
@@ -614,7 +621,7 @@ export default function HireBooking() {
           </p>
         )}
 
-        <div className="grid gap-[18px] [grid-template-columns:repeat(auto-fit,minmax(250px,1fr))]">
+        <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(215px,1fr))]">
           {models.map((model) => (
             <VehicleCard
               key={model.id}
@@ -1005,7 +1012,6 @@ function VehicleCard({
   onNext: (day: string) => void;
 }) {
   const photo = PHOTOS[model.id];
-  const saloon = model.group === "saloon";
   return (
     <article className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-[#e5e5e5] bg-white">
       {photo ? (
@@ -1014,42 +1020,34 @@ function VehicleCard({
             src={photo}
             alt={model.name + ", illustrative photo"}
             loading="lazy"
-            className="block h-[170px] w-full object-cover object-[center_60%]"
+            decoding="async"
+            className="block h-[118px] w-full object-cover object-[center_60%]"
           />
-          <span className="absolute bottom-2.5 left-2.5 rounded bg-[rgba(23,23,23,0.78)] px-2 py-[3px] text-xs font-semibold text-white">
+          <span className="absolute bottom-2 left-2 rounded bg-[rgba(23,23,23,0.78)] px-[7px] py-0.5 text-[11px] font-semibold text-white">
             Illustrative photo
           </span>
         </div>
       ) : (
-        <div className="grid h-[150px] place-items-center bg-[#ececea] p-2.5 text-center text-[13px] text-[#595959]">
+        <div className="grid h-[118px] place-items-center bg-[#ececea] p-2.5 text-center text-[13px] text-[#595959]">
           Photo of {model.name} to be added
         </div>
       )}
-      <div className="flex flex-1 flex-col gap-2.5 p-[18px]">
+      <div className="flex flex-1 flex-col gap-1.5 px-3.5 pb-3.5 pt-3">
         <div className="text-xs font-bold uppercase tracking-[1.5px] text-[#595959]">{model.tag}</div>
-        <h3 className="text-[21px] font-bold tracking-[-0.02em]">{model.name}</h3>
-        <div className="flex flex-wrap gap-x-3.5 gap-y-1 border-b border-[#e5e5e5] pb-3 text-[13px] text-[#595959]">
+        <h3 className="text-lg font-bold tracking-[-0.02em]">{model.name}</h3>
+        <div className="flex flex-wrap gap-x-3.5 gap-y-1 border-b border-[#e5e5e5] pb-2 text-[13px] text-[#595959]">
           <span>{model.seatsText}</span>
           <span>{model.gear}</span>
           <span>{model.fuel}</span>
-          <span>{model.count === 1 ? "1 vehicle" : model.count + " vehicles"}</span>
         </div>
         <div className="flex items-baseline justify-between gap-2">
-          <strong className="text-xl">{ksh(model.rate)}</strong>
-          <span className="text-[13px] text-[#595959]">per day, incl. VAT</span>
+          <strong className="whitespace-nowrap text-lg">{ksh(model.rate)}</strong>
+          <span className="whitespace-nowrap text-[13px] text-[#595959]">per day</span>
         </div>
-        <div className="text-[13px] text-[#595959]">
-          {model.addon > 0 && (
-            <>
-              Optional damage cover: {ksh(model.addon)} per day
-              <br />
-            </>
-          )}
-          {saloon ? "100 km a day included, then KSh 15 per extra km" : "Unlimited mileage, no extra km charge"}
-        </div>
+        <div className="text-[13px] text-[#595959]">{model.mileage}</div>
 
         {days > 0 && (
-          <div className="bg-[#f5f5f3] px-3 py-2.5 text-sm leading-[1.6]">
+          <div className="rounded-md bg-[#f5f5f3] px-2.5 py-1.5 text-[13px] leading-normal">
             <div className="flex justify-between gap-2">
               <span>{plural(days)}</span>
               <strong>{ksh(model.hireTotal)}</strong>
@@ -1063,9 +1061,9 @@ function VehicleCard({
         {model.available ? (
           <div className="mt-auto flex flex-col gap-2">
             <div className="text-[13px] font-bold text-[#1d6b3a]">
-              {model.free} of {model.count} {model.count === 1 ? "vehicle" : "vehicles"} available for your dates
+              {model.free} of {model.count} available for your dates
             </div>
-            <button type="button" onClick={onBook} className={btnDark + " w-full"}>
+            <button type="button" onClick={onBook} className={btnDark + " min-h-[44px] w-full"}>
               Book this vehicle
             </button>
           </div>
@@ -1073,7 +1071,7 @@ function VehicleCard({
           <div className="mt-auto flex flex-col gap-2">
             <div className="text-[13px] font-bold text-[#9b1c1c]">Not available for your dates</div>
             {model.nextFree && (
-              <button type="button" onClick={() => onNext(model.nextFree!)} className={btnLight + " w-full"}>
+              <button type="button" onClick={() => onNext(model.nextFree!)} className={btnLight + " min-h-[44px] w-full"}>
                 Next free: {formatDay(model.nextFree)}
               </button>
             )}

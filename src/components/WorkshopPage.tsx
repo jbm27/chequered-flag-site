@@ -106,6 +106,7 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
   const [service, setService] = useState(SERVICES[0].id);
 
   const waNumber = CONTACT.whatsappE164.replace(/\D/g, "");
+  const callBack = contact === "call";
   const tel = "tel:" + CONTACT.phoneE164.replace(/\s/g, "");
 
   function toggleNeed(need: string) {
@@ -134,9 +135,9 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
       "Hello Chequered Flag workshop, I would like to book my vehicle in.",
       "Name: " + name.trim(),
       "Phone: " + phone.trim(),
-      "Vehicle: " + vehicle.trim() + (reg.trim() ? " (" + reg.trim().toUpperCase() + ")" : ""),
+      "Vehicle: " + (vehicle.trim() || "Not given") + (reg.trim() ? " (" + reg.trim().toUpperCase() + ")" : ""),
       "Needs: " + (needs.length ? needs.join(", ") : "Not chosen"),
-      "Issue: " + notes.trim(),
+      "Issue: " + (notes.trim() || "Not given, please call me"),
       "Please reach me by " + (contact === "whatsapp" ? "WhatsApp" : "phone call") + ".",
     ];
     return lines.join("\n");
@@ -155,8 +156,9 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
     const digits = phone.replace(/\D/g, "").length;
     if (!name.trim()) return setError("Please enter your name.");
     if (digits < 9) return setError("Please enter a phone number with at least 9 digits.");
-    if (!vehicle.trim()) return setError("Please tell us the make and model of your vehicle.");
-    if (notes.trim().length < 10) return setError("Please add a few words about the issue so we can prepare.");
+    // For a phone call back we only need a name and number; we get the rest on the call.
+    if (!callBack && !vehicle.trim()) return setError("Please tell us the make and model of your vehicle.");
+    if (!callBack && notes.trim().length < 10) return setError("Please add a few words about the issue so we can prepare.");
     setError("");
     if (channel === "whatsapp") window.open(whatsappLink(), "_blank", "noopener");
     else window.location.href = emailLink();
@@ -257,7 +259,40 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
             {!sent ? (
               <div>
                 <h2 className="mb-1 text-2xl font-extrabold tracking-[-0.02em]">Book your vehicle in</h2>
-                <p className="mb-[18px] text-sm text-[#595959]">Tell us what is going on. We call you back to talk it through.</p>
+                <p className="mb-3.5 text-sm text-[#595959]">Tell us what is going on. We call you back to talk it through.</p>
+                <a
+                  href={tel}
+                  className="mb-4 flex min-h-[48px] items-center justify-between gap-3 rounded-lg border border-[#e5e5e5] bg-[#f5f5f3] px-4 py-2 text-[#171717] no-underline hover:bg-[#efefec]"
+                >
+                  <span className="text-sm">
+                    <strong>In a hurry? Call us now</strong>
+                    <span className="block text-[13px] text-[#595959]">No form needed. Mon to Fri 8am to 5pm, Sat 8am to 1pm.</span>
+                  </span>
+                  <span className="whitespace-nowrap text-[15px] font-bold">{CONTACT.phoneDisplay}</span>
+                </a>
+                <div className="mb-4 flex flex-wrap items-center gap-x-2.5 gap-y-2">
+                  <span className="mr-1 text-[13px] text-[#595959]">How should we reach you?</span>
+                  {(
+                    [
+                      { id: "call", label: "Phone call" },
+                      { id: "whatsapp", label: "WhatsApp" },
+                    ] as const
+                  ).map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      aria-pressed={contact === item.id}
+                      onClick={() => setContact(item.id)}
+                      className={
+                        "min-h-[44px] cursor-pointer rounded-lg border-2 px-3.5 text-sm font-semibold text-[#171717] " +
+                        (contact === item.id ? "border-[#171717] bg-[#f5f5f3]" : "border-[#d0d0d0] bg-white")
+                      }
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+
                 <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(200px,1fr))]">
                   <div>
                     <label htmlFor="bname" className={label}>
@@ -273,7 +308,7 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
                   </div>
                   <div>
                     <label htmlFor="bveh" className={label}>
-                      Vehicle make and model
+                      Vehicle make and model{callBack ? " (optional)" : ""}
                     </label>
                     <input id="bveh" type="text" value={vehicle} onChange={(e) => { setVehicle(e.target.value); setError(""); }} placeholder="e.g. Toyota Prado 2014" className={field} />
                   </div>
@@ -308,7 +343,7 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
 
                 <div className="mb-1.5 mt-4 flex items-baseline justify-between gap-3">
                   <label htmlFor="wnotes" className="text-[13px] text-[#595959]">
-                    Tell us about the issue
+                    Tell us about the issue{callBack ? " (optional)" : ""}
                   </label>
                   <span className={"text-xs " + (notes.length > 720 ? "text-[#9b1c1c]" : "text-[#595959]")}>{notes.length} / 800</span>
                 </div>
@@ -330,29 +365,6 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
                       className="min-h-[36px] cursor-pointer rounded-md border border-[#e0e0e0] bg-[#f5f5f3] px-2.5 text-xs text-[#3f3f3f]"
                     >
                       + {key}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="mt-4 flex flex-wrap items-center gap-x-2.5 gap-y-2">
-                  <span className="mr-1 text-[13px] text-[#595959]">Reach me by</span>
-                  {(
-                    [
-                      { id: "call", label: "Phone call" },
-                      { id: "whatsapp", label: "WhatsApp" },
-                    ] as const
-                  ).map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      aria-pressed={contact === item.id}
-                      onClick={() => setContact(item.id)}
-                      className={
-                        "min-h-[44px] cursor-pointer rounded-lg border-2 px-3.5 text-sm font-semibold text-[#171717] " +
-                        (contact === item.id ? "border-[#171717] bg-[#f5f5f3]" : "border-[#d0d0d0] bg-white")
-                      }
-                    >
-                      {item.label}
                     </button>
                   ))}
                 </div>
@@ -399,13 +411,13 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
                 </p>
                 <div className="mb-4 whitespace-pre-line rounded-lg bg-[#f5f5f3] p-3.5 text-left text-sm leading-[1.7]">
                   <strong>
-                    {vehicle}
+                    {vehicle.trim() || "Vehicle not given"}
                     {reg.trim() ? " · " + reg.trim().toUpperCase() : ""}
                   </strong>
                   <br />
                   <span className="text-[#3f3f3f]">{needs.length ? needs.join(", ") : "Service type not chosen"}</span>
                   <br />
-                  <span className="text-[#3f3f3f]">{notes}</span>
+                  <span className="text-[#3f3f3f]">{notes.trim() || "We will go through the details on the call."}</span>
                 </div>
                 <p className="mb-3.5 text-[13px] text-[#595959]">
                   {via === "email" ? (

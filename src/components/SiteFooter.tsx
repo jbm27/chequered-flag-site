@@ -75,7 +75,7 @@ export default function SiteFooter() {
           {/* Hours */}
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-              Hours of operation.
+              Hours of operation
             </div>
             <div className="mt-1 text-sm">
               <div>Mon–Fri: 8:00am – 5:00pm</div>

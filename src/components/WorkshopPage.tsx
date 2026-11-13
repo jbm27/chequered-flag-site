@@ -5,7 +5,8 @@ import { CONTACT } from "../lib/contact";
 import ScrollReveal from "./ScrollReveal";
 
 // Workshop page laid out from Homer's "Design B, Bold" workshop design (light version).
-// The enquiry form has no inbox behind it yet, so sending opens WhatsApp with the details filled in.
+// The enquiry form has no inbox behind it yet, so sending opens WhatsApp, or the customer's own email app,
+// with the details filled in.
 // Nothing is stored on the website.
 
 const GREEN = "#1d6b3a";
@@ -101,6 +102,7 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
   const [contact, setContact] = useState<"call" | "whatsapp">("call");
   const [error, setError] = useState("");
   const [sent, setSent] = useState(false);
+  const [via, setVia] = useState<"whatsapp" | "email">("whatsapp");
   const [service, setService] = useState(SERVICES[0].id);
 
   const waNumber = CONTACT.whatsappE164.replace(/\D/g, "");
@@ -140,14 +142,25 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
     return lines.join("\n");
   }
 
-  function send() {
+  function whatsappLink() {
+    return "https://wa.me/" + waNumber + "?text=" + encodeURIComponent(message());
+  }
+
+  function emailLink() {
+    const subject = "Workshop enquiry: " + (vehicle.trim() || "my vehicle");
+    return "mailto:" + CONTACT.email + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(message());
+  }
+
+  function send(channel: "whatsapp" | "email") {
     const digits = phone.replace(/\D/g, "").length;
     if (!name.trim()) return setError("Please enter your name.");
     if (digits < 9) return setError("Please enter a phone number with at least 9 digits.");
     if (!vehicle.trim()) return setError("Please tell us the make and model of your vehicle.");
     if (notes.trim().length < 10) return setError("Please add a few words about the issue so we can prepare.");
     setError("");
-    window.open("https://wa.me/" + waNumber + "?text=" + encodeURIComponent(message()), "_blank", "noopener");
+    if (channel === "whatsapp") window.open(whatsappLink(), "_blank", "noopener");
+    else window.location.href = emailLink();
+    setVia(channel);
     setSent(true);
   }
 
@@ -349,15 +362,25 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
                     {error}
                   </p>
                 )}
-                <button
-                  type="button"
-                  onClick={send}
-                  className="mt-[18px] min-h-[52px] w-full cursor-pointer rounded-lg border-0 bg-[#171717] text-sm font-bold uppercase tracking-[1px] text-white hover:bg-[#2b2b2b]"
-                >
-                  Send enquiry on WhatsApp
-                </button>
+                <div className="mt-[18px] grid gap-2.5 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => send("whatsapp")}
+                    className="min-h-[52px] w-full cursor-pointer rounded-lg border-0 bg-[#171717] text-sm font-bold uppercase tracking-[1px] text-white hover:bg-[#2b2b2b]"
+                  >
+                    Send on WhatsApp
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => send("email")}
+                    className="min-h-[52px] w-full cursor-pointer rounded-lg border-2 border-[#171717] bg-white text-sm font-bold uppercase tracking-[1px] text-[#171717] hover:bg-[#f5f5f3]"
+                  >
+                    Send by email
+                  </button>
+                </div>
                 <p className="mt-2.5 text-center text-xs text-[#595959]">
-                  No payment needed. This opens WhatsApp with your details filled in; press send there to reach us.
+                  No payment needed. Either button opens WhatsApp or your email app with your details filled in; press send
+                  there to reach us.
                 </p>
               </div>
             ) : (
@@ -371,8 +394,8 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
                   {firstName ? "Thanks, " + firstName + "." : "Thanks."} Your message is ready.
                 </h2>
                 <p className="mx-auto mb-4 max-w-[440px] text-[#595959]">
-                  WhatsApp has opened with your details. Press send there, and we will{" "}
-                  {contact === "whatsapp" ? "message" : "call"} you on {phone} to arrange a time.
+                  {via === "email" ? "Your email app has opened" : "WhatsApp has opened"} with your details. Press send there,
+                  and we will {contact === "whatsapp" ? "message" : "call"} you on {phone} to arrange a time.
                 </p>
                 <div className="mb-4 whitespace-pre-line rounded-lg bg-[#f5f5f3] p-3.5 text-left text-sm leading-[1.7]">
                   <strong>
@@ -385,15 +408,29 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
                   <span className="text-[#3f3f3f]">{notes}</span>
                 </div>
                 <p className="mb-3.5 text-[13px] text-[#595959]">
-                  WhatsApp did not open?{" "}
-                  <a
-                    href={"https://wa.me/" + waNumber + "?text=" + encodeURIComponent(message())}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-semibold underline"
-                  >
-                    Open it again
-                  </a>{" "}
+                  {via === "email" ? (
+                    <>
+                      Email app did not open?{" "}
+                      <a href={emailLink()} className="font-semibold underline">
+                        Try again
+                      </a>
+                      , email us at <span className="select-all font-semibold text-[#171717]">{CONTACT.email}</span>,{" "}
+                      <a href={whatsappLink()} target="_blank" rel="noopener noreferrer" className="font-semibold underline">
+                        send it on WhatsApp
+                      </a>
+                    </>
+                  ) : (
+                    <>
+                      WhatsApp did not open?{" "}
+                      <a href={whatsappLink()} target="_blank" rel="noopener noreferrer" className="font-semibold underline">
+                        Open it again
+                      </a>
+                      ,{" "}
+                      <a href={emailLink()} className="font-semibold underline">
+                        send it by email
+                      </a>
+                    </>
+                  )}{" "}
                   or call{" "}
                   <a href={tel} className="font-semibold underline">
                     {CONTACT.phoneDisplay}

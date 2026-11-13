@@ -33,7 +33,7 @@ export default function SiteHeader() {
             <div className="text-base font-semibold tracking-wide md:text-lg">
               Chequered Flag
             </div>
-            <div className="text-xs font-medium uppercase tracking-[0.18em] text-red-600">
+            <div className="text-xs font-medium uppercase tracking-[0.18em] text-neutral-500">
               Established 1975
             </div>
           </div>

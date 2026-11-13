@@ -1,29 +1,140 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import HireCalendar, { type DeskVehicle } from "./HireCalendar";
-import { formatDay, ksh, type StaffBooking } from "../lib/hire";
+import { useEffect, useMemo, useState } from "react";
+import { addDays, dayNumber, formatDay, ksh, todayNairobi, type StaffBooking } from "../lib/hire";
 
-const FILTERS = [
-  { id: "pending", label: "Awaiting payment" },
-  { id: "quote", label: "Quotes" },
-  { id: "confirmed", label: "Confirmed" },
-  { id: "cancelled", label: "Closed" },
+// Staff desk laid out like Homer's fleet dashboard design (V1.5).
+// It only uses the data and actions the desk already had: bookings, the fleet list, staff logins,
+// and the confirm / release / cancel / quote actions. Booking rules are unchanged: a booking is held
+// until staff confirm the full payment; prep and cleaning days are a visual guide only.
+
+export type DeskVehicle = {
+  id: string;
+  model: string;
+  plate: string;
+  category: "saloon" | "suv" | "4x4";
+};
+
+type Chip = { label: string; bg: string; fg: string; bd: string };
+type SectionKey = "overview" | "calendar" | "table" | "payments" | "compare" | "schedule";
+
+const WIN = 28;
+const PAID = { bg: "#ceead6", fg: "#0d5a2a" };
+const AWAIT = { bg: "#feefc3", fg: "#5f4400" };
+const BUFFER = "#c4c7c5";
+
+const CHIP_PAID: Chip = { label: "Paid in full", bg: "#ceead6", fg: "#0d5a2a", bd: "#81c995" };
+const CHIP_AWAIT: Chip = { label: "Awaiting payment", bg: "#feefc3", fg: "#5f4400", bd: "#f9d46b" };
+const CHIP_CODE: Chip = { label: "Payment code to check", bg: "#e8f0fe", fg: "#174ea6", bd: "#aecbfa" };
+const CHIP_LATE: Chip = { label: "Unpaid, pick-up reached", bg: "#fce8e6", fg: "#a50e0e", bd: "#f1a9a3" };
+const CHIP_QUOTE: Chip = { label: "Quote, not held", bg: "#e8def8", fg: "#3c1f7a", bd: "#cdb9f0" };
+const CHIP_CLOSED: Chip = { label: "Closed", bg: "#e8eaed", fg: "#3c4043", bd: "#dadce0" };
+
+const TYPES = [
+  { id: "all", label: "All vehicles" },
+  { id: "saloon", label: "Saloon" },
+  { id: "suv", label: "SUV" },
+  { id: "4x4", label: "4x4" },
 ] as const;
 
+const TABLE_FILTERS = [
+  { id: "pending", label: "Awaiting payment" },
+  { id: "quote", label: "Quotes" },
+  { id: "confirmed", label: "Paid in full" },
+  { id: "cancelled", label: "Closed" },
+  { id: "all", label: "All" },
+] as const;
+
+const card = "rounded-xl border border-[#e5e5e5] bg-white";
+const pill =
+  "inline-flex min-h-[38px] cursor-pointer items-center rounded-full border border-[#dadce0] px-4 text-[13px] font-bold";
+const btnDark =
+  "inline-flex min-h-[40px] cursor-pointer items-center justify-center rounded-lg bg-[#171717] px-4 text-[13px] font-bold text-white hover:bg-[#2b2b2b] disabled:opacity-50";
+const btnGreen =
+  "inline-flex min-h-[40px] cursor-pointer items-center justify-center rounded-lg bg-[#188038] px-4 text-[13px] font-bold text-white hover:bg-[#137333]";
+const btnLight =
+  "inline-flex min-h-[40px] cursor-pointer items-center justify-center rounded-lg border border-[#dadce0] bg-white px-4 text-[13px] font-bold text-[#171717] hover:bg-[#f5f5f3] disabled:cursor-not-allowed disabled:opacity-40";
+const input = "h-10 w-full rounded-lg border border-[#c8c8c8] bg-white px-3 text-sm text-[#171717]";
+const search = "h-10 w-full max-w-[320px] rounded-lg border border-[#c8c8c8] bg-white px-3 text-sm text-[#171717]";
+
+function lastHireDay(pickup: string, returnOn: string) {
+  if (returnOn > pickup) {
+    const end = addDays(returnOn, -1);
+    return end < pickup ? pickup : end;
+  }
+  return pickup;
+}
+
+function num(iso: string) {
+  return dayNumber(iso) ?? 0;
+}
+
+function isoOf(n: number) {
+  return new Date(n * 86400000).toISOString().slice(0, 10);
+}
+
+function short(iso: string) {
+  const n = dayNumber(iso);
+  if (n === null) return iso;
+  return new Date(n * 86400000).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+}
+
+function range(a: number, b: number) {
+  return a === b ? short(isoOf(a)) : short(isoOf(a)) + " to " + short(isoOf(b));
+}
+
+function plural(n: number, word: string) {
+  return n + " " + word + (n === 1 ? "" : "s");
+}
+
+function chipFor(booking: StaffBooking, today: string): Chip {
+  if (booking.status === "confirmed") return CHIP_PAID;
+  if (booking.status === "quote") return CHIP_QUOTE;
+  if (booking.status === "cancelled") return CHIP_CLOSED;
+  if (booking.pickup <= today) return CHIP_LATE;
+  if (booking.mpesaCode) return CHIP_CODE;
+  return CHIP_AWAIT;
+}
+
+function ChipView({ chip }: { chip: Chip }) {
+  return (
+    <span
+      className="inline-block whitespace-nowrap rounded-[10px] border px-2 py-0.5 text-xs font-bold"
+      style={{ background: chip.bg, color: chip.fg, borderColor: chip.bd }}
+    >
+      {chip.label}
+    </span>
+  );
+}
+
+function matches(query: string, parts: (string | null | undefined)[]) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return parts.join(" ").toLowerCase().includes(needle);
+}
+
+function csvCell(value: string | number) {
+  const text = String(value);
+  return /[",\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+}
+
 export default function HireDesk() {
+  const today = todayNairobi();
+  const T = num(today);
+
   const [ready, setReady] = useState<boolean | null>(null);
   const [username, setUsername] = useState("");
   const [signedIn, setSignedIn] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [bookings, setBookings] = useState<StaffBooking[]>([]);
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("pending");
+  const [fleet, setFleet] = useState<DeskVehicle[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [fees, setFees] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [notice, setNotice] = useState("");
-  const [fees, setFees] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+
   const [team, setTeam] = useState<string[]>([]);
   const [memberName, setMemberName] = useState("");
   const [memberPassword, setMemberPassword] = useState("");
@@ -31,11 +142,28 @@ export default function HireDesk() {
   const [teamError, setTeamError] = useState("");
   const [teamNotice, setTeamNotice] = useState("");
   const [addingMember, setAddingMember] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
-  const [deskView, setDeskView] = useState<"bookings" | "calendar">("bookings");
-  const [fleet, setFleet] = useState<DeskVehicle[]>([]);
-  const menuRef = useRef<HTMLDivElement>(null);
+
+  const [open, setOpen] = useState<Record<SectionKey, boolean>>({
+    overview: true,
+    calendar: true,
+    table: true,
+    payments: true,
+    compare: true,
+    schedule: true,
+  });
+  const [selectedId, setSelectedId] = useState("");
+  const [detailOpen, setDetailOpen] = useState(true);
+  const [offset, setOffset] = useState(0);
+  const [before, setBefore] = useState(1);
+  const [after, setAfter] = useState(1);
+  const [type, setType] = useState<(typeof TYPES)[number]["id"]>("all");
+  const [hideIdle, setHideIdle] = useState(true);
+  const [calQuery, setCalQuery] = useState("");
+  const [tableFilter, setTableFilter] = useState<(typeof TABLE_FILTERS)[number]["id"]>("pending");
+  const [tableQuery, setTableQuery] = useState("");
+  const [payQuery, setPayQuery] = useState("");
+  const [scheduleQuery, setScheduleQuery] = useState("");
 
   async function loadSession() {
     const response = await fetch("/api/hire/session");
@@ -66,10 +194,6 @@ export default function HireDesk() {
     setFleet(body.fleet || []);
   }
 
-  useEffect(() => {
-    loadSession();
-  }, []);
-
   async function loadTeam() {
     const response = await fetch("/api/hire/staff/team");
     const body = await response.json();
@@ -85,34 +209,15 @@ export default function HireDesk() {
   }
 
   useEffect(() => {
+    loadSession();
+  }, []);
+
+  useEffect(() => {
     if (signedIn) {
       loadBookings();
       loadTeam();
     }
   }, [signedIn]);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    function close(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false);
-    }
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setMenuOpen(false);
-    }
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpen]);
-
-  const counts = useMemo(() => {
-    const tally = { pending: 0, quote: 0, confirmed: 0, cancelled: 0 };
-    for (const booking of bookings) tally[booking.status] += 1;
-    return tally;
-  }, [bookings]);
-  const shown = bookings.filter((booking) => booking.status === filter);
 
   async function signIn(event: React.FormEvent) {
     event.preventDefault();
@@ -136,14 +241,11 @@ export default function HireDesk() {
     setSignedIn("");
     setBookings([]);
     setFleet([]);
-    setDeskView("bookings");
+    setSelectedId("");
     setShowTeam(false);
-    setMenuOpen(false);
     setTeam([]);
     setTeamNotice("");
     setTeamError("");
-    setMenuOpen(false);
-    setShowTeam(false);
   }
 
   async function addMember(event: React.FormEvent) {
@@ -181,8 +283,8 @@ export default function HireDesk() {
     return booking.deliveryManual || booking.deliveryFee === null;
   }
 
-  async function act(booking: StaffBooking, action: string, prompt: string, extra?: { deliveryFee?: string }) {
-    let deliveryFee = extra?.deliveryFee ?? "";
+  async function act(booking: StaffBooking, action: string, prompt: string) {
+    let deliveryFee = fees[booking.id] || "";
     if ((action === "hold" || action === "settle") && needsDeliveryPrice(booking)) {
       deliveryFee = deliveryFee.trim().replace(/,/g, "");
       if (!/^\d+$/.test(deliveryFee) || Number(deliveryFee) > 500000) {
@@ -204,341 +306,1242 @@ export default function HireDesk() {
       setMessage(body.error || "The booking could not be updated.");
       return;
     }
-    if (action === "hold") {
-      setNotice(booking.reference + " is held. It is waiting for the full payment.");
-      setFilter("pending");
-    } else if (action === "settle" || action === "confirm") {
-      setNotice(booking.reference + " is confirmed. The vehicle is held.");
-      setFilter("confirmed");
-    } else if (action === "dismiss") {
-      setNotice(booking.reference + " was rejected.");
-      setFilter("cancelled");
-    } else if (action === "release" || action === "cancel") {
-      setNotice(booking.reference + " was closed and the vehicle is free.");
-      setFilter("cancelled");
-    }
+    if (action === "hold") setNotice(booking.reference + " is held. It is waiting for the full payment.");
+    else if (action === "settle" || action === "confirm") setNotice(booking.reference + " is confirmed. The vehicle is held.");
+    else if (action === "dismiss") setNotice(booking.reference + " was rejected.");
+    else setNotice(booking.reference + " was closed and the vehicle is free.");
     await loadBookings();
   }
 
+  function pick(id: string) {
+    setSelectedId(id);
+    setDetailOpen(true);
+    window.setTimeout(() => {
+      document.getElementById("booking-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+  }
+
+  // ---------- derived data ----------
+  const fleetById = useMemo(() => {
+    const map: Record<string, DeskVehicle> = {};
+    for (const vehicle of fleet) map[vehicle.id] = vehicle;
+    return map;
+  }, [fleet]);
+
+  const holds = useMemo(
+    () => bookings.filter((booking) => (booking.status === "pending" || booking.status === "confirmed") && booking.vehicleId),
+    [bookings],
+  );
+  const current = holds.filter((booking) => lastHireDay(booking.pickup, booking.returnOn) >= today);
+  const outToday = holds.filter((booking) => booking.pickup <= today && lastHireDay(booking.pickup, booking.returnOn) >= today);
+  const coming = holds.filter((booking) => booking.pickup >= today && booking.pickup <= addDays(today, 6));
+  const awaiting = current.filter((booking) => booking.status === "pending");
+  const chase = awaiting.filter((booking) => booking.pickup <= today);
+  const awaitingTotal = awaiting.reduce((sum, booking) => sum + booking.total, 0);
+  const chaseTotal = chase.reduce((sum, booking) => sum + booking.total, 0);
+  const paidCurrent = current.filter((booking) => booking.status === "confirmed");
+  const paidTotal = paidCurrent.reduce((sum, booking) => sum + booking.total, 0);
+  const codesToCheck = bookings.filter((booking) => booking.status === "pending" && booking.mpesaCode);
+  const quotes = bookings.filter((booking) => booking.status === "quote");
+  const selected = bookings.find((booking) => booking.id === selectedId) || null;
+
+  const pickups = holds.filter((b) => b.pickup === today).sort((a, b) => a.pickTime.localeCompare(b.pickTime));
+  const returns = holds.filter((b) => b.returnOn === today).sort((a, b) => a.retTime.localeCompare(b.retTime));
+  const onHire = holds
+    .filter((b) => b.pickup < today && b.returnOn > today)
+    .sort((a, b) => a.returnOn.localeCompare(b.returnOn));
+
+  const chaseText = chase.length
+    ? plural(chase.length, "booking") + " reached pick-up still unpaid (" + ksh(chaseTotal) + ")"
+    : "";
+  const flags: Record<SectionKey, string> = {
+    overview: chaseText,
+    calendar: "",
+    table: chaseText,
+    payments: codesToCheck.length ? plural(codesToCheck.length, "payment code") + " to check" : "",
+    compare: chase.length ? plural(chase.length, "booking") + " unpaid at pick-up" : "",
+    schedule: "",
+  };
+
+  // Calendar
+  const first = T - 2 + offset;
+  const lastCol = first + WIN - 1;
+  const calDays = Array.from({ length: WIN }, (_, index) => {
+    const n = first + index;
+    const date = new Date(n * 86400000);
+    return {
+      n,
+      dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getUTCDay()],
+      num: date.getUTCDate(),
+      mon:
+        index === 0 || date.getUTCDate() === 1
+          ? ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date.getUTCMonth()]
+          : "",
+      today: n === T,
+      weekend: date.getUTCDay() === 0,
+    };
+  });
+  function col(start: number, end: number) {
+    const a = Math.max(start, first);
+    const b = Math.min(end, lastCol);
+    if (b < a) return null;
+    return a - first + 1 + " / " + (b - first + 2);
+  }
+  const calRows = fleet
+    .filter((vehicle) => type === "all" || vehicle.category === type)
+    .map((vehicle) => {
+      const mine = holds.filter((booking) => booking.vehicleId === vehicle.id);
+      const busy = mine.some((booking) => {
+        const start = num(booking.pickup);
+        const end = num(lastHireDay(booking.pickup, booking.returnOn));
+        return start - before <= lastCol && end + after >= first;
+      });
+      const hit = matches(calQuery, [vehicle.model, vehicle.plate, ...mine.map((b) => b.customerName + " " + b.reference)]);
+      return { vehicle, mine, busy, hit };
+    })
+    .filter((row) => row.hit && !(hideIdle && !row.busy && !calQuery.trim()));
+  const idleCount = fleet.filter((vehicle) => type === "all" || vehicle.category === type).length - calRows.length;
+
+  // Table
+  const tableCounts = {
+    pending: bookings.filter((b) => b.status === "pending").length,
+    quote: quotes.length,
+    confirmed: bookings.filter((b) => b.status === "confirmed").length,
+    cancelled: bookings.filter((b) => b.status === "cancelled").length,
+    all: bookings.length,
+  };
+  const tableRows = bookings
+    .filter((b) => tableFilter === "all" || b.status === tableFilter)
+    .filter((b) => matches(tableQuery, [b.customerName, b.reference, b.model, b.plate, b.phone, chipFor(b, today).label]))
+    .sort((a, b) => a.pickup.localeCompare(b.pickup));
+
+  // Payment codes
+  const payRows = bookings
+    .filter((b) => b.mpesaCode && (b.status === "pending" || b.status === "confirmed"))
+    .filter((b) => matches(payQuery, [b.customerName, b.phone, b.mpesaCode, b.reference]))
+    .sort((a, b) => (a.status === b.status ? b.createdAt.localeCompare(a.createdAt) : a.status === "pending" ? -1 : 1));
+
+  // Schedule
+  const schedule = holds
+    .flatMap((booking) => {
+      const vehicle = booking.vehicleId ? fleetById[booking.vehicleId] : null;
+      const name = vehicle ? vehicle.plate + " " + vehicle.model : booking.model;
+      const start = num(booking.pickup);
+      const end = num(lastHireDay(booking.pickup, booking.returnOn));
+      const items: { name: string; kind: string; s: number; e: number; detail: string }[] = [];
+      if (before > 0) items.push({ name, kind: "Prep before hire", s: start - before, e: start - 1, detail: "for " + booking.customerName });
+      if (after > 0) items.push({ name, kind: "Clean and service after hire", s: end + 1, e: end + after, detail: "after " + booking.customerName });
+      return items;
+    })
+    .filter((item) => item.e >= T && item.s <= T + 13)
+    .filter((item) => matches(scheduleQuery, [item.name, item.kind, item.detail]))
+    .sort((a, b) => a.s - b.s);
+
+  function downloadCsv() {
+    const header = ["Reference", "Status", "Customer", "Phone", "Email", "Vehicle", "Plate", "Pick-up", "Return", "Total (KSh)", "M-Pesa code", "Staff note"];
+    const lines = [header.join(",")].concat(
+      bookings.map((b) =>
+        [b.reference, chipFor(b, today).label, b.customerName, b.phone, b.email, b.model, b.plate || "", b.pickup, b.returnOn, b.total, b.mpesaCode, b.staffNote]
+          .map(csvCell)
+          .join(","),
+      ),
+    );
+    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "hire-bookings-" + today + ".csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ---------- rendering ----------
   if (loading) {
-    return <p className="mx-auto max-w-3xl px-5 py-16 text-sm text-neutral-600">Checking sign-in…</p>;
+    return <p className="mx-auto max-w-3xl px-5 py-16 text-sm text-[#595959]">Checking sign-in…</p>;
   }
 
   if (!signedIn) {
     return (
-      <main className="mx-auto max-w-md px-5 py-16">
-        <h1 className="text-3xl font-semibold tracking-tight">Hire desk</h1>
-        <p className="mt-3 text-sm leading-relaxed text-neutral-700">
-          Staff sign-in for vehicle bookings. A request holds the vehicle until you confirm that the full payment has arrived, or you release it.
-        </p>
-        {ready === false && (
-          <p className="mt-4 text-sm text-red-700" role="alert">
-            {authError || "Add HIRE_STAFF_USERNAME and HIRE_STAFF_PASSWORD in Vercel, then redeploy, before signing in."}
-          </p>
-        )}
-        <form onSubmit={signIn} className="mt-6 space-y-4">
-          <label className="block text-sm">
-            <span className="mb-1 block text-neutral-600">Username</span>
-            <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" className="h-11 w-full rounded-md border border-neutral-300 px-3" />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-neutral-600">Password</span>
-            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" className="h-11 w-full rounded-md border border-neutral-300 px-3" />
-          </label>
-          {authError && ready !== false && (
-            <p className="text-sm text-red-700" role="alert">
-              {authError}
+      <div className="min-h-[70vh] bg-[#f7f7f5] text-[15px] text-[#171717]">
+        <DeskHeader today={today} />
+        <main className="mx-auto max-w-md px-5 py-14">
+          <div className={card + " p-6"}>
+            <h1 className="text-[26px] font-bold tracking-[-0.02em]">Hire desk</h1>
+            <p className="mt-2 text-sm leading-relaxed text-[#3f3f3f]">
+              Staff sign-in for vehicle bookings. A request holds the vehicle until you confirm that the full payment has
+              arrived, or you release it.
             </p>
-          )}
-          <button type="submit" className="rounded-md bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white">
-            Sign in
-          </button>
-        </form>
-      </main>
+            {ready === false && (
+              <p className="mt-4 text-sm font-bold text-[#a50e0e]" role="alert">
+                {authError || "Add HIRE_STAFF_USERNAME and HIRE_STAFF_PASSWORD in Vercel, then redeploy, before signing in."}
+              </p>
+            )}
+            <form onSubmit={signIn} className="mt-5 space-y-4">
+              <label className="block text-sm">
+                <span className="mb-1.5 block text-[13px] text-[#595959]">Username</span>
+                <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" className={input + " h-11"} />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1.5 block text-[13px] text-[#595959]">Password</span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  className={input + " h-11"}
+                />
+              </label>
+              {authError && ready !== false && (
+                <p className="text-sm font-bold text-[#a50e0e]" role="alert">
+                  {authError}
+                </p>
+              )}
+              <button type="submit" className={btnDark + " min-h-[44px] w-full uppercase tracking-[1px]"}>
+                Sign in
+              </button>
+            </form>
+          </div>
+        </main>
+      </div>
     );
   }
 
-  return (
-    <main className={deskView === "calendar" ? "mx-auto max-w-[1400px] px-5 py-10" : "mx-auto max-w-5xl px-5 py-10"}>
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Hire desk</h1>
-          <p className="mt-2 text-sm text-neutral-600">Signed in as {signedIn}. Confirm a booking only after the full amount is on the statement.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="relative" ref={menuRef}>
-            <button
-              type="button"
-              aria-expanded={menuOpen}
-              aria-haspopup="menu"
-              onClick={() => setMenuOpen((open) => !open)}
-              className="rounded-md border border-neutral-300 px-4 py-2 text-sm"
-            >
-              Menu
-            </button>
-            {menuOpen && (
-              <div role="menu" className="absolute right-0 z-10 mt-2 w-48 rounded-md border border-neutral-200 bg-white py-1 shadow-lg">
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="block w-full px-4 py-2 text-left text-sm hover:bg-neutral-100"
-                  onClick={() => {
-                    setDeskView("bookings");
-                    setShowTeam(false);
-                    setMenuOpen(false);
-                  }}
-                >
-                  Bookings
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="block w-full px-4 py-2 text-left text-sm hover:bg-neutral-100"
-                  onClick={() => {
-                    setDeskView("calendar");
-                    setShowTeam(false);
-                    setMenuOpen(false);
-                  }}
-                >
-                  Calendar
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="block w-full px-4 py-2 text-left text-sm hover:bg-neutral-100"
-                  onClick={() => {
-                    setShowTeam(true);
-                    setMenuOpen(false);
-                  }}
-                >
-                  Add team member
-                </button>
-              </div>
-            )}
-          </div>
-          <button type="button" onClick={signOut} className="rounded-md border border-neutral-300 px-4 py-2 text-sm">
-            Sign out
-          </button>
-        </div>
-      </div>
-
-      {showTeam && (
-      <section className="mt-8 rounded-xl border border-neutral-200 p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-semibold">Team</h2>
-            <p className="mt-1 text-sm text-neutral-600">Add a username for someone else. They sign in on this same page and can confirm payments.</p>
-          </div>
-          <button type="button" onClick={() => setShowTeam(false)} className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm">
-            Close
-          </button>
-        </div>
-        {team.length > 0 && (
-          <ul className="mt-3 flex flex-wrap gap-2">
-            {team.map((name) => (
-              <li key={name} className="rounded-full border border-neutral-300 px-3 py-1 text-sm">
-                {name}
-                {name === signedIn ? " (you)" : ""}
-              </li>
-            ))}
-          </ul>
-        )}
-        <form onSubmit={addMember} className="mt-4 grid gap-3 sm:grid-cols-3">
-          <label className="block text-sm">
-            <span className="mb-1 block text-neutral-600">Username</span>
-            <input
-              value={memberName}
-              onChange={(event) => setMemberName(event.target.value)}
-              autoComplete="off"
-              className="h-10 w-full rounded-md border border-neutral-300 px-3"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-neutral-600">Password</span>
-            <input
-              type="password"
-              value={memberPassword}
-              onChange={(event) => setMemberPassword(event.target.value)}
-              autoComplete="new-password"
-              className="h-10 w-full rounded-md border border-neutral-300 px-3"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-neutral-600">Password again</span>
-            <input
-              type="password"
-              value={memberPasswordAgain}
-              onChange={(event) => setMemberPasswordAgain(event.target.value)}
-              autoComplete="new-password"
-              className="h-10 w-full rounded-md border border-neutral-300 px-3"
-            />
-          </label>
-          <div className="sm:col-span-3">
-            <p className="text-sm text-neutral-500">3 to 40 characters: letters, numbers, dots, underscores, or hyphens. Password at least 8 characters.</p>
-            {teamError && (
-              <p className="mt-2 text-sm text-red-700" role="alert">
-                {teamError}
-              </p>
-            )}
-            {teamNotice && <p className="mt-2 text-sm text-green-800">{teamNotice}</p>}
-            <button type="submit" disabled={addingMember} className="mt-3 rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
-              {addingMember ? "Adding…" : "Add team member"}
-            </button>
-          </div>
-        </form>
-      </section>
-      )}
-
-      {message && <p className="mt-4 text-sm text-red-700">{message}</p>}
-      {notice && <p className="mt-4 text-sm text-green-800">{notice}</p>}
-
-      {deskView === "calendar" ? (
-        <HireCalendar bookings={bookings} fleet={fleet} onAct={act} />
+  const sectionHead = (key: SectionKey, title: string, size: "lg" | "md" = "lg") => (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+      {size === "lg" ? (
+        <h2 className="text-[26px] font-bold tracking-[-0.02em]">{title}</h2>
       ) : (
-      <>
-      <div className="mt-6 flex flex-wrap gap-2">
-        {FILTERS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => setFilter(item.id)}
-            className={
-              "rounded-full px-3 py-1.5 text-sm " +
-              (filter === item.id ? "bg-neutral-900 text-white" : "border border-neutral-300 text-neutral-800")
-            }
-          >
-            {item.label} ({counts[item.id]})
-          </button>
-        ))}
-      </div>
-      <div className="mt-6 space-y-4">
-        {shown.length === 0 && <p className="rounded-xl border border-neutral-200 p-5 text-sm text-neutral-600">Nothing in this list.</p>}
-        {shown.map((booking) => (
-          <article key={booking.id} className="rounded-xl border border-neutral-200 p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
+        <strong className="text-lg">{title}</strong>
+      )}
+      <button
+        type="button"
+        aria-expanded={open[key]}
+        onClick={() => setOpen((value) => ({ ...value, [key]: !value[key] }))}
+        className="inline-flex min-h-[40px] flex-none cursor-pointer items-center rounded-full border border-[#dadce0] bg-white px-4 text-[13px] font-bold text-[#171717]"
+      >
+        {open[key] ? "Hide details ▲" : "Show details ▼"}
+      </button>
+      {flags[key] && (
+        <span
+          role="status"
+          className="inline-flex items-center gap-1.5 rounded-2xl border border-[#f1a9a3] bg-[#fce8e6] px-3 py-1.5 text-[13px] font-bold text-[#a50e0e]"
+        >
+          ⚠ {flags[key]}
+        </span>
+      )}
+    </div>
+  );
+
+  const tiles = [
+    { label: "Vehicles out today", value: outToday.length + " of " + fleet.length, note: "On hire right now", accent: "#1a73e8" },
+    { label: "Collections in the next 7 days", value: String(coming.length), note: "Including today", accent: "#171717" },
+    {
+      label: "Awaiting payment",
+      value: ksh(awaitingTotal),
+      note: plural(awaiting.length, "booking") + " held until you confirm the full amount",
+      accent: "#171717",
+    },
+    {
+      label: "Pick-up reached, still unpaid",
+      value: String(chase.length),
+      note: chase.length ? ksh(chaseTotal) + " to check before handover" : "Nothing to chase",
+      accent: "#d93025",
+    },
+  ];
+
+  const todayGroups = [
+    { title: "Pick-ups today", items: pickups, empty: "No pick-ups today.", time: (b: StaffBooking) => b.pickTime, accent: "#1a73e8" },
+    { title: "Returns today", items: returns, empty: "No returns today.", time: (b: StaffBooking) => b.retTime, accent: "#188038" },
+    {
+      title: "On hire now",
+      items: onHire,
+      empty: "No vehicles out on a longer hire.",
+      time: (b: StaffBooking) => "back " + short(b.returnOn),
+      accent: "#e37400",
+    },
+  ];
+
+  const collectedPct = paidTotal + awaitingTotal ? Math.round((paidTotal / (paidTotal + awaitingTotal)) * 100) : 0;
+
+  return (
+    <div className="bg-[#f7f7f5] text-[15px] leading-normal text-[#171717]">
+      <DeskHeader today={today}>
+        <span className="text-sm text-[#595959]">Signed in as {signedIn}</span>
+        <button type="button" onClick={() => setShowTeam((value) => !value)} className={btnLight}>
+          Team
+        </button>
+        <a href="/vehicle-hire" className="font-medium text-[#171717]">
+          Customer website
+        </a>
+        <button type="button" onClick={signOut} className={btnLight}>
+          Sign out
+        </button>
+      </DeskHeader>
+
+      <main className="mx-auto box-border max-w-[1280px] px-[5.5%] pb-14 pt-7">
+        <p className="mb-[18px] rounded-lg bg-[#e8f0fe] px-3.5 py-2.5 text-sm text-[#174ea6]">
+          Confirm a booking only after the full amount is on the M-Pesa or bank statement. Prep and cleaning days are a
+          planning guide; only the hire dates hold a vehicle.
+        </p>
+
+        {message && (
+          <p role="alert" className="mb-4 rounded-lg border border-[#f1a9a3] bg-[#fce8e6] px-3.5 py-2.5 text-sm font-bold text-[#a50e0e]">
+            {message}
+          </p>
+        )}
+        {notice && (
+          <p role="status" className="mb-4 rounded-lg border border-[#81c995] bg-[#ceead6] px-3.5 py-2.5 text-sm font-bold text-[#0d5a2a]">
+            {notice}
+          </p>
+        )}
+
+        {showTeam && (
+          <section className={card + " mb-[22px] p-[22px]"}>
+            <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-semibold">
-                  {booking.reference} · {booking.model}
-                  {booking.plate ? " · " + booking.plate : ""}
-                </h2>
-                <p className="mt-1 text-sm text-neutral-600">
-                  {booking.customerName} · {booking.phone} · {booking.email}
+                <h2 className="text-[22px] font-bold tracking-[-0.02em]">Team</h2>
+                <p className="mt-1 text-sm text-[#595959]">
+                  Add a username for someone else. They sign in on this same page and can confirm payments.
                 </p>
               </div>
-              <p className="text-lg font-semibold">{booking.deliveryManual ? ksh(booking.total) + " plus delivery" : ksh(booking.total) + " in full"}</p>
+              <button type="button" onClick={() => setShowTeam(false)} className={btnLight}>
+                Close
+              </button>
             </div>
-            <p className="mt-3 text-sm text-neutral-800">
-              {formatDay(booking.pickup)}, {booking.pickTime} to {formatDay(booking.returnOn)}, {booking.retTime} · {booking.days} day
-              {booking.days === 1 ? "" : "s"} · {booking.location}
-            </p>
-            <p className="mt-1 text-sm text-neutral-700">{booking.deliverySummary}</p>
-            {booking.deliveryDetail && <p className="mt-1 whitespace-pre-line text-sm text-neutral-600">{booking.deliveryDetail}</p>}
-            {booking.ooh && <p className="mt-1 text-sm text-amber-900">Out of hours: {booking.oohNote || "No note"}</p>}
-            <p className="mt-2 text-sm text-neutral-600">
-              Hire {ksh(booking.hireTotal)}
-              {booking.insuranceTotal ? " · cover " + ksh(booking.insuranceTotal) : ""}
-              {booking.deliveryFee ? " · delivery " + ksh(booking.deliveryFee) : ""}
-              {booking.mpesaCode ? " · M-Pesa " + booking.mpesaCode : " · no M-Pesa code yet"}
-            </p>
-            {booking.staffNote && <p className="mt-1 text-sm text-neutral-600">Note: {booking.staffNote}</p>}
-            {(booking.status === "pending" || booking.status === "confirmed" || booking.status === "quote") && (
-              <div className="mt-4 space-y-3">
-                <label className="block text-sm">
-                  <span className="mb-1 block text-neutral-500">Note for the file (optional)</span>
-                  <input
-                    value={notes[booking.id] || ""}
-                    onChange={(event) => setNotes((current) => ({ ...current, [booking.id]: event.target.value }))}
-                    className="h-10 w-full rounded-md border border-neutral-300 px-3"
-                  />
-                </label>
-                {booking.status === "quote" && needsDeliveryPrice(booking) && (
-                  <label className="block max-w-xs text-sm">
-                    <span className="mb-1 block text-neutral-500">Delivery charge (KSh). Use 0 if there is none.</span>
-                    <input
-                      inputMode="numeric"
-                      value={fees[booking.id] || ""}
-                      onChange={(event) => setFees((current) => ({ ...current, [booking.id]: event.target.value }))}
-                      className="h-10 w-full rounded-md border border-neutral-300 px-3"
-                    />
-                  </label>
+            {team.length > 0 && (
+              <ul className="mt-3 flex flex-wrap gap-2">
+                {team.map((name) => (
+                  <li key={name} className="rounded-full border border-[#dadce0] px-3 py-1 text-sm">
+                    {name}
+                    {name === signedIn ? " (you)" : ""}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <form onSubmit={addMember} className="mt-4 grid gap-3 sm:grid-cols-3">
+              <label className="block text-sm">
+                <span className="mb-1.5 block text-[13px] text-[#595959]">Username</span>
+                <input value={memberName} onChange={(e) => setMemberName(e.target.value)} autoComplete="off" className={input} />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1.5 block text-[13px] text-[#595959]">Password</span>
+                <input
+                  type="password"
+                  value={memberPassword}
+                  onChange={(e) => setMemberPassword(e.target.value)}
+                  autoComplete="new-password"
+                  className={input}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1.5 block text-[13px] text-[#595959]">Password again</span>
+                <input
+                  type="password"
+                  value={memberPasswordAgain}
+                  onChange={(e) => setMemberPasswordAgain(e.target.value)}
+                  autoComplete="new-password"
+                  className={input}
+                />
+              </label>
+              <div className="sm:col-span-3">
+                <p className="text-[13px] text-[#595959]">
+                  3 to 40 characters: letters, numbers, dots, underscores, or hyphens. Password at least 8 characters.
+                </p>
+                {teamError && (
+                  <p className="mt-2 text-sm font-bold text-[#a50e0e]" role="alert">
+                    {teamError}
+                  </p>
                 )}
-                <div className="flex flex-wrap gap-2">
-                  {booking.status === "quote" && (
-                    <button
-                      type="button"
-                      className="h-10 rounded-md bg-neutral-900 px-3 text-sm font-medium text-white"
-                      onClick={() =>
-                        act(
-                          booking,
-                          "hold",
-                          "Hold a " + booking.model + " for " + booking.reference + "? It stays unpaid until you confirm the full amount.",
-                          { deliveryFee: fees[booking.id] || "" },
-                        )
-                      }
+                {teamNotice && <p className="mt-2 text-sm font-bold text-[#0d5a2a]">{teamNotice}</p>}
+                <button type="submit" disabled={addingMember} className={btnDark + " mt-3"}>
+                  {addingMember ? "Adding…" : "Add team member"}
+                </button>
+              </div>
+            </form>
+          </section>
+        )}
+
+        {/* Overview */}
+        <div className="mb-3">{sectionHead("overview", "Overview", "md")}</div>
+        {open.overview && (
+          <>
+            <section className="grid gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(230px,1fr))]">
+              {tiles.map((tile) => (
+                <div key={tile.label} className={card + " border-t-4 px-[18px] py-4"} style={{ borderTopColor: tile.accent }}>
+                  <div className="text-[13px] text-[#595959]">{tile.label}</div>
+                  <div className="mb-0.5 mt-1 text-[32px] font-bold tracking-[-0.02em]">{tile.value}</div>
+                  <div className="text-[13px] text-[#3f3f3f]">{tile.note}</div>
+                </div>
+              ))}
+            </section>
+            <div className={card + " mt-3.5 px-5 py-[18px]"}>
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <strong className="text-lg">Today</strong>
+                <span className="text-[13px] text-[#595959]">Today, {short(today)} · select a booking to open its details</span>
+              </div>
+              <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
+                {todayGroups.map((group) => (
+                  <div key={group.title} className="min-w-0 rounded-[10px] bg-[#f5f5f3] px-3.5 py-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <strong className="text-sm">{group.title}</strong>
+                      <span className="inline-grid h-6 min-w-[24px] place-items-center rounded-xl bg-[#171717] px-2 text-xs font-bold text-white">
+                        {group.items.length}
+                      </span>
+                    </div>
+                    {group.items.length === 0 && <div className="py-1.5 text-[13px] text-[#595959]">{group.empty}</div>}
+                    <div className="grid gap-2">
+                      {group.items.map((booking) => {
+                        const vehicle = booking.vehicleId ? fleetById[booking.vehicleId] : null;
+                        return (
+                          <button
+                            key={booking.id}
+                            type="button"
+                            onClick={() => pick(booking.id)}
+                            className="block w-full cursor-pointer rounded-lg border border-l-4 border-[#e5e5e5] bg-white px-3 py-2.5 text-left text-[13px] leading-[1.45] text-[#171717] hover:bg-[#fafafa]"
+                            style={{ borderLeftColor: group.accent }}
+                          >
+                            <span className="flex justify-between gap-2">
+                              <strong className="text-sm">{booking.customerName}</strong>
+                              <strong>{group.time(booking)}</strong>
+                            </span>
+                            <span className="block">{vehicle ? vehicle.plate + " " + vehicle.model : booking.model}</span>
+                            <span className="block text-[#595959]">
+                              {booking.phone} · {booking.location} · {ksh(booking.total)}
+                            </span>
+                            <span className="mt-1 inline-block">
+                              <ChipView chip={chipFor(booking, today)} />
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Booking calendar */}
+        <section className={card + " mt-[22px] p-[22px]"}>
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-x-7 gap-y-3.5">
+            <div>
+              {sectionHead("calendar", "Booking calendar")}
+              <p className="mt-1 max-w-[760px] text-sm text-[#595959]">
+                Four weeks at a time. Use Earlier and Later to see past and future bookings. Vehicles with nothing booked in
+                the period shown are hidden until you choose to show them. Select a booking to see its details.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-x-5 gap-y-2.5">
+              <Stepper
+                label="Prep before hire"
+                value={before}
+                onLess={() => setBefore((v) => Math.max(0, v - 1))}
+                onMore={() => setBefore((v) => Math.min(3, v + 1))}
+              />
+              <Stepper
+                label="Clean and service after hire"
+                value={after}
+                onLess={() => setAfter((v) => Math.max(0, v - 1))}
+                onMore={() => setAfter((v) => Math.min(3, v + 1))}
+              />
+            </div>
+          </div>
+
+          {open.calendar && (
+            <>
+              <div className="mb-3.5 flex flex-wrap items-center gap-2">
+                <button type="button" className={btnLight + " rounded-full"} onClick={() => setOffset((v) => v - 7)}>
+                  ‹ Earlier
+                </button>
+                <button type="button" className={btnLight + " rounded-full"} disabled={offset === 0} onClick={() => setOffset(0)}>
+                  Today
+                </button>
+                <button type="button" className={btnLight + " rounded-full"} onClick={() => setOffset((v) => v + 7)}>
+                  Later ›
+                </button>
+                <strong className="ml-1.5 text-sm">{range(first, lastCol)}</strong>
+              </div>
+              <div className="mb-3.5">
+                <input
+                  type="text"
+                  aria-label="Search vehicles, plates or customers"
+                  value={calQuery}
+                  onChange={(e) => setCalQuery(e.target.value)}
+                  placeholder="Search vehicles, plates or customers"
+                  className={search}
+                />
+              </div>
+              <div className="mb-3 flex flex-wrap gap-2">
+                {TYPES.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-pressed={type === item.id}
+                    onClick={() => setType(item.id)}
+                    className={pill + (type === item.id ? " bg-[#171717] text-white" : " bg-white text-[#171717]")}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div className="mb-3 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  aria-pressed={!hideIdle}
+                  onClick={() => setHideIdle((v) => !v)}
+                  className={pill + " bg-white text-[#171717]"}
+                >
+                  {hideIdle ? "Show idle vehicles" : "Hide idle vehicles"}
+                </button>
+                <span className="text-[13px] text-[#595959]">
+                  {hideIdle && idleCount > 0
+                    ? plural(idleCount, "vehicle") + " with nothing booked in this period " + (idleCount === 1 ? "is" : "are") + " hidden."
+                    : "Showing every vehicle in this group."}
+                </span>
+              </div>
+              <div className="mb-3 flex flex-wrap gap-x-[18px] gap-y-2 text-[13px]">
+                <Legend bg={PAID.bg} h={16} label="Hire, paid in full" />
+                <Legend bg={AWAIT.bg} h={16} label="Hire, awaiting payment" />
+                <Legend bg={BUFFER} h={8} label="Prep before / clean and service after" />
+              </div>
+              {calRows.length === 0 && (
+                <p className="mb-3 text-sm text-[#595959]">
+                  {calQuery.trim()
+                    ? "Nothing matches your search."
+                    : "No vehicles in this group have a hire in the period shown."}
+                </p>
+              )}
+              <div className="overflow-x-auto">
+                <div className="min-w-[980px] overflow-hidden rounded-lg border border-[#dadce0]">
+                  <div className="grid border-b border-[#dadce0] bg-white" style={{ gridTemplateColumns: "200px minmax(0, 1fr)" }}>
+                    <div className="self-end px-2.5 pb-2 text-[13px] font-bold">Vehicle</div>
+                    <div className="grid" style={{ gridTemplateColumns: "repeat(" + WIN + ", minmax(0, 1fr))" }}>
+                      {calDays.map((day) => (
+                        <div key={day.n} className="pb-2 pt-1.5 text-center leading-tight">
+                          <span className="block min-h-[15px] text-xs text-[#70757a]">{day.mon}</span>
+                          <span className="block text-xs text-[#70757a]">{day.dow}</span>
+                          <strong
+                            className={
+                              "mt-0.5 inline-grid h-7 w-7 place-items-center rounded-full text-[13px] " +
+                              (day.today ? "bg-[#1a73e8] text-white" : "")
+                            }
+                          >
+                            {day.num}
+                          </strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {calRows.map(({ vehicle, mine }) => (
+                    <div
+                      key={vehicle.id}
+                      className="grid border-b border-[#dadce0] bg-white last:border-b-0"
+                      style={{ gridTemplateColumns: "200px minmax(0, 1fr)" }}
                     >
-                      Hold the vehicle
-                    </button>
-                  )}
-                  {booking.status === "quote" && (
-                    <button
-                      type="button"
-                      className="h-10 rounded-md bg-green-700 px-3 text-sm font-medium text-white"
-                      onClick={() =>
-                        act(
-                          booking,
-                          "settle",
-                          "Confirm that the full payment for " + booking.reference + " has arrived, and hold a " + booking.model + "?",
-                          { deliveryFee: fees[booking.id] || "" },
-                        )
-                      }
-                    >
-                      Confirm payment received
-                    </button>
-                  )}
-                  {booking.status === "quote" && (
-                    <button
-                      type="button"
-                      className="h-10 rounded-md border border-neutral-300 px-3 text-sm"
-                      onClick={() => act(booking, "dismiss", "Reject " + booking.reference + "? The vehicle will not be held.")}
-                    >
-                      Reject request
-                    </button>
-                  )}
-                  {booking.status === "pending" && (
-                    <button
-                      type="button"
-                      className="h-10 rounded-md bg-green-700 px-3 text-sm font-medium text-white"
-                      onClick={() => act(booking, "confirm", "Confirm that the full payment for " + booking.reference + " has arrived?")}
-                    >
-                      Confirm payment received
-                    </button>
-                  )}
-                  {booking.status === "pending" && (
-                    <button
-                      type="button"
-                      className="h-10 rounded-md border border-neutral-300 px-3 text-sm"
-                      onClick={() => act(booking, "release", "Release the hold on " + (booking.plate || booking.model) + "?")}
-                    >
-                      Release hold
-                    </button>
-                  )}
-                  {booking.status === "confirmed" && (
-                    <button
-                      type="button"
-                      className="h-10 rounded-md border border-neutral-300 px-3 text-sm"
-                      onClick={() => act(booking, "cancel", "Cancel " + booking.reference + " and free the vehicle?")}
-                    >
-                      Cancel booking
-                    </button>
-                  )}
+                      <div className="flex flex-col justify-center border-r border-[#dadce0] px-2.5 py-1.5 text-sm leading-tight">
+                        <strong>{vehicle.model}</strong>
+                        <span className="text-xs text-[#595959]">{vehicle.plate}</span>
+                      </div>
+                      <div
+                        className="grid py-1.5"
+                        style={{
+                          gridTemplateColumns: "repeat(" + WIN + ", minmax(0, 1fr))",
+                          gridTemplateRows: "30px 8px",
+                          rowGap: "4px",
+                          backgroundImage:
+                            "linear-gradient(to right, #eef0f2 1px, transparent 1px)" +
+                            (T >= first && T <= lastCol ? ", linear-gradient(rgba(26,115,232,0.08), rgba(26,115,232,0.08))" : ""),
+                          backgroundSize:
+                            "calc(100% / " + WIN + ") 100%" + (T >= first && T <= lastCol ? ", calc(100% / " + WIN + ") 100%" : ""),
+                          backgroundPosition: "0 0" + (T >= first && T <= lastCol ? ", " + ((T - first) / (WIN - 1)) * 100 + "% 0" : ""),
+                          backgroundRepeat: "repeat-x" + (T >= first && T <= lastCol ? ", no-repeat" : ""),
+                        }}
+                      >
+                        {mine.flatMap((booking) => {
+                          const start = num(booking.pickup);
+                          const end = num(lastHireDay(booking.pickup, booking.returnOn));
+                          const paid = booking.status === "confirmed";
+                          const pal = paid ? PAID : AWAIT;
+                          const parts: React.ReactNode[] = [];
+                          const hire = col(start, end);
+                          if (hire) {
+                            parts.push(
+                              <div key={booking.id + "h"} className="min-w-0 px-0.5" style={{ gridColumn: hire, gridRow: 1 }}>
+                                <button
+                                  type="button"
+                                  onClick={() => pick(booking.id)}
+                                  title={
+                                    booking.customerName +
+                                    "\n" +
+                                    vehicle.plate +
+                                    " " +
+                                    vehicle.model +
+                                    "\nPick-up: " +
+                                    short(booking.pickup) +
+                                    ", " +
+                                    booking.pickTime +
+                                    " · " +
+                                    booking.location +
+                                    "\nReturn: " +
+                                    short(booking.returnOn) +
+                                    ", " +
+                                    booking.retTime +
+                                    "\n" +
+                                    booking.phone +
+                                    "\n" +
+                                    ksh(booking.total) +
+                                    " · " +
+                                    chipFor(booking, today).label
+                                  }
+                                  className="block h-[30px] w-full cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap rounded-md border-0 px-2 text-left text-[13px] font-bold leading-[30px]"
+                                  style={{
+                                    background: pal.bg,
+                                    color: pal.fg,
+                                    boxShadow: selectedId === booking.id ? "0 0 0 2px #1a73e8" : "none",
+                                  }}
+                                >
+                                  {booking.customerName}
+                                  {paid ? "" : " · unpaid"}
+                                </button>
+                              </div>,
+                            );
+                          }
+                          const prep = before > 0 ? col(start - before, start - 1) : null;
+                          if (prep) {
+                            parts.push(
+                              <div
+                                key={booking.id + "p"}
+                                title={"Prep before hire for " + booking.customerName + ", " + range(start - before, start - 1)}
+                                className="mx-0.5 h-2 min-w-0 rounded"
+                                style={{ gridColumn: prep, gridRow: 2, background: BUFFER }}
+                              />,
+                            );
+                          }
+                          const clean = after > 0 ? col(end + 1, end + after) : null;
+                          if (clean) {
+                            parts.push(
+                              <div
+                                key={booking.id + "c"}
+                                title={"Clean and service after " + booking.customerName + ", " + range(end + 1, end + after)}
+                                className="mx-0.5 h-2 min-w-0 rounded"
+                                style={{ gridColumn: clean, gridRow: 2, background: BUFFER }}
+                              />,
+                            );
+                          }
+                          return parts;
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
+              {quotes.length > 0 && (
+                <div className="mt-4 rounded-[10px] bg-[#f5f5f3] px-3.5 py-3">
+                  <strong className="text-sm">Quotes not on the calendar ({quotes.length})</strong>
+                  <p className="text-[13px] text-[#595959]">
+                    These requests do not hold a vehicle until you set the delivery charge and hold it.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {quotes.map((booking) => (
+                      <button key={booking.id} type="button" onClick={() => pick(booking.id)} className={btnLight}>
+                        {booking.reference} · {booking.customerName} · {booking.model} · {short(booking.pickup)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+
+        {/* Booking detail */}
+        {selected && (
+          <section id="booking-detail" className={card + " mt-[22px] scroll-mt-28 p-[22px]"}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-[13px] font-bold uppercase tracking-[2px] text-[#595959]">Booking {selected.reference}</div>
+                <h2 className="mt-1.5 text-[28px] font-bold tracking-[-0.02em]">{selected.customerName}</h2>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <ChipView chip={chipFor(selected, today)} />
+                <button type="button" aria-expanded={detailOpen} onClick={() => setDetailOpen((v) => !v)} className={btnLight + " rounded-full"}>
+                  {detailOpen ? "Hide details ▲" : "Show details ▼"}
+                </button>
+                <button type="button" onClick={() => setSelectedId("")} className={btnLight + " rounded-full"}>
+                  Close
+                </button>
+              </div>
+            </div>
+            {!detailOpen && (
+              <p className="mt-2 text-sm text-[#595959]">
+                {selected.model} · {short(selected.pickup)} to {short(selected.returnOn)} · {ksh(selected.total)}
+              </p>
             )}
-          </article>
-        ))}
+            {detailOpen && (
+              <div className="mt-4 grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(330px,100%),1fr))]">
+                <DetailBox title="Customer">
+                  <Row label="Name">
+                    <strong>{selected.customerName}</strong>
+                  </Row>
+                  <Row label="Phone">
+                    <a href={"tel:" + selected.phone.replace(/\s/g, "")} className="underline">
+                      {selected.phone}
+                    </a>
+                  </Row>
+                  <Row label="Email">
+                    <a href={"mailto:" + selected.email} className="break-all underline">
+                      {selected.email}
+                    </a>
+                  </Row>
+                  <Row label="Booked">{formatDay(selected.createdAt.slice(0, 10))}</Row>
+                </DetailBox>
+
+                <DetailBox title="Hire">
+                  <Row label="Vehicle">
+                    <strong>{selected.plate ? selected.plate + " " + selected.model : selected.model + " (not assigned yet)"}</strong>
+                  </Row>
+                  <Row label="Pick-up">
+                    {short(selected.pickup)}, {selected.pickTime}
+                    <br />
+                    <span className="text-[#595959]">{selected.location}</span>
+                  </Row>
+                  <Row label="Return">
+                    {short(selected.returnOn)}, {selected.retTime}
+                  </Row>
+                  <Row label="Length">{plural(selected.days, "day")}</Row>
+                  <Row label="Delivery">
+                    {selected.deliverySummary}
+                    {selected.deliveryDetail && <span className="block whitespace-pre-line text-[#595959]">{selected.deliveryDetail}</span>}
+                  </Row>
+                  {selected.ooh && <Row label="Out of hours">{selected.oohNote || "No note"}</Row>}
+                </DetailBox>
+
+                <DetailBox title="Payment">
+                  <Row label="Hire">{ksh(selected.hireTotal)}</Row>
+                  {selected.insuranceTotal > 0 && <Row label="Damage cover">{ksh(selected.insuranceTotal)}</Row>}
+                  <Row label="Delivery">
+                    {selected.deliveryManual || selected.deliveryFee === null
+                      ? "To be set"
+                      : selected.deliveryFee
+                        ? ksh(selected.deliveryFee)
+                        : "None"}
+                  </Row>
+                  <Row label={selected.status === "confirmed" ? "Paid in full" : "Due in full"}>
+                    <strong>
+                      {ksh(selected.total)}
+                      {selected.deliveryManual ? " plus delivery" : ""}
+                    </strong>
+                  </Row>
+                  <Row label="M-Pesa code">{selected.mpesaCode || "None sent yet"}</Row>
+                  {selected.staffNote && <Row label="Note">{selected.staffNote}</Row>}
+
+                  {(selected.status === "pending" || selected.status === "confirmed" || selected.status === "quote") && (
+                    <div className="mt-3 space-y-2.5">
+                      <label className="block text-sm">
+                        <span className="mb-1 block text-[13px] text-[#595959]">Note for the file (optional)</span>
+                        <input
+                          value={notes[selected.id] || ""}
+                          onChange={(e) => setNotes((cur) => ({ ...cur, [selected.id]: e.target.value }))}
+                          className={input}
+                        />
+                      </label>
+                      {selected.status === "quote" && needsDeliveryPrice(selected) && (
+                        <label className="block text-sm">
+                          <span className="mb-1 block text-[13px] text-[#595959]">Delivery charge (KSh). Use 0 if there is none.</span>
+                          <input
+                            inputMode="numeric"
+                            value={fees[selected.id] || ""}
+                            onChange={(e) => setFees((cur) => ({ ...cur, [selected.id]: e.target.value }))}
+                            className={input}
+                          />
+                        </label>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        {selected.status === "pending" && (
+                          <button
+                            type="button"
+                            className={btnGreen}
+                            onClick={() => act(selected, "confirm", "Confirm that the full payment for " + selected.reference + " has arrived?")}
+                          >
+                            Confirm payment received
+                          </button>
+                        )}
+                        {selected.status === "pending" && (
+                          <button
+                            type="button"
+                            className={btnLight}
+                            onClick={() => act(selected, "release", "Release the hold on " + (selected.plate || selected.model) + "?")}
+                          >
+                            Release hold
+                          </button>
+                        )}
+                        {selected.status === "confirmed" && (
+                          <button
+                            type="button"
+                            className={btnLight}
+                            onClick={() => act(selected, "cancel", "Cancel " + selected.reference + " and free the vehicle?")}
+                          >
+                            Cancel booking
+                          </button>
+                        )}
+                        {selected.status === "quote" && (
+                          <button
+                            type="button"
+                            className={btnDark}
+                            onClick={() =>
+                              act(
+                                selected,
+                                "hold",
+                                "Hold a " + selected.model + " for " + selected.reference + "? It stays unpaid until you confirm the full amount.",
+                              )
+                            }
+                          >
+                            Hold the vehicle
+                          </button>
+                        )}
+                        {selected.status === "quote" && (
+                          <button
+                            type="button"
+                            className={btnGreen}
+                            onClick={() =>
+                              act(
+                                selected,
+                                "settle",
+                                "Confirm that the full payment for " + selected.reference + " has arrived, and hold a " + selected.model + "?",
+                              )
+                            }
+                          >
+                            Confirm payment received
+                          </button>
+                        )}
+                        {selected.status === "quote" && (
+                          <button
+                            type="button"
+                            className={btnLight}
+                            onClick={() => act(selected, "dismiss", "Reject " + selected.reference + "? The vehicle will not be held.")}
+                          >
+                            Reject request
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </DetailBox>
+
+                {selected.status !== "quote" && selected.status !== "cancelled" && (
+                  <DetailBox title="Turnaround around this hire">
+                    <div className="grid gap-2.5">
+                      {[
+                        before > 0
+                          ? {
+                              name: "Prep before hire",
+                              when: range(num(selected.pickup) - before, num(selected.pickup) - 1),
+                              color: BUFFER,
+                            }
+                          : null,
+                        { name: "Pick-up", when: short(selected.pickup) + ", " + selected.pickTime, color: "#1a73e8" },
+                        { name: "Return", when: short(selected.returnOn) + ", " + selected.retTime, color: "#188038" },
+                        after > 0
+                          ? {
+                              name: "Clean and service after hire",
+                              when: range(
+                                num(lastHireDay(selected.pickup, selected.returnOn)) + 1,
+                                num(lastHireDay(selected.pickup, selected.returnOn)) + after,
+                              ),
+                              color: BUFFER,
+                            }
+                          : null,
+                      ]
+                        .filter((step): step is { name: string; when: string; color: string } => Boolean(step))
+                        .map((step) => (
+                          <div key={step.name} className="flex items-start gap-2.5 text-sm">
+                            <span className="mt-1.5 inline-block h-2.5 w-2.5 flex-none rounded-full" style={{ background: step.color }} />
+                            <span>
+                              <strong>{step.name}</strong>
+                              <br />
+                              <span className="text-[#595959]">{step.when}</span>
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  </DetailBox>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Bookings and payment status */}
+        <section className={card + " mt-[22px] p-[22px]"}>
+          <div className="mb-3.5 flex flex-wrap items-end justify-between gap-x-7 gap-y-3">
+            <div>
+              {sectionHead("table", "Bookings and payment status")}
+              <p className="mt-1 text-sm text-[#595959]">
+                Every booking is paid in full. A held booking waits for the payment until you confirm it or release the hold.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {TABLE_FILTERS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-pressed={tableFilter === item.id}
+                  onClick={() => setTableFilter(item.id)}
+                  className={pill + (tableFilter === item.id ? " bg-[#171717] text-white" : " bg-white text-[#171717]")}
+                >
+                  {item.label} ({tableCounts[item.id]})
+                </button>
+              ))}
+            </div>
+          </div>
+          {open.table && (
+            <>
+              <div className="mb-3.5">
+                <input
+                  type="text"
+                  aria-label="Search customer, vehicle or status"
+                  value={tableQuery}
+                  onChange={(e) => setTableQuery(e.target.value)}
+                  placeholder="Search customer, vehicle or status"
+                  className={search}
+                />
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[860px] border-collapse text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-[#dadce0] text-[13px] text-[#595959]">
+                      <th className="px-2 py-2 font-semibold">Vehicle</th>
+                      <th className="px-2 py-2 font-semibold">Customer</th>
+                      <th className="px-2 py-2 font-semibold">Collection</th>
+                      <th className="px-2 py-2 font-semibold">Total due</th>
+                      <th className="px-2 py-2 font-semibold">M-Pesa code</th>
+                      <th className="px-2 py-2 font-semibold">Status</th>
+                      <th className="px-2 py-2 font-semibold">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tableRows.map((booking) => (
+                      <tr key={booking.id} className="border-b border-[#eef0f2] align-top">
+                        <td className="px-2 py-2.5">
+                          <strong>{booking.plate ? booking.plate + " " : ""}{booking.model}</strong>
+                          <span className="block text-xs text-[#595959]">{booking.reference}</span>
+                        </td>
+                        <td className="px-2 py-2.5">
+                          {booking.customerName}
+                          <span className="block text-xs text-[#595959]">{booking.phone}</span>
+                        </td>
+                        <td className="px-2 py-2.5">
+                          {short(booking.pickup)}, {booking.pickTime}
+                          <span className="block text-xs text-[#595959]">{booking.location}</span>
+                        </td>
+                        <td className="px-2 py-2.5 font-bold">
+                          {ksh(booking.total)}
+                          {booking.deliveryManual ? " + delivery" : ""}
+                        </td>
+                        <td className="px-2 py-2.5">{booking.mpesaCode || <span className="text-[#595959]">—</span>}</td>
+                        <td className="px-2 py-2.5">
+                          <ChipView chip={chipFor(booking, today)} />
+                        </td>
+                        <td className="px-2 py-2.5">
+                          <div className="flex flex-wrap gap-1.5">
+                            <button type="button" className={btnLight + " min-h-[34px] px-3"} onClick={() => pick(booking.id)}>
+                              Details
+                            </button>
+                            {booking.status === "pending" && (
+                              <button
+                                type="button"
+                                className={btnGreen + " min-h-[34px] px-3"}
+                                onClick={() => act(booking, "confirm", "Confirm that the full payment for " + booking.reference + " has arrived?")}
+                              >
+                                Confirm paid
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {tableRows.length === 0 && (
+                <p className="mt-3 text-sm text-[#595959]">{tableQuery.trim() ? "Nothing matches your search." : "Nothing in this list."}</p>
+              )}
+            </>
+          )}
+        </section>
+
+        {/* Payment codes */}
+        <section className={card + " mt-[22px] p-[22px]"}>
+          <div className="mb-3.5 flex flex-wrap items-end justify-between gap-x-7 gap-y-3">
+            <div>
+              {sectionHead("payments", "Payments")}
+              <p className="mt-1 max-w-[760px] text-sm text-[#595959]">
+                M-Pesa codes sent by customers. A code shows as To check until you find the payment on the statement and
+                confirm the booking. Nothing is charged on the website.
+              </p>
+            </div>
+            <button type="button" onClick={downloadCsv} className={btnLight}>
+              Download CSV
+            </button>
+          </div>
+          {open.payments && (
+            <>
+              <div className="mb-4 grid gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(200px,1fr))]">
+                <MiniTile
+                  label="Codes to check"
+                  value={String(codesToCheck.length)}
+                  note={ksh(codesToCheck.reduce((sum, b) => sum + b.total, 0)) + " if they all match"}
+                />
+                <MiniTile label="Paid in full, current and upcoming" value={ksh(paidTotal)} note={plural(paidCurrent.length, "booking")} />
+                <MiniTile label="Still to collect" value={ksh(awaitingTotal)} note={plural(awaiting.length, "booking") + " held"} />
+              </div>
+              <div className="mb-3.5">
+                <label htmlFor="paySearch" className="mb-1.5 block text-[13px] text-[#595959]">
+                  Search by name, phone, M-Pesa code or booking
+                </label>
+                <input
+                  id="paySearch"
+                  type="text"
+                  value={payQuery}
+                  onChange={(e) => setPayQuery(e.target.value)}
+                  placeholder="For example QJK3X7AB12 or +254 700"
+                  className={search + " max-w-[420px]"}
+                />
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-[#dadce0] text-[13px] text-[#595959]">
+                      <th className="px-2 py-2 font-semibold">Customer</th>
+                      <th className="px-2 py-2 font-semibold">Booking</th>
+                      <th className="px-2 py-2 font-semibold">M-Pesa code</th>
+                      <th className="px-2 py-2 font-semibold">Amount due</th>
+                      <th className="px-2 py-2 font-semibold">Status</th>
+                      <th className="px-2 py-2 font-semibold">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payRows.map((booking) => (
+                      <tr key={booking.id} className="border-b border-[#eef0f2] align-top">
+                        <td className="px-2 py-2.5">
+                          <strong>{booking.customerName}</strong>
+                          <span className="block text-xs text-[#595959]">{booking.phone}</span>
+                        </td>
+                        <td className="px-2 py-2.5">
+                          <strong>{booking.reference}</strong>
+                          <span className="block text-xs text-[#595959]">
+                            {booking.model} · {short(booking.pickup)}
+                          </span>
+                        </td>
+                        <td className="px-2 py-2.5 font-bold">{booking.mpesaCode}</td>
+                        <td className="px-2 py-2.5 font-bold">{ksh(booking.total)}</td>
+                        <td className="px-2 py-2.5">
+                          <ChipView
+                            chip={
+                              booking.status === "confirmed"
+                                ? { ...CHIP_PAID, label: "Confirmed" }
+                                : { ...CHIP_CODE, label: "To check" }
+                            }
+                          />
+                        </td>
+                        <td className="px-2 py-2.5">
+                          <div className="flex flex-wrap gap-1.5">
+                            <button type="button" className={btnLight + " min-h-[34px] px-3"} onClick={() => pick(booking.id)}>
+                              Open
+                            </button>
+                            {booking.status === "pending" && (
+                              <button
+                                type="button"
+                                className={btnGreen + " min-h-[34px] px-3"}
+                                onClick={() =>
+                                  act(
+                                    booking,
+                                    "confirm",
+                                    "Confirm that M-Pesa code " + booking.mpesaCode + " for " + ksh(booking.total) + " is on the statement?",
+                                  )
+                                }
+                              >
+                                Confirm payment
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {payRows.length === 0 && (
+                <p className="mt-3 text-sm text-[#595959]">
+                  {payQuery.trim() ? "No payments match your search." : "No M-Pesa codes have been sent yet."}
+                </p>
+              )}
+            </>
+          )}
+        </section>
+
+        <section className="mt-[22px] grid gap-[22px] [grid-template-columns:repeat(auto-fit,minmax(min(420px,100%),1fr))]">
+          {/* Paid vs awaiting */}
+          <div className={card + " p-[22px]"}>
+            {sectionHead("compare", "Awaiting payment vs paid in full")}
+            <p className="mb-3.5 mt-1 text-sm text-[#595959]">Current and upcoming hires, by whether the full amount has arrived.</p>
+            {open.compare && (
+              <>
+                <div className="h-3.5 overflow-hidden rounded-full bg-[#feefc3]">
+                  <div className="h-full bg-[#81c995]" style={{ width: collectedPct + "%" }} />
+                </div>
+                <div className="mt-2 flex flex-wrap justify-between gap-2 text-[13px]">
+                  <span>
+                    Paid {ksh(paidTotal)} ({collectedPct}%)
+                  </span>
+                  <span>Still to collect {ksh(awaitingTotal)}</span>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-[10px] border-l-4 border-[#f9d46b] bg-[#f5f5f3] px-3.5 py-3">
+                    <div className="text-[13px] font-bold">Awaiting payment</div>
+                    <div className="text-[22px] font-bold">{plural(awaiting.length, "booking")}</div>
+                    <div className="text-[13px] text-[#3f3f3f]">
+                      Due in full <strong>{ksh(awaitingTotal)}</strong>
+                      <br />
+                      {chase.length ? plural(chase.length, "booking") + " already at pick-up" : "None at pick-up yet"}
+                    </div>
+                  </div>
+                  <div className="rounded-[10px] border-l-4 border-[#81c995] bg-[#f5f5f3] px-3.5 py-3">
+                    <div className="text-[13px] font-bold">Paid in full</div>
+                    <div className="text-[22px] font-bold">{plural(paidCurrent.length, "booking")}</div>
+                    <div className="text-[13px] text-[#3f3f3f]">
+                      Collected <strong>{ksh(paidTotal)}</strong>
+                      <br />
+                      Nothing due
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Cleaning schedule */}
+          <div className={card + " p-[22px]"}>
+            {sectionHead("schedule", "Cleaning and workshop schedule")}
+            <p className="mb-3.5 mt-1 text-sm text-[#595959]">
+              Next two weeks, in date order. Change the turnaround days on the calendar to see how it shifts.
+            </p>
+            {open.schedule && (
+              <>
+                <div className="mb-3">
+                  <input
+                    type="text"
+                    aria-label="Search vehicle or task"
+                    value={scheduleQuery}
+                    onChange={(e) => setScheduleQuery(e.target.value)}
+                    placeholder="Search vehicle or task"
+                    className={search}
+                  />
+                </div>
+                <div className="grid max-h-[420px] gap-2 overflow-y-auto pr-1">
+                  {schedule.map((item, index) => (
+                    <div key={index} className="flex items-start gap-2.5 rounded-lg bg-[#f5f5f3] px-3 py-2.5 text-sm">
+                      <span className="mt-1.5 inline-block h-2.5 w-2.5 flex-none rounded-full" style={{ background: BUFFER }} />
+                      <span>
+                        <strong>{item.name}</strong> · {item.kind}
+                        <br />
+                        <span className="text-[13px] text-[#595959]">
+                          {range(item.s, item.e)} · {item.detail}
+                        </span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {schedule.length === 0 && (
+                  <p className="text-sm text-[#595959]">
+                    {scheduleQuery.trim() ? "Nothing matches your search." : "No prep or cleaning due in the next two weeks."}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function DeskHeader({ today, children }: { today: string; children?: React.ReactNode }) {
+  return (
+    <header className="flex flex-wrap items-center justify-between gap-x-7 gap-y-3 bg-[#f5f5f3] px-[5.5%] py-3.5">
+      <div className="flex items-center gap-3.5">
+        <div className="flex flex-col leading-tight">
+          <strong className="text-xl font-semibold tracking-[-0.01em]">Chequered Flag</strong>
+          <span className="mt-[3px] text-xs tracking-[3px] text-[#595959]">FLEET DASHBOARD · STAFF VIEW</span>
+        </div>
       </div>
-      </>
-      )}
-    </main>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[15px]">
+        <span className="font-semibold">Today, {short(today)}</span>
+        {children}
+      </div>
+    </header>
+  );
+}
+
+function Stepper({ label, value, onLess, onMore }: { label: string; value: number; onLess: () => void; onMore: () => void }) {
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      <span>{label}</span>
+      <button
+        type="button"
+        aria-label={"One day less: " + label}
+        onClick={onLess}
+        className="h-9 w-9 cursor-pointer rounded-full border border-[#dadce0] bg-white text-lg"
+      >
+        −
+      </button>
+      <strong className="min-w-[54px] text-center">{plural(value, "day")}</strong>
+      <button
+        type="button"
+        aria-label={"One day more: " + label}
+        onClick={onMore}
+        className="h-9 w-9 cursor-pointer rounded-full border border-[#dadce0] bg-white text-lg"
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+function Legend({ bg, h, label }: { bg: string; h: number; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className="inline-block w-[22px] rounded" style={{ height: h, background: bg }} />
+      {label}
+    </span>
+  );
+}
+
+function MiniTile({ label, value, note }: { label: string; value: string; note: string }) {
+  return (
+    <div className="rounded-[10px] bg-[#f5f5f3] px-4 py-3">
+      <div className="text-[13px] text-[#595959]">{label}</div>
+      <div className="mt-0.5 text-[22px] font-bold tracking-[-0.02em]">{value}</div>
+      <div className="text-[13px] text-[#3f3f3f]">{note}</div>
+    </div>
+  );
+}
+
+function DetailBox({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-[10px] bg-[#f5f5f3] px-4 py-3.5">
+      <div className="mb-2 text-[13px] font-bold uppercase tracking-[1.5px] text-[#595959]">{title}</div>
+      <div className="grid gap-1.5">{children}</div>
+    </div>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[110px_minmax(0,1fr)] gap-2 text-sm">
+      <span className="text-[#595959]">{label}</span>
+      <span className="min-w-0">{children}</span>
+    </div>
   );
 }

@@ -173,7 +173,7 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
           src="/images/workshop/land-cruiser-79.jpg"
           alt="A green Land Cruiser safari vehicle in the Chequered Flag yard"
           fetchPriority="high"
-          className="block h-[clamp(170px,22vw,300px)] w-full object-cover object-[center_62%]"
+          className="mx-auto mt-6 block h-[clamp(200px,32vw,420px)] w-[89%] max-w-[1022px] rounded-xl object-cover object-[center_58%]"
         />
         <div className="mx-auto mt-[34px] flex w-[89%] max-w-[1180px] flex-wrap items-start gap-9">
           <div className="min-w-0 flex-[1_1_380px] pt-2">

@@ -6,21 +6,60 @@ import {
   addDays,
   assessBooking,
   assessmentError,
+  dateProblem,
   dayNumber,
+  DELIVERY_LABELS,
+  exclusiveEnd,
   formatDay,
-  formatDayShort,
   HOURS,
   ksh,
   outOfHours,
   PICKUP_LOCATIONS,
+  PLACES,
+  PRICING,
   quoteDelivery,
   todayNairobi,
   type AvailabilityResponse,
+  type BookingInput,
+  type DeliveryMode,
   type PublicBookingResult,
   type PublicModelCard,
 } from "../lib/hire";
 
+// Layout and wording follow Homer's vehicle hire design (V1.5).
+// Payment rules follow the booking system: the full amount is due, nothing is charged on this page,
+// and staff confirm once they have checked the M-Pesa or bank payment.
+
 const STORED = "cfHireRequest";
+
+// Photos from Homer's design, one per model. They are illustrative until real photos replace them.
+const PHOTOS: Record<string, string> = {
+  "toyota-axio": "/images/vehicle-hire/models/toyota-axio.webp",
+  "toyota-fielder": "/images/vehicle-hire/models/toyota-fielder.webp",
+  "toyota-premio": "/images/vehicle-hire/models/toyota-premio.webp",
+  "toyota-nze": "/images/vehicle-hire/models/toyota-nze.webp",
+  "nissan-bluebird": "/images/vehicle-hire/models/nissan-bluebird.webp",
+  "nissan-x-trail": "/images/vehicle-hire/models/nissan-x-trail.webp",
+  "toyota-prado": "/images/vehicle-hire/models/toyota-prado.webp",
+  "toyota-prado-3-door": "/images/vehicle-hire/models/toyota-prado-3-door.webp",
+  "toyota-land-cruiser": "/images/vehicle-hire/models/toyota-land-cruiser.webp",
+};
+
+const field =
+  "h-[46px] w-full min-w-0 border border-[#c8c8c8] bg-white px-3 text-[15px] text-[#171717] rounded-none";
+const fieldBox = "h-[46px] min-w-0 border border-[#c8c8c8] bg-white text-[15px] text-[#171717] rounded-none";
+const roundField =
+  "h-[46px] w-full min-w-0 rounded-lg border border-[#c8c8c8] bg-white px-3 text-[15px] text-[#171717]";
+const area =
+  "w-full rounded-lg border border-[#c8c8c8] bg-white px-3 py-2.5 font-[inherit] text-[15px] text-[#171717]";
+const label = "mb-1.5 block text-[13px] text-[#595959]";
+const btnDark =
+  "inline-flex min-h-[46px] cursor-pointer items-center justify-center rounded-lg border-0 bg-[#171717] px-[22px] text-[13px] font-bold uppercase tracking-[1px] text-white hover:bg-[#2b2b2b] disabled:cursor-not-allowed disabled:opacity-50";
+const btnLight =
+  "inline-flex min-h-[46px] cursor-pointer items-center justify-center rounded-lg border border-[#171717] bg-white px-5 text-[13px] font-bold text-[#171717] hover:bg-[#f5f5f3] disabled:cursor-not-allowed disabled:opacity-40";
+const eyebrow = "text-[13px] font-bold uppercase tracking-[3px] text-[#595959]";
+const h2 = "mt-1.5 text-[28px] font-bold leading-tight tracking-[-0.02em] md:text-[34px]";
+const sectionWrap = "mx-auto w-[89%] max-w-[1180px]";
 
 function weekday(iso: string) {
   const n = dayNumber(iso);
@@ -35,8 +74,6 @@ function defaultWindow() {
   return { pickup, returnOn };
 }
 
-const fieldClass = "h-11 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm text-neutral-900";
-
 function plural(days: number) {
   return days + " day" + (days === 1 ? "" : "s");
 }
@@ -50,6 +87,21 @@ function readStored(): PublicBookingResult | null {
   }
 }
 
+function scrollToId(id: string) {
+  window.setTimeout(() => {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 60);
+}
+
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function dayParts(iso: string) {
+  const n = dayNumber(iso);
+  const date = new Date((n ?? 0) * 86400000);
+  return { dow: DOW[date.getUTCDay()], num: date.getUTCDate(), mon: MONTHS[date.getUTCMonth()] };
+}
+
 export default function HireBooking() {
   const today = todayNairobi();
   const initialDates = useState(defaultWindow)[0];
@@ -59,10 +111,15 @@ export default function HireBooking() {
   const [pickTime, setPickTime] = useState("09:00");
   const [retTime, setRetTime] = useState("09:00");
   const [type, setType] = useState("all");
-  const [delivery, setDelivery] = useState<"none" | "deliver" | "both">("none");
+  const [delivery, setDelivery] = useState<DeliveryMode>("none");
   const [address, setAddress] = useState("");
+  const [placeId, setPlaceId] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const directions = "";
+  const [note, setNote] = useState("");
   const [oohNote, setOohNote] = useState("");
   const [selectedId, setSelectedId] = useState("");
+  const [step, setStep] = useState<1 | 2>(1);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -80,19 +137,18 @@ export default function HireBooking() {
   const [laterCode, setLaterCode] = useState("");
   const [codeMessage, setCodeMessage] = useState("");
 
+  const dateError = dateProblem(pickup, returnOn);
+
   useEffect(() => {
     setResult(readStored());
   }, []);
 
   useEffect(() => {
-    if (!selectedId) return;
-    const timer = window.setTimeout(() => {
-      document.getElementById("checkout")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 50);
-    return () => window.clearTimeout(timer);
-  }, [selectedId]);
-
-  useEffect(() => {
+    if (dateError) {
+      setAvailability(null);
+      setLoading(false);
+      return;
+    }
     const params = new URLSearchParams({ pickup, return: returnOn });
     if (calFrom) params.set("from", calFrom);
     const controller = new AbortController();
@@ -113,27 +169,60 @@ export default function HireBooking() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [pickup, returnOn, calFrom, refreshToken]);
+  }, [pickup, returnOn, calFrom, refreshToken, dateError]);
 
   const hours = outOfHours(pickup, returnOn, pickTime, retTime);
-  const deliveryQuote = quoteDelivery({
-    delivery,
-    place: null,
-    address,
-    location,
-    ooh: hours,
-    directions: "",
-    note: "",
-  });
+  // Every delivery stays a quote, as on the live page: staff set the delivery charge and the vehicle is
+  // not held until then. The place list only helps the customer type the address.
+  const deliveryQuote = quoteDelivery({ delivery, place: null, address, location, ooh: hours, directions, note });
   const models = useMemo(() => {
     const list = availability?.models || [];
     return type === "all" ? list : list.filter((model) => model.group === type);
   }, [availability, type]);
-  const selected = models.find((model) => model.id === selectedId) || null;
-  const hireTotal = selected && availability ? availability.days * selected.rate : 0;
-  const insuranceTotal = selected && insure ? availability!.days * selected.addon : 0;
+  const selected = (availability?.models || []).find((model) => model.id === selectedId) || null;
+  const days = availability?.days || 0;
+  const hireTotal = selected ? days * selected.rate : 0;
+  const insuranceTotal = selected && insure ? days * selected.addon : 0;
   const pricedDelivery = deliveryQuote.manual ? 0 : deliveryQuote.fee || 0;
   const total = hireTotal + insuranceTotal + pricedDelivery;
+
+  const suggestions = useMemo(() => {
+    const query = address.trim().toLowerCase();
+    if (query.length < 2 || placeId) return [];
+    return PLACES.filter((item) => (item.name + " " + item.area).toLowerCase().includes(query)).slice(0, 6);
+  }, [address, placeId]);
+
+  function bookingInput(acceptTerms: boolean): Partial<BookingInput> {
+    return {
+      modelId: selectedId,
+      pickup,
+      returnOn,
+      pickTime,
+      retTime,
+      location,
+      delivery,
+      placeId: "",
+      address: delivery === "none" ? "" : address,
+      directions: delivery === "none" ? "" : directions,
+      note: delivery === "none" ? "" : note,
+      insure,
+      name,
+      email,
+      phone,
+      oohNote,
+      mpesaCode: deliveryQuote.manual ? "" : mpesaCode,
+      terms: acceptTerms,
+    };
+  }
+
+  function check(acceptTerms: boolean) {
+    if (!selected) return "Choose a vehicle.";
+    const checked = assessBooking(
+      { id: selected.id, name: selected.name, rate: selected.rate, addon: selected.addon },
+      bookingInput(acceptTerms),
+    );
+    return assessmentError(checked) || (checked.ok ? "" : "Check the booking details.");
+  }
 
   function remember(booking: PublicBookingResult) {
     setResult(booking);
@@ -144,72 +233,48 @@ export default function HireBooking() {
     }
   }
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    if (!selected) return;
+  function chooseVehicle(id: string) {
+    setSelectedId(id);
+    setStep(1);
     setFormError("");
-    const checked = assessBooking(
-      { id: selected.id, name: selected.name, rate: selected.rate, addon: selected.addon },
-      {
-        modelId: selected.id,
-        pickup,
-        returnOn,
-        pickTime,
-        retTime,
-        location,
-        delivery,
-        placeId: "",
-        address,
-        directions: "",
-        note: "",
-        insure,
-        name,
-        email,
-        phone,
-        oohNote,
-        mpesaCode,
-        terms,
-      },
-    );
-    const problem = assessmentError(checked);
-    if (problem || !checked.ok) {
-      setFormError(problem || "Check the booking details.");
+    scrollToId("checkout");
+  }
+
+  function goStep2() {
+    const problem = check(true);
+    if (problem) {
+      setFormError(problem);
       return;
     }
+    setFormError("");
+    setStep(2);
+    scrollToId("checkout");
+  }
+
+  async function submit() {
+    if (!selected) return;
+    const problem = check(terms);
+    if (problem) {
+      setFormError(problem);
+      return;
+    }
+    setFormError("");
     setSubmitting(true);
     try {
       const response = await fetch("/api/hire/bookings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          modelId: selected.id,
-          pickup,
-          returnOn,
-          pickTime,
-          retTime,
-          location,
-          delivery,
-          placeId: "",
-          address,
-          directions: "",
-          note: "",
-          insure,
-          name,
-          email,
-          phone,
-          oohNote,
-          mpesaCode,
-          terms,
-        }),
+        body: JSON.stringify(bookingInput(terms)),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "The booking could not be saved.");
       remember(body);
       setSelectedId("");
+      setStep(1);
       setTerms(false);
       setMpesaCode("");
       setRefreshToken((value) => value + 1);
-      document.getElementById("book")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      scrollToId("checkout");
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "The booking could not be saved.");
     } finally {
@@ -242,347 +307,689 @@ export default function HireBooking() {
     setReturnOn(sameDay ? day : addDays(day, span));
   }
 
+  function bookAnother() {
+    setResult(null);
+    setCodeMessage("");
+    try {
+      sessionStorage.removeItem(STORED);
+    } catch {
+      /* nothing stored */
+    }
+    scrollToId("vehicles");
+  }
+
   const wa = "https://wa.me/" + CONTACT.whatsappE164.replace(/\D/g, "");
+  const tel = "tel:" + CONTACT.phoneE164.replace(/\s/g, "");
+  const summaryLine = availability
+    ? plural(availability.days) + " · " + formatDay(pickup) + " to " + formatDay(returnOn) + " · " + location
+    : "Choose your dates to see availability and totals";
+  const deliveryHelp =
+    delivery === "both"
+      ? "Tell us where to deliver the vehicle and where to collect it at the end."
+      : "Tell us where to deliver the vehicle. You return it to " + location + ".";
+  const showCheckout = Boolean(selected || result);
+  const manual = deliveryQuote.manual;
 
   return (
-    <section id="book" className="scroll-mt-24 border-b border-neutral-200 bg-neutral-50">
-      <div className="mx-auto max-w-6xl px-5 py-14">
-        <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">Find your vehicle</h2>
-        <p className="mt-3 max-w-3xl text-neutral-700">
-          Choose your dates and we will show what is free. The full hire amount is due when you book. We confirm the
-          booking after we have checked the payment. Nothing is taken on this page.
-        </p>
-
-        {result && (
-          <div className="mt-8 rounded-xl border border-neutral-300 bg-white p-6">
-            <h3 className="text-xl font-semibold">{result.manual ? "Request sent" : "Vehicle held"}</h3>
-            <p className="mt-3 text-sm leading-relaxed text-neutral-700">{result.message}</p>
-            <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
-              <div>
-                <dt className="text-neutral-500">Reference</dt>
-                <dd className="text-lg font-semibold">{result.reference}</dd>
+    <>
+      <div className={sectionWrap}>
+        {/* Find your vehicle */}
+        <div
+          id="book"
+          className="scroll-mt-28 border border-[#d9d1b8] bg-white px-5 py-[22px] text-[#171717] shadow-[0_6px_18px_rgba(60,50,20,0.08)] sm:px-6"
+        >
+          <h2 className="mb-4 text-[22px] font-bold tracking-[-0.02em]">Find your vehicle</h2>
+          <div className="grid items-end gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(190px,1fr))]">
+            <div>
+              <label htmlFor="loc" className={label}>
+                Pick-up location
+              </label>
+              <select
+                id="loc"
+                value={location}
+                onChange={(event) => setLocation(event.target.value as (typeof PICKUP_LOCATIONS)[number])}
+                className={field}
+              >
+                {PICKUP_LOCATIONS.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="pdate" className={label}>
+                Pick-up date and time
+              </label>
+              <div className="flex gap-1.5">
+                <input
+                  id="pdate"
+                  type="date"
+                  min={today}
+                  value={pickup}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setCalFrom(null);
+                    setPickup(value);
+                    if (returnOn < value) setReturnOn(value);
+                  }}
+                  className={fieldBox + " flex-[1_1_130px] px-2"}
+                />
+                <select
+                  aria-label="Pick-up time"
+                  value={pickTime}
+                  onChange={(event) => setPickTime(event.target.value)}
+                  className={fieldBox + " w-[84px] flex-none px-1"}
+                >
+                  {HOURS.map((hour) => (
+                    <option key={hour}>{hour}</option>
+                  ))}
+                </select>
               </div>
-              <div>
-                <dt className="text-neutral-500">{result.manual ? "Hire so far" : "Amount due in full"}</dt>
-                <dd className="text-lg font-semibold">{ksh(result.total)}</dd>
+            </div>
+            <div>
+              <label htmlFor="rdate" className={label}>
+                Return date and time
+              </label>
+              <div className="flex gap-1.5">
+                <input
+                  id="rdate"
+                  type="date"
+                  min={pickup || today}
+                  value={returnOn}
+                  onChange={(event) => {
+                    setCalFrom(null);
+                    setReturnOn(event.target.value);
+                  }}
+                  className={fieldBox + " flex-[1_1_130px] px-2"}
+                />
+                <select
+                  aria-label="Return time"
+                  value={retTime}
+                  onChange={(event) => setRetTime(event.target.value)}
+                  className={fieldBox + " w-[84px] flex-none px-1"}
+                >
+                  {HOURS.map((hour) => (
+                    <option key={hour}>{hour}</option>
+                  ))}
+                </select>
               </div>
-              <div>
-                <dt className="text-neutral-500">Vehicle</dt>
-                <dd>{result.model}</dd>
-              </div>
-              <div>
-                <dt className="text-neutral-500">Dates</dt>
-                <dd>
-                  {formatDay(result.pickup)}, {result.pickTime} to {formatDay(result.returnOn)}, {result.retTime}
-                </dd>
-              </div>
-            </dl>
-            <p className="mt-4 text-sm text-neutral-600">{result.summary}</p>
-            {!result.manual && (
-              <form onSubmit={sendCode} className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end">
-                <label className="block flex-1 text-sm">
-                  <span className="mb-1 block text-neutral-600">M-Pesa code, once you have paid</span>
-                  <input value={laterCode} onChange={(event) => setLaterCode(event.target.value)} className={fieldClass} />
-                </label>
-                <button type="submit" className="h-11 rounded-md bg-neutral-900 px-4 text-sm font-medium text-white">
-                  Send code
-                </button>
-              </form>
-            )}
-            {codeMessage && <p className="mt-3 text-sm text-neutral-700">{codeMessage}</p>}
-            <button
-              type="button"
-              className="mt-4 text-sm text-neutral-600 underline"
-              onClick={() => {
-                setResult(null);
-                sessionStorage.removeItem(STORED);
-              }}
-            >
-              Make another booking
+            </div>
+            <div>
+              <label htmlFor="vtype" className={label}>
+                Vehicle type
+              </label>
+              <select id="vtype" value={type} onChange={(event) => setType(event.target.value)} className={field}>
+                <option value="all">All vehicles</option>
+                <option value="4x4">4x4 / SUV</option>
+                <option value="saloon">Saloon</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="deliv" className={label}>
+                Delivery
+              </label>
+              <select
+                id="deliv"
+                value={delivery}
+                onChange={(event) => setDelivery(event.target.value as DeliveryMode)}
+                className={field}
+              >
+                <option value="none">No, I will collect it</option>
+                <option value="deliver">Deliver to me</option>
+                <option value="both">Deliver and collect</option>
+              </select>
+            </div>
+            <button type="button" onClick={() => scrollToId("vehicles")} className={btnDark + " h-[46px] px-5"}>
+              Show available vehicles
             </button>
           </div>
-        )}
 
-        <form className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-3" onSubmit={(event) => event.preventDefault()}>
-          <label className="block text-sm">
-            <span className="mb-1 block text-neutral-600">Pick-up location</span>
-            <select value={location} onChange={(event) => setLocation(event.target.value as (typeof PICKUP_LOCATIONS)[number])} className={fieldClass}>
-              {PICKUP_LOCATIONS.map((item) => (
-                <option key={item}>{item}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-neutral-600">Pick-up date</span>
-            <input
-              type="date"
-              min={today}
-              value={pickup}
-              onChange={(event) => {
-                const value = event.target.value;
-                setCalFrom(null);
-                setPickup(value);
-                if (returnOn < value) setReturnOn(value);
-              }}
-              className={fieldClass}
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-neutral-600">Return date</span>
-            <input
-              type="date"
-              min={pickup || today}
-              value={returnOn}
-              onChange={(event) => {
-                setCalFrom(null);
-                setReturnOn(event.target.value);
-              }}
-              className={fieldClass}
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-neutral-600">Pick-up time</span>
-            <select value={pickTime} onChange={(event) => setPickTime(event.target.value)} className={fieldClass}>
-              {HOURS.map((hour) => (
-                <option key={hour}>{hour}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-neutral-600">Return time</span>
-            <select value={retTime} onChange={(event) => setRetTime(event.target.value)} className={fieldClass}>
-              {HOURS.map((hour) => (
-                <option key={hour}>{hour}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-neutral-600">Vehicle type</span>
-            <select value={type} onChange={(event) => setType(event.target.value)} className={fieldClass}>
-              <option value="all">All vehicles</option>
-              <option value="4x4">4x4 / SUV</option>
-              <option value="saloon">Saloon</option>
-            </select>
-          </label>
-          <label className="block text-sm md:col-span-2 lg:col-span-3">
-            <span className="mb-1 block text-neutral-600">Delivery</span>
-            <select
-              value={delivery}
-              onChange={(event) => setDelivery(event.target.value as "none" | "deliver" | "both")}
-              className={fieldClass}
-            >
-              <option value="none">No, I will collect it</option>
-              <option value="deliver">Deliver to me</option>
-              <option value="both">Deliver and collect</option>
-            </select>
-            <span className="mt-2 block text-xs leading-relaxed text-neutral-500">
-              Open Monday to Friday 08:00–17:00 and Saturday 08:00–13:00. Collection from Karen, JKIA, or Wilson is
-              included. Delivery inside Nairobi is free during those hours. Otherwise it is {ksh(1000)} per trip plus{" "}
-              {ksh(50)} per km after the first 5 km, and quoted by hand beyond 150 km.
-            </span>
-          </label>
-        </form>
+          {delivery !== "none" && (
+            <div className="mt-[18px] border-t border-[#e5e5e5] pt-4">
+              <div className="text-base font-bold">Where should we deliver?</div>
+              <p className="mb-3 mt-0.5 text-[13px] text-[#595959]">
+                {deliveryHelp} Search for a place, or type the address.
+              </p>
+              <div className="relative">
+                <label htmlFor="daddr" className={label}>
+                  Delivery address
+                </label>
+                <input
+                  id="daddr"
+                  type="text"
+                  autoComplete="off"
+                  value={address}
+                  onChange={(event) => {
+                    setAddress(event.target.value);
+                    setPlaceId("");
+                    setShowSuggestions(true);
+                  }}
+                  onFocus={() => setShowSuggestions(true)}
+                  onBlur={() => window.setTimeout(() => setShowSuggestions(false), 150)}
+                  placeholder="Start typing, e.g. Village Market or Naivasha"
+                  className={roundField}
+                />
+                {showSuggestions && suggestions.length > 0 && (
+                  <div
+                    role="listbox"
+                    aria-label="Suggested places"
+                    className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-lg border border-[#c8c8c8] bg-white shadow-[0_8px_24px_rgba(0,0,0,0.12)]"
+                  >
+                    {suggestions.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        role="option"
+                        aria-selected={false}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => {
+                          setPlaceId(item.id);
+                          setAddress(item.name + ", " + item.area);
+                          setShowSuggestions(false);
+                        }}
+                        className="block w-full cursor-pointer border-0 border-b border-[#f0f0f0] bg-white px-3.5 py-2.5 text-left text-sm text-[#171717] hover:bg-[#f7f7f5]"
+                      >
+                        <strong>{item.name}</strong> <span className="text-[#595959]">· {item.area}</span>
+                      </button>
+                    ))}
+                    <div className="bg-[#f7f7f5] px-3.5 py-1.5 text-[11px] text-[#595959]">
+                      Not in the list? Type the full address.
+                    </div>
+                  </div>
+                )}
+              </div>
 
-        {hours.any && (
-          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-            <p className="font-medium">{hours.title}</p>
-            <p className="mt-1">Tell us what you need and we will arrange it. Delivery inside Nairobi is charged outside opening hours.</p>
-            <label className="mt-3 block">
-              <span className="mb-1 block text-neutral-700">Out-of-hours details</span>
-              <textarea value={oohNote} onChange={(event) => setOohNote(event.target.value)} rows={2} className="w-full rounded-md border border-neutral-300 px-3 py-2" />
-            </label>
-          </div>
-        )}
+              {manual && address.trim().length >= 3 && (
+                <div className="mt-3.5">
+                  <p className="rounded-lg bg-[#fef7e0] px-3 py-2.5 text-sm text-[#5f4b00]">{deliveryQuote.message}</p>
+                  <label htmlFor="lnote" className="mb-1.5 mt-3 block text-sm font-bold">
+                    Delivery details
+                  </label>
+                  <textarea
+                    id="lnote"
+                    rows={3}
+                    value={note}
+                    onChange={(event) => setNote(event.target.value)}
+                    placeholder="Exact place, and when you need the vehicle there"
+                    className={area}
+                  />
+                </div>
+              )}
 
-        {delivery !== "none" && (
-          <div className="mt-4 rounded-xl border border-neutral-200 bg-white p-4">
-            <label className="block text-sm">
-              <span className="mb-1 block text-neutral-600">Town or suburb</span>
-              <input
-                value={address}
-                onChange={(event) => setAddress(event.target.value)}
-                placeholder="For example, Kilimani"
-                className={fieldClass}
+              <p className="mt-2.5 text-xs text-[#595959]">
+                Collection from Karen, JKIA or Wilson Airport is included. Delivery inside Nairobi is free during opening
+                hours. Otherwise it is {ksh(PRICING.base)} per trip plus {ksh(PRICING.perKm)} per km after the first{" "}
+                {PRICING.freeKm} km, measured by road from our workshop in Karen.
+              </p>
+            </div>
+          )}
+
+          {hours.any && (
+            <div role="status" className="mt-4 rounded-lg border border-[#f3d57a] bg-[#fef7e0] px-3.5 py-3 text-[#5f4b00]">
+              <strong className="block text-sm">⚠ {hours.title}</strong>
+              <p className="mb-2.5 mt-1 text-sm">
+                We are open Monday to Friday 08:00–17:00 and Saturday 08:00–13:00. Tell us what you need below and we will
+                arrange it with you.
+                {delivery !== "none" && " Delivery inside Nairobi is charged by distance outside opening hours."}
+              </p>
+              <label htmlFor="oohNote" className="mb-1.5 block text-[13px] font-bold text-[#3f3f3f]">
+                Out-of-hours details
+              </label>
+              <textarea
+                id="oohNote"
+                rows={2}
+                value={oohNote}
+                onChange={(event) => setOohNote(event.target.value)}
+                placeholder="For example: landing at JKIA at 21:30 on flight KQ101"
+                className={area}
               />
-            </label>
-            <p className="mt-3 text-sm text-neutral-700">
-              {address.trim().length >= 3
-                ? deliveryQuote.message
-                : "Enter the town or suburb. We will price the delivery and tell you the full amount before you pay."}
-            </p>
-          </div>
-        )}
+            </div>
+          )}
 
-        {!loadError && (
-          <p className="mt-6 text-sm text-neutral-600">
-            {availability ? availability.rangeLabel + " · " + location : "Choose your dates to see availability and the full amount."}
+          {dateError && (
+            <p role="alert" className="mt-3.5 text-sm font-bold text-[#9b1c1c]">
+              {dateError}
+            </p>
+          )}
+        </div>
+
+        <div className="mt-5 flex flex-wrap gap-3">
+          <a
+            href={tel}
+            className="inline-flex min-h-[48px] items-center rounded-lg bg-[#171717] px-[26px] text-base font-semibold text-white no-underline hover:bg-[#2b2b2b] hover:text-white"
+          >
+            Call
+          </a>
+          <a
+            href={wa}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-[48px] items-center rounded-lg border border-[#e0e0e0] bg-white px-[26px] text-base font-medium text-[#171717] no-underline"
+          >
+            WhatsApp
+          </a>
+          <a
+            href="#how"
+            className="inline-flex min-h-[48px] items-center rounded-lg border border-[#e0e0e0] bg-white px-[26px] text-base font-medium text-[#171717] no-underline"
+          >
+            How it works
+          </a>
+        </div>
+      </div>
+
+      {/* Available vehicles */}
+      <section id="vehicles" className={sectionWrap + " mt-14 scroll-mt-28"}>
+        <div className="mb-[22px] flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+          <div>
+            <div className={eyebrow}>Choose your drive</div>
+            <h2 className={h2}>Available vehicles</h2>
+          </div>
+          <p className="text-sm text-[#595959]">
+            {summaryLine} ·{" "}
+            <a href="#calendar" className="underline">
+              See the availability calendar
+            </a>
           </p>
-        )}
+        </div>
+
         {loadError && (
-          <p className="mt-3 text-sm text-red-700" role="alert">
+          <p role="alert" className="mb-4 rounded-xl border border-[#e5e5e5] bg-white p-5 text-sm text-[#9b1c1c]">
             {loadError} You can still call {CONTACT.phoneDisplay} or{" "}
-            <a className="underline" href={wa}>
+            <a className="underline" href={wa} target="_blank" rel="noopener noreferrer">
               WhatsApp
             </a>{" "}
             us.
           </p>
         )}
-        {loading && <p className="mt-3 text-sm text-neutral-500">Checking the fleet…</p>}
+        {loading && <p className="mb-4 text-sm text-[#595959]">Checking the fleet…</p>}
+        {!loading && !loadError && !dateError && models.length === 0 && (
+          <p className="rounded-xl border border-[#e5e5e5] bg-white p-5">
+            No vehicles of this type are listed. Choose “All vehicles” to see the full fleet.
+          </p>
+        )}
+        {dateError && (
+          <p className="rounded-xl border border-[#e5e5e5] bg-white p-5">
+            Choose valid dates in Find your vehicle to see what is free and the total for each vehicle.
+          </p>
+        )}
 
-        <div id="vehicles" className="mt-8 grid gap-4 md:grid-cols-2">
+        <div className="grid gap-[18px] [grid-template-columns:repeat(auto-fit,minmax(250px,1fr))]">
           {models.map((model) => (
-            <VehicleCard key={model.id} model={model} days={availability?.days || 0} onBook={() => setSelectedId(model.id)} onNext={(day) => pickDay(day)} />
+            <VehicleCard
+              key={model.id}
+              model={model}
+              days={days}
+              onBook={() => chooseVehicle(model.id)}
+              onNext={(day) => pickDay(day)}
+            />
           ))}
-          {!loading && !loadError && models.length === 0 && (
-            <p className="rounded-xl border border-neutral-200 bg-white p-5 text-sm text-neutral-700">No vehicles of this type are listed.</p>
+        </div>
+        <p className="mt-3.5 text-[13px] leading-relaxed text-[#595959]">
+          Our workshop cleans and checks every vehicle between hires. You choose a model; we assign the exact vehicle
+          when you collect.
+        </p>
+      </section>
+
+      {/* Availability calendar */}
+      <section id="calendar" className={sectionWrap + " mt-12 scroll-mt-28"}>
+        <div className="mb-3.5 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+          <div>
+            <div className={eyebrow}>Plan around your dates</div>
+            <h2 className={h2}>Availability calendar</h2>
+          </div>
+          {availability && (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className={btnLight + " min-h-[44px] px-[18px]"}
+                disabled={availability.calendar[0] <= availability.today}
+                onClick={() => setCalFrom(addDays(availability.calendar[0], -14))}
+              >
+                Earlier
+              </button>
+              <button
+                type="button"
+                className={btnLight + " min-h-[44px] px-[18px]"}
+                onClick={() => setCalFrom(addDays(availability.calendar[0], 14))}
+              >
+                Later
+              </button>
+            </div>
           )}
         </div>
 
-        {availability && models.length > 0 && (
-          <div className="mt-10">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h3 className="text-lg font-semibold">Availability</h3>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-40"
-                  disabled={availability.calendar[0] <= availability.today}
-                  onClick={() => setCalFrom(addDays(availability.calendar[0], -14))}
-                >
-                  Earlier
-                </button>
-                <button
-                  type="button"
-                  className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm"
-                  onClick={() => setCalFrom(addDays(availability.calendar[0], 14))}
-                >
-                  Later
-                </button>
-              </div>
-            </div>
-            <p className="mt-2 text-sm text-neutral-600">A green day has at least one vehicle free. Select a day to start the hire then.</p>
-            <div className="mt-4 overflow-x-auto rounded-xl border border-neutral-200 bg-white">
-              <table className="min-w-[760px] border-collapse text-left text-xs">
-                <thead>
-                  <tr>
-                    <th className="sticky left-0 bg-white px-3 py-2 font-medium">Vehicle</th>
-                    {availability.calendar.map((day) => (
-                      <th key={day} className="px-1 py-2 text-center font-medium text-neutral-500">
-                        {formatDayShort(day)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {models.map((model) => (
-                    <tr key={model.id} className="border-t border-neutral-100">
-                      <th className="sticky left-0 bg-white px-3 py-2 text-left font-medium text-neutral-800">{model.name}</th>
-                      {availability.calendar.map((day, index) => {
-                        const free = model.dayFree[index] || 0;
-                        const inHire = day >= pickup && day < (returnOn > pickup ? returnOn : addDays(pickup, 1));
-                        return (
-                          <td key={day} className="px-1 py-1 text-center">
-                            <button
-                              type="button"
-                              title={free + " of " + model.count + " free"}
-                              onClick={() => pickDay(day)}
-                              className={
-                                "h-8 w-8 rounded-md " +
-                                (free > 0 ? "bg-green-100 text-green-900" : "bg-neutral-100 text-neutral-400") +
-                                (inHire ? " ring-2 ring-neutral-900" : "")
-                              }
-                            >
-                              {free > 0 ? free : "–"}
-                            </button>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        {!availability && (
+          <p className="rounded-xl border border-[#e5e5e5] bg-white p-[18px]">
+            {loading
+              ? "Loading the calendar…"
+              : "Choose a valid pick-up and return date above to see which vehicles are free around that time."}
+          </p>
         )}
 
-        {selected && availability && (
-          <form id="checkout" onSubmit={submit} className="mt-10 scroll-mt-24 rounded-xl border border-neutral-300 bg-white p-6">
-            <h3 className="text-xl font-semibold">Book the {selected.name}</h3>
-            <p className="mt-2 text-sm text-neutral-600">
-              {plural(availability.days)} · {formatDay(pickup)}, {pickTime} to {formatDay(returnOn)}, {retTime}
-            </p>
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
-              <label className="block text-sm">
-                <span className="mb-1 block text-neutral-600">Full name</span>
-                <input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" className={fieldClass} />
-              </label>
-              <label className="block text-sm">
-                <span className="mb-1 block text-neutral-600">Email</span>
-                <input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" className={fieldClass} />
-              </label>
-              <label className="block text-sm">
-                <span className="mb-1 block text-neutral-600">Mobile</span>
-                <input value={phone} onChange={(event) => setPhone(event.target.value)} autoComplete="tel" className={fieldClass} />
-              </label>
-              <label className="block text-sm">
-                <span className="mb-1 block text-neutral-600">M-Pesa code (optional)</span>
-                <input value={mpesaCode} onChange={(event) => setMpesaCode(event.target.value)} className={fieldClass} />
-              </label>
-            </div>
-            {selected.addon > 0 && (
-              <label className="mt-4 flex items-start gap-3 text-sm">
-                <input type="checkbox" checked={insure} onChange={(event) => setInsure(event.target.checked)} className="mt-1" />
-                <span>Add optional damage cover, {ksh(selected.addon)} per day.</span>
-              </label>
-            )}
-            <dl className="mt-5 space-y-2 text-sm">
-              <div className="flex justify-between gap-4">
-                <dt>Hire, {plural(availability.days)} at {ksh(selected.rate)} / day</dt>
-                <dd>{ksh(hireTotal)}</dd>
-              </div>
-              {insuranceTotal > 0 && (
-                <div className="flex justify-between gap-4">
-                  <dt>Damage cover</dt>
-                  <dd>{ksh(insuranceTotal)}</dd>
-                </div>
-              )}
-              <div className="flex justify-between gap-4">
-                <dt>Delivery</dt>
-                <dd>{deliveryQuote.manual ? "Quoted before you pay" : pricedDelivery ? ksh(pricedDelivery) : "Included"}</dd>
-              </div>
-              <div className="flex justify-between gap-4 border-t border-neutral-200 pt-2 text-base font-semibold">
-                <dt>{deliveryQuote.manual ? "Hire so far" : "Due in full"}</dt>
-                <dd>{ksh(total)}</dd>
-              </div>
-            </dl>
-            <p className="mt-3 text-sm text-neutral-600">{deliveryQuote.summary}</p>
-            <label className="mt-4 flex items-start gap-3 text-sm">
-              <input type="checkbox" checked={terms} onChange={(event) => setTerms(event.target.checked)} className="mt-1" />
-              <span>I am at least 25 and I will bring a valid driving licence and ID to collection.</span>
-            </label>
-            <p className="mt-3 text-sm text-neutral-600">We check the licence at handover. There is nothing to upload now.</p>
-            {formError && (
-              <p className="mt-3 text-sm text-red-700" role="alert">
-                {formError}
-              </p>
-            )}
-            {!selected.available && <p className="mt-3 text-sm text-red-700">That vehicle is no longer free for these dates.</p>}
-            <div className="mt-5 flex flex-wrap gap-3">
-              <button
-                type="submit"
-                disabled={submitting || !selected.available}
-                className="rounded-md bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
-              >
-                {submitting ? "Sending…" : deliveryQuote.manual ? "Send booking request" : "Submit booking — " + ksh(total) + " due in full"}
-              </button>
-              <button type="button" onClick={() => setSelectedId("")} className="rounded-md border border-neutral-300 px-4 py-2.5 text-sm">
-                Cancel
-              </button>
-            </div>
-          </form>
+        {availability && (
+          <AvailabilityCalendar
+            availability={availability}
+            models={models}
+            pickup={pickup}
+            returnOn={returnOn}
+            onPick={pickDay}
+          />
         )}
-      </div>
-    </section>
+      </section>
+
+      {/* Checkout */}
+      {showCheckout && (
+        <section id="checkout" className={sectionWrap + " mt-12 scroll-mt-28"}>
+          <div className="rounded-xl border border-[#e5e5e5] bg-white p-5 sm:p-[26px]">
+            <div className="mb-5 flex gap-1.5">
+              {[1, 2].map((n) => (
+                <span
+                  key={n}
+                  className={"h-1 flex-1 " + (result || (selected && step >= n) ? "bg-[#171717]" : "bg-[#e5e5e5]")}
+                />
+              ))}
+            </div>
+
+            {result && !selected && (
+              <div className="px-2 pb-2 pt-[18px] text-center">
+                <div
+                  aria-hidden="true"
+                  className="mx-auto mb-3.5 grid h-14 w-14 place-items-center rounded-full bg-[#171717] text-[28px] text-[#d5bb7a]"
+                >
+                  ✓
+                </div>
+                <h2 className="mb-2 text-[30px] font-bold tracking-[-0.02em]">
+                  {result.manual ? "Booking request sent" : "Vehicle held"}
+                </h2>
+                <p className="mx-auto mb-[18px] max-w-[520px] text-[#595959]">{result.message}</p>
+                <div className="mx-auto mb-[18px] max-w-[520px] bg-[#f5f5f3] p-4 text-left text-[15px] leading-[1.8]">
+                  <div>
+                    Reference <strong className="text-lg">{result.reference}</strong>
+                  </div>
+                  <strong>{result.model}</strong>
+                  <br />
+                  {formatDay(result.pickup)}, {result.pickTime} to {formatDay(result.returnOn)}, {result.retTime}
+                  <br />
+                  {result.summary}
+                  <br />
+                  {result.manual ? "Hire so far: " : "Due in full: "}
+                  <strong>{ksh(result.total)}</strong>
+                  {result.manual && (
+                    <>
+                      <br />
+                      The delivery charge is agreed with you before you pay.
+                    </>
+                  )}
+                </div>
+                {!result.manual && (
+                  <form
+                    onSubmit={sendCode}
+                    className="mx-auto mb-[18px] flex max-w-[520px] flex-col gap-3 text-left sm:flex-row sm:items-end"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <label htmlFor="laterCode" className={label}>
+                        M-Pesa code, once you have paid
+                      </label>
+                      <input
+                        id="laterCode"
+                        value={laterCode}
+                        onChange={(event) => setLaterCode(event.target.value)}
+                        className={roundField}
+                      />
+                    </div>
+                    <button type="submit" className={btnLight}>
+                      Send code
+                    </button>
+                  </form>
+                )}
+                {codeMessage && <p className="mb-4 text-sm text-[#3f3f3f]">{codeMessage}</p>}
+                <button type="button" onClick={bookAnother} className={btnDark}>
+                  Book another vehicle
+                </button>
+              </div>
+            )}
+
+            {selected && availability && (
+              <div className="flex flex-wrap gap-7">
+                <div className="min-w-0 flex-[999_1_420px]">
+                  {step === 1 && (
+                    <div>
+                      <div className="text-[13px] font-bold uppercase tracking-[2px] text-[#595959]">Step 1 of 2</div>
+                      <h2 className="mb-4 mt-1.5 text-[28px] font-bold tracking-[-0.02em]">Your details</h2>
+                      <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
+                        <div>
+                          <label htmlFor="fname" className={label}>
+                            Full name
+                          </label>
+                          <input
+                            id="fname"
+                            type="text"
+                            value={name}
+                            onChange={(event) => setName(event.target.value)}
+                            autoComplete="name"
+                            placeholder="Your full name"
+                            className={field}
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="femail" className={label}>
+                            Email address
+                          </label>
+                          <input
+                            id="femail"
+                            type="email"
+                            value={email}
+                            onChange={(event) => setEmail(event.target.value)}
+                            autoComplete="email"
+                            placeholder="you@example.com"
+                            className={field}
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="fphone" className={label}>
+                            Mobile number
+                          </label>
+                          <input
+                            id="fphone"
+                            type="tel"
+                            value={phone}
+                            onChange={(event) => setPhone(event.target.value)}
+                            autoComplete="tel"
+                            placeholder="+254"
+                            className={field}
+                          />
+                        </div>
+                      </div>
+                      <p className="mt-3 text-[13px] text-[#595959]">
+                        Please bring your driving licence and ID to collection. We check them at handover, so there is
+                        nothing to upload now.
+                      </p>
+                      {formError && (
+                        <p role="alert" className="mt-3 text-sm font-bold text-[#9b1c1c]">
+                          {formError}
+                        </p>
+                      )}
+                      <div className="mt-[18px] flex flex-wrap gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedId("");
+                            setFormError("");
+                            scrollToId("vehicles");
+                          }}
+                          className={btnLight}
+                        >
+                          Change vehicle
+                        </button>
+                        <button type="button" onClick={goStep2} className={btnDark}>
+                          Continue
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {step === 2 && (
+                    <div>
+                      <div className="text-[13px] font-bold uppercase tracking-[2px] text-[#595959]">Step 2 of 2</div>
+                      <h2 className="mb-4 mt-1.5 text-[28px] font-bold tracking-[-0.02em]">
+                        {manual ? "Send your request" : "Confirm and pay"}
+                      </h2>
+                      {selected.addon > 0 && (
+                        <div className="mb-5 flex items-start gap-2.5 rounded-lg border border-[#e5e5e5] bg-[#f5f5f3] px-4 py-3.5">
+                          <input
+                            id="insBox"
+                            type="checkbox"
+                            checked={insure}
+                            onChange={(event) => setInsure(event.target.checked)}
+                            className="mt-px h-[22px] w-[22px] flex-none"
+                          />
+                          <label htmlFor="insBox" className="text-sm leading-normal">
+                            <strong>Add damage cover for {ksh(selected.addon)} a day</strong>
+                            <br />
+                            <span className="text-[#595959]">
+                              Covers damage to the vehicle, repaired by our own workshop. Without it, you pay for any
+                              damage.
+                            </span>
+                          </label>
+                        </div>
+                      )}
+
+                      {manual ? (
+                        <div className="rounded-xl border border-[#e5e5e5] bg-[#f5f5f3] p-4 text-sm leading-relaxed text-[#3f3f3f]">
+                          <strong className="mb-1 block text-[15px] text-[#171717]">How a delivery quote works</strong>
+                          We will price the delivery and contact you by email, text or WhatsApp with the full amount
+                          before you pay. The vehicle is not held until the delivery charge is agreed.
+                        </div>
+                      ) : (
+                        <div className="rounded-xl border border-[#e5e5e5] bg-[#f5f5f3] p-4">
+                          <div className="mb-3 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(170px,1fr))]">
+                            <div>
+                              <div className="text-[13px] text-[#595959]">Amount due in full</div>
+                              <div className="mt-0.5 text-2xl font-bold tracking-[-0.01em]">{ksh(total)}</div>
+                            </div>
+                            <div>
+                              <div className="text-[13px] text-[#595959]">Pay by</div>
+                              <div className="mt-0.5 text-2xl font-bold tracking-[-0.01em]">M-Pesa or bank</div>
+                            </div>
+                          </div>
+                          <ol className="mb-2.5 list-decimal pl-5 text-sm leading-[1.7] text-[#3f3f3f]">
+                            <li>Submit the booking. We hold the vehicle and give you a booking reference.</li>
+                            <li>Pay the full amount by M-Pesa or bank transfer, and quote the booking reference.</li>
+                            <li>We check the payment and confirm your booking.</li>
+                          </ol>
+                          <p className="text-[13px] text-[#595959]">Nothing is taken on this page.</p>
+                          <label htmlFor="mpesa" className={label + " mt-3"}>
+                            M-Pesa code (optional, if you have already paid)
+                          </label>
+                          <input
+                            id="mpesa"
+                            value={mpesaCode}
+                            onChange={(event) => setMpesaCode(event.target.value)}
+                            className={roundField}
+                          />
+                        </div>
+                      )}
+
+                      <div className="mt-3.5 flex items-start gap-2.5">
+                        <input
+                          id="termsBox"
+                          type="checkbox"
+                          checked={terms}
+                          onChange={(event) => setTerms(event.target.checked)}
+                          className="mt-px h-[22px] w-[22px] flex-none"
+                        />
+                        <label htmlFor="termsBox" className="text-sm leading-normal">
+                          I am at least 25 and I will bring a valid driving licence and ID to collection.
+                        </label>
+                      </div>
+                      {formError && (
+                        <p role="alert" className="mt-3 text-sm font-bold text-[#9b1c1c]">
+                          {formError}
+                        </p>
+                      )}
+                      {!selected.available && (
+                        <p className="mt-3 text-sm font-bold text-[#9b1c1c]">
+                          That vehicle is no longer free for these dates.
+                        </p>
+                      )}
+                      <div className="mt-[18px] flex flex-wrap gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setStep(1);
+                            setFormError("");
+                          }}
+                          className={btnLight}
+                        >
+                          Back
+                        </button>
+                        <button
+                          type="button"
+                          onClick={submit}
+                          disabled={submitting || !selected.available}
+                          className={btnDark}
+                        >
+                          {submitting
+                            ? "Sending…"
+                            : manual
+                              ? "Send booking request"
+                              : "Hold vehicle · " + ksh(total) + " due"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <aside className="min-w-0 flex-[1_1_280px] self-start bg-[#f5f5f3] p-5">
+                  <div className="text-[13px] font-bold uppercase tracking-[2px] text-[#595959]">Your hire</div>
+                  <h3 className="mb-2.5 mt-1.5 text-[22px] font-bold tracking-[-0.02em]">{selected.name}</h3>
+                  <div className="text-sm leading-[1.8]">
+                    <div>
+                      {formatDay(pickup)}, {pickTime}
+                    </div>
+                    <div>
+                      to {formatDay(returnOn)}, {retTime}
+                    </div>
+                    <div>{location}</div>
+                    {delivery !== "none" && (
+                      <div>
+                        <strong>Delivery:</strong> {DELIVERY_LABELS[delivery]}
+                      </div>
+                    )}
+                  </div>
+                  <div className="my-3.5 border-t border-[#e5e5e5] pt-3 text-sm leading-[1.9]">
+                    <div className="flex justify-between gap-2">
+                      <span>
+                        {plural(days)} at {ksh(selected.rate)}
+                      </span>
+                      <span>{ksh(hireTotal)}</span>
+                    </div>
+                    {delivery !== "none" && (
+                      <div className="flex justify-between gap-2">
+                        <span>Delivery</span>
+                        <span>{manual ? "Quoted before you pay" : pricedDelivery ? ksh(pricedDelivery) : "Free"}</span>
+                      </div>
+                    )}
+                    {insuranceTotal > 0 && (
+                      <div className="flex justify-between gap-2">
+                        <span>Damage cover, {plural(days)}</span>
+                        <span>{ksh(insuranceTotal)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between gap-2 font-bold">
+                      <span>{manual ? "Hire so far" : "Due in full"}</span>
+                      <span>{ksh(total)}</span>
+                    </div>
+                    <div className="text-[13px] text-[#595959]">Nothing is taken on this page.</div>
+                  </div>
+                </aside>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+    </>
   );
 }
 
@@ -597,35 +1004,230 @@ function VehicleCard({
   onBook: () => void;
   onNext: (day: string) => void;
 }) {
+  const photo = PHOTOS[model.id];
+  const saloon = model.group === "saloon";
   return (
-    <article className="flex flex-col rounded-xl border border-neutral-200 bg-white p-5">
-      <p className="text-xs font-medium uppercase tracking-[0.14em] text-neutral-500">{model.tag}</p>
-      <h3 className="mt-2 text-lg font-semibold">{model.name}</h3>
-      <p className="mt-2 text-sm text-neutral-600">
-        {model.seatsText} · {model.gear} · {model.fuel}
-      </p>
-      <p className="mt-1 text-sm text-neutral-600">
-        {model.count === 1 ? "1 vehicle" : model.count + " vehicles"} · {model.mileage}
-      </p>
-      <p className="mt-1 text-sm text-neutral-600">Optional cover {ksh(model.addon)} / day</p>
-      <p className={"mt-3 text-sm font-medium " + (model.available ? "text-green-800" : "text-red-700")}>
-        {model.free} of {model.count} free for your dates
-      </p>
-      <div className="mt-4 flex items-end justify-between gap-3">
-        <div>
-          <div className="text-sm text-neutral-500">{ksh(model.rate)} / day</div>
-          <div className="text-lg font-semibold">{days ? ksh(model.hireTotal) + " hire" : "Choose dates"}</div>
+    <article className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-[#e5e5e5] bg-white">
+      {photo ? (
+        <div className="relative">
+          <img
+            src={photo}
+            alt={model.name + ", illustrative photo"}
+            loading="lazy"
+            className="block h-[170px] w-full object-cover object-[center_60%]"
+          />
+          <span className="absolute bottom-2.5 left-2.5 rounded bg-[rgba(23,23,23,0.78)] px-2 py-[3px] text-xs font-semibold text-white">
+            Illustrative photo
+          </span>
         </div>
+      ) : (
+        <div className="grid h-[150px] place-items-center bg-[#ececea] p-2.5 text-center text-[13px] text-[#595959]">
+          Photo of {model.name} to be added
+        </div>
+      )}
+      <div className="flex flex-1 flex-col gap-2.5 p-[18px]">
+        <div className="text-xs font-bold uppercase tracking-[1.5px] text-[#595959]">{model.tag}</div>
+        <h3 className="text-[21px] font-bold tracking-[-0.02em]">{model.name}</h3>
+        <div className="flex flex-wrap gap-x-3.5 gap-y-1 border-b border-[#e5e5e5] pb-3 text-[13px] text-[#595959]">
+          <span>{model.seatsText}</span>
+          <span>{model.gear}</span>
+          <span>{model.fuel}</span>
+          <span>{model.count === 1 ? "1 vehicle" : model.count + " vehicles"}</span>
+        </div>
+        <div className="flex items-baseline justify-between gap-2">
+          <strong className="text-xl">{ksh(model.rate)}</strong>
+          <span className="text-[13px] text-[#595959]">per day, incl. VAT</span>
+        </div>
+        <div className="text-[13px] text-[#595959]">
+          {model.addon > 0 && (
+            <>
+              Optional damage cover: {ksh(model.addon)} per day
+              <br />
+            </>
+          )}
+          {saloon ? "100 km a day included, then KSh 15 per extra km" : "Unlimited mileage, no extra km charge"}
+        </div>
+
+        {days > 0 && (
+          <div className="bg-[#f5f5f3] px-3 py-2.5 text-sm leading-[1.6]">
+            <div className="flex justify-between gap-2">
+              <span>{plural(days)}</span>
+              <strong>{ksh(model.hireTotal)}</strong>
+            </div>
+            <div className="flex justify-between gap-2 text-[13px] text-[#595959]">
+              <span>Paid in full when you book</span>
+            </div>
+          </div>
+        )}
+
         {model.available ? (
-          <button type="button" onClick={onBook} className="rounded-md bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white">
-            Book
-          </button>
-        ) : model.nextFree ? (
-          <button type="button" onClick={() => onNext(model.nextFree!)} className="rounded-md border border-neutral-300 px-4 py-2.5 text-sm">
-            Next free {formatDayShort(model.nextFree)}
-          </button>
-        ) : null}
+          <div className="mt-auto flex flex-col gap-2">
+            <div className="text-[13px] font-bold text-[#1d6b3a]">
+              {model.free} of {model.count} {model.count === 1 ? "vehicle" : "vehicles"} available for your dates
+            </div>
+            <button type="button" onClick={onBook} className={btnDark + " w-full"}>
+              Book this vehicle
+            </button>
+          </div>
+        ) : (
+          <div className="mt-auto flex flex-col gap-2">
+            <div className="text-[13px] font-bold text-[#9b1c1c]">Not available for your dates</div>
+            {model.nextFree && (
+              <button type="button" onClick={() => onNext(model.nextFree!)} className={btnLight + " w-full"}>
+                Next free: {formatDay(model.nextFree)}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </article>
+  );
+}
+
+function AvailabilityCalendar({
+  availability,
+  models,
+  pickup,
+  returnOn,
+  onPick,
+}: {
+  availability: AvailabilityResponse;
+  models: PublicModelCard[];
+  pickup: string;
+  returnOn: string;
+  onPick: (day: string) => void;
+}) {
+  const days = availability.calendar;
+  const cols = days.length;
+  const end = exclusiveEnd(pickup, returnOn);
+  const reqIdx = days.map((day, index) => (day >= pickup && day < end ? index : -1)).filter((index) => index >= 0);
+  const span = returnOn === pickup ? 1 : Math.max(1, availability.days);
+  const gridCols = { gridTemplateColumns: "repeat(" + cols + ", minmax(0, 1fr))" };
+
+  return (
+    <div>
+      <p className="mb-3.5 max-w-[760px] text-sm text-[#3f3f3f]">
+        Your dates are outlined in blue. Grey bars are days when every vehicle of that model is booked. Green days have
+        at least one vehicle free. Select a free day to move your pick-up there; your trip stays at {plural(span)}.
+      </p>
+      <div className="mb-3 flex flex-wrap gap-x-[22px] gap-y-2 text-[13px]">
+        <span className="inline-flex items-center gap-2">
+          <span className="inline-block h-4 w-[22px] rounded border border-[#a8dab5] bg-[#e6f4ea]" />
+          Free
+        </span>
+        <span className="inline-flex items-center gap-2">
+          <span className="inline-block h-4 w-[22px] rounded bg-[#dadce0]" />
+          Booked
+        </span>
+        <span className="inline-flex items-center gap-2">
+          <span className="box-border inline-block h-4 w-[22px] rounded border-2 border-[#1a73e8] bg-[rgba(26,115,232,0.1)]" />
+          Your dates
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <div className="min-w-[820px] overflow-hidden rounded-lg border border-[#dadce0] bg-white">
+          <div className="grid border-b border-[#dadce0]" style={{ gridTemplateColumns: "170px minmax(0, 1fr)" }}>
+            <div className="self-end px-2.5 pb-2 text-[13px] font-bold">Vehicle</div>
+            <div className="grid" style={gridCols}>
+              {days.map((day, index) => {
+                const parts = dayParts(day);
+                const isToday = day === availability.today;
+                return (
+                  <div key={day} className="pb-2 pt-1.5 text-center leading-tight">
+                    <span className="block min-h-[15px] text-xs text-[#70757a]">
+                      {index === 0 || parts.num === 1 ? parts.mon : ""}
+                    </span>
+                    <span className="block text-xs text-[#70757a]">{parts.dow}</span>
+                    <strong
+                      className={
+                        "mt-0.5 inline-grid h-7 w-7 place-items-center rounded-full text-[13px] " +
+                        (isToday ? "bg-[#1a73e8] text-white" : "text-[#3c4043]")
+                      }
+                    >
+                      {parts.num}
+                    </strong>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {models.map((model) => {
+            const cells: React.ReactNode[] = [];
+            let index = 0;
+            while (index < cols) {
+              const free = model.dayFree[index] || 0;
+              if (free > 0) {
+                const day = days[index];
+                const title = formatDay(day) + ": " + free + " of " + model.count + " free";
+                cells.push(
+                  <div key={"f" + index} className="min-w-0 px-px" style={{ gridColumn: index + 1, gridRow: 1 }}>
+                    <button
+                      type="button"
+                      aria-label={title}
+                      title={title}
+                      onClick={() => onPick(day)}
+                      className="block h-[34px] w-full cursor-pointer rounded border-0 bg-[#e6f4ea] p-0 hover:bg-[#cdebd6]"
+                    />
+                  </div>,
+                );
+                index += 1;
+              } else {
+                const start = index;
+                while (index < cols && !(model.dayFree[index] > 0)) index += 1;
+                cells.push(
+                  <div
+                    key={"b" + start}
+                    title={"Booked " + formatDay(days[start]) + " to " + formatDay(days[index - 1])}
+                    className="min-w-0 px-px"
+                    style={{ gridColumn: start + 1 + " / " + (index + 1), gridRow: 1 }}
+                  >
+                    <div className="box-border h-[34px] overflow-hidden whitespace-nowrap rounded bg-[#dadce0] px-2 text-[13px] font-bold leading-[34px] text-[#3c4043]">
+                      {index - start >= 2 ? "Booked" : ""}
+                    </div>
+                  </div>,
+                );
+              }
+            }
+            if (reqIdx.length) {
+              cells.push(
+                <div
+                  key="req"
+                  className="pointer-events-none min-w-0 px-px"
+                  style={{ gridColumn: reqIdx[0] + 1 + " / " + (reqIdx[reqIdx.length - 1] + 2), gridRow: 1 }}
+                >
+                  <div className="box-border h-[34px] rounded border-2 border-[#1a73e8] bg-[rgba(26,115,232,0.1)]" />
+                </div>,
+              );
+            }
+            return (
+              <div
+                key={model.id}
+                className="grid border-b border-[#dadce0] last:border-b-0"
+                style={{ gridTemplateColumns: "170px minmax(0, 1fr)" }}
+              >
+                <div className="flex flex-col justify-center border-r border-[#dadce0] px-2.5 py-1.5 text-sm leading-tight">
+                  <strong>{model.name}</strong>
+                  <span className={"text-xs font-bold " + (model.available ? "text-[#1e8e3e]" : "text-[#c5221f]")}>
+                    {model.available ? model.free + " of " + model.count + " free for your dates" : "Not free for your dates"}
+                  </span>
+                </div>
+                <div
+                  className="grid py-2"
+                  style={{
+                    ...gridCols,
+                    gridTemplateRows: "34px",
+                    backgroundImage: "linear-gradient(to right, #e8eaed 1px, transparent 1px)",
+                    backgroundSize: "calc(100% / " + cols + ") 100%",
+                  }}
+                >
+                  {cells}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }

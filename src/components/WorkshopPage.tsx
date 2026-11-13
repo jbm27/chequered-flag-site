@@ -62,24 +62,6 @@ const SERVICES = [
   },
 ];
 
-const STEPS = [
-  {
-    title: "Send an enquiry",
-    text: "Tell us about your vehicle and the problem using the form at the top of this page. We call you back to talk it through and agree a time.",
-  },
-  {
-    title: "Drop off",
-    text: "Bring the vehicle to our workshop on Ngong Road, Karen, Monday to Friday 8am to 5pm or Saturday 8am to 1pm. We note its condition and mileage with you before you leave.",
-  },
-  { title: "Inspection", text: "One of our mechanics inspects the vehicle and finds the cause of the problem." },
-  { title: "Your go-ahead", text: "We call you with what we found and a clear quote. Nothing is done until you say yes." },
-  {
-    title: "The work",
-    text: "The job is done in our own workshop by our own team. If we find anything else, we call you before we touch it.",
-  },
-  { title: "Check and collect", text: "A final check and road test, then we walk you through what was done when you collect." },
-];
-
 const PROMISES = [
   { title: "A quote before any work", text: "We inspect first, explain what we found and agree the price with you." },
   { title: "A call before anything extra", text: "If we find something else, we call you before we touch it." },
@@ -120,7 +102,6 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
   const [error, setError] = useState("");
   const [sent, setSent] = useState(false);
   const [service, setService] = useState(SERVICES[0].id);
-  const [step, setStep] = useState(0);
 
   const waNumber = CONTACT.whatsappE164.replace(/\D/g, "");
   const tel = "tel:" + CONTACT.phoneE164.replace(/\s/g, "");
@@ -512,70 +493,6 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
             loading="lazy"
             className="block h-full w-full rounded-[14px] object-cover"
           />
-        </div>
-      </section>
-
-      {/* Process */}
-      <section id="process" className={wrap + " mt-9"}>
-        <div className={eyebrow}>Your vehicle with us</div>
-        <h2 className={h2 + " mb-[22px]"}>What happens, step by step</h2>
-        <div className="flex flex-wrap items-stretch gap-[18px]">
-          <div role="group" aria-label="Steps" className="flex min-w-0 flex-[1_1_300px] flex-col gap-1.5">
-            {STEPS.map((item, index) => {
-              const done = index < step;
-              const on = index === step;
-              return (
-                <button
-                  key={item.title}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => setStep(index)}
-                  className="flex min-h-[56px] cursor-pointer items-center gap-3.5 rounded-[10px] border border-[#e5e5e5] bg-white px-3.5 py-2 text-left text-[#171717]"
-                >
-                  <span
-                    className="box-border inline-grid h-[34px] w-[34px] flex-none place-items-center rounded-full border-2 text-sm font-bold"
-                    style={{
-                      background: done ? "#171717" : on ? GOLD : "#ffffff",
-                      color: done ? "#ffffff" : "#171717",
-                      borderColor: done || on ? "#171717" : "#c8c8c8",
-                    }}
-                  >
-                    {index + 1}
-                  </span>
-                  <span className={"text-[15px] " + (on ? "font-bold" : "font-medium")}>{item.title}</span>
-                </button>
-              );
-            })}
-          </div>
-          <div className="flex min-w-0 flex-[999_1_480px] flex-col overflow-hidden rounded-xl text-white" style={{ background: DARK }}>
-            <img src="/images/workshop/welding.jpg" alt="Welding in the Chequered Flag workshop" loading="lazy" className="block h-[220px] w-full object-cover" />
-            <div className="flex flex-1 flex-col gap-2.5 px-[26px] py-6">
-              <div className="text-xs font-bold tracking-[2px]" style={{ color: GOLD }}>
-                STEP {step + 1} OF {STEPS.length}
-              </div>
-              <h3 className="text-[26px] font-extrabold tracking-[-0.02em]">{STEPS[step].title}</h3>
-              <p className="text-[15px] leading-[1.7] text-[#d6d6d6]">{STEPS[step].text}</p>
-              <div className="mt-auto flex gap-2 pt-2.5">
-                <button
-                  type="button"
-                  onClick={() => setStep((v) => Math.max(0, v - 1))}
-                  disabled={step === 0}
-                  className="min-h-[44px] cursor-pointer rounded-lg border border-white bg-transparent px-[18px] text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStep((v) => Math.min(STEPS.length - 1, v + 1))}
-                  disabled={step === STEPS.length - 1}
-                  className="min-h-[44px] cursor-pointer rounded-lg border-0 px-[18px] text-[13px] font-bold text-[#171717] disabled:cursor-not-allowed disabled:opacity-40"
-                  style={{ background: GOLD }}
-                >
-                  Next step
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
       </section>
 

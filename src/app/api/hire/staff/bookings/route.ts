@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { FLEET } from "../../../../../lib/fleet";
+import { VEHICLE_RECORDS } from "../../../../../lib/vehicleRecords";
 import { databaseConfigured, httpStatus, listBookings, publicError, staffFromToken, updateBooking } from "../../../../../lib/db";
 
 export const runtime = "nodejs";
@@ -30,6 +31,11 @@ export async function GET() {
       model: vehicle.model,
       plate: vehicle.plate,
       category: vehicle.category,
+      seats: vehicle.seats,
+      rate: vehicle.rate,
+      addon: vehicle.addon,
+      year: VEHICLE_RECORDS[vehicle.id]?.year ?? null,
+      km: VEHICLE_RECORDS[vehicle.id]?.km ?? null,
     }));
     return NextResponse.json({ bookings, fleet }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

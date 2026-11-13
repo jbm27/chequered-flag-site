@@ -13,10 +13,15 @@ export type DeskVehicle = {
   model: string;
   plate: string;
   category: "saloon" | "suv" | "4x4";
+  seats?: number;
+  rate?: number;
+  addon?: number;
+  year?: number | null;
+  km?: number | null;
 };
 
 type Chip = { label: string; bg: string; fg: string; bd: string };
-type SectionKey = "overview" | "calendar" | "table" | "payments" | "compare" | "schedule";
+type SectionKey = "overview" | "calendar" | "table" | "payments" | "vehicles" | "compare" | "schedule";
 
 const WIN = 28;
 const PAID = { bg: "#ceead6", fg: "#0d5a2a" };
@@ -149,6 +154,7 @@ export default function HireDesk() {
     calendar: true,
     table: true,
     payments: true,
+    vehicles: true,
     compare: true,
     schedule: true,
   });
@@ -164,6 +170,9 @@ export default function HireDesk() {
   const [tableQuery, setTableQuery] = useState("");
   const [payQuery, setPayQuery] = useState("");
   const [scheduleQuery, setScheduleQuery] = useState("");
+  const [vehQuery, setVehQuery] = useState("");
+  const [vehType, setVehType] = useState<(typeof TYPES)[number]["id"]>("all");
+  const [vehOpen, setVehOpen] = useState<Record<string, boolean>>({});
 
   async function loadSession() {
     const response = await fetch("/api/hire/session");
@@ -359,6 +368,7 @@ export default function HireDesk() {
     calendar: "",
     table: chaseText,
     payments: codesToCheck.length ? plural(codesToCheck.length, "payment code") + " to check" : "",
+    vehicles: "",
     compare: chase.length ? plural(chase.length, "booking") + " unpaid at pick-up" : "",
     schedule: "",
   };
@@ -436,6 +446,21 @@ export default function HireDesk() {
     .filter((item) => item.e >= T && item.s <= T + 13)
     .filter((item) => matches(scheduleQuery, [item.name, item.kind, item.detail]))
     .sort((a, b) => a.s - b.s);
+
+  // Vehicle records (read-only)
+  const thisYear = Number(today.slice(0, 4));
+  const vehCards = fleet
+    .filter((vehicle) => vehType === "all" || vehicle.category === vehType)
+    .filter((vehicle) => matches(vehQuery, [vehicle.model, vehicle.plate, vehicle.year ? String(vehicle.year) : ""]))
+    .map((vehicle) => {
+      const mine = holds
+        .filter((booking) => booking.vehicleId === vehicle.id)
+        .sort((a, b) => a.pickup.localeCompare(b.pickup));
+      const now = mine.find((booking) => booking.pickup <= today && lastHireDay(booking.pickup, booking.returnOn) >= today) || null;
+      const next = mine.find((booking) => booking.pickup > today) || null;
+      return { vehicle, now, next };
+    });
+  const allVehOpen = vehCards.length > 0 && vehCards.every((card) => vehOpen[card.vehicle.id]);
 
   function downloadCsv() {
     const header = ["Reference", "Status", "Customer", "Phone", "Email", "Vehicle", "Plate", "Pick-up", "Return", "Total (KSh)", "M-Pesa code", "Staff note"];
@@ -1376,6 +1401,127 @@ export default function HireDesk() {
                 <p className="mt-3 text-sm text-[#595959]">
                   {payQuery.trim() ? "No payments match your search." : "No M-Pesa codes have been sent yet."}
                 </p>
+              )}
+            </>
+          )}
+        </section>
+
+
+        {/* Vehicle records */}
+        <section className={card + " mt-[22px] p-[22px]"}>
+          {sectionHead("vehicles", "Vehicle records")}
+          <p className="mb-3.5 mt-1 max-w-[760px] text-sm text-[#595959]">
+            Make, plate, year, odometer and rates for each vehicle, with what it is doing now. Read-only for now: the year
+            and odometer come from the fleet list, and editing a record will be added once James sets up somewhere to save
+            it.
+          </p>
+          {open.vehicles && (
+            <>
+              <div className="mb-3.5">
+                <input
+                  type="text"
+                  aria-label="Search make, model, plate or year"
+                  value={vehQuery}
+                  onChange={(e) => setVehQuery(e.target.value)}
+                  placeholder="Search make, model, plate or year"
+                  className={search}
+                />
+              </div>
+              <div className="mb-3 flex flex-wrap gap-2">
+                {TYPES.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-pressed={vehType === item.id}
+                    onClick={() => setVehType(item.id)}
+                    className={pill + (vehType === item.id ? " bg-[#171717] text-white" : " bg-white text-[#171717]")}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div className="mb-3.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next: Record<string, boolean> = {};
+                    for (const c of vehCards) next[c.vehicle.id] = !allVehOpen;
+                    setVehOpen((cur) => ({ ...cur, ...next }));
+                  }}
+                  className={pill + " bg-white text-[#171717]"}
+                >
+                  {allVehOpen ? "Close all records" : "Open all records"}
+                </button>
+              </div>
+              <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(min(340px,100%),1fr))]">
+                {vehCards.map(({ vehicle, now, next }) => {
+                  const isOpen = Boolean(vehOpen[vehicle.id]);
+                  const status: Chip = now
+                    ? { label: "On hire now", bg: "#e8f0fe", fg: "#174ea6", bd: "#aecbfa" }
+                    : { label: "Free today", bg: "#ceead6", fg: "#0d5a2a", bd: "#81c995" };
+                  const [make, ...rest] = vehicle.model.split(" ");
+                  return (
+                    <div key={vehicle.id} className="self-start overflow-hidden rounded-[10px] border border-[#e5e5e5] bg-white">
+                      <button
+                        type="button"
+                        aria-expanded={isOpen}
+                        onClick={() => setVehOpen((cur) => ({ ...cur, [vehicle.id]: !cur[vehicle.id] }))}
+                        className="flex w-full cursor-pointer items-center justify-between gap-3 bg-white px-3.5 py-3 text-left hover:bg-[#fafafa]"
+                      >
+                        <span className="min-w-0">
+                          <strong className="block">{vehicle.model}</strong>
+                          <span className="text-[13px] text-[#595959]">Number plate {vehicle.plate}</span>
+                        </span>
+                        <span className="flex flex-none items-center gap-2">
+                          <ChipView chip={status} />
+                          <span aria-hidden="true" className="text-[#595959]">
+                            {isOpen ? "▲" : "▼"}
+                          </span>
+                        </span>
+                      </button>
+                      {isOpen && (
+                        <div className="grid gap-1.5 border-t border-[#e5e5e5] bg-[#f5f5f3] px-3.5 py-3">
+                          <Row label="Make">{make}</Row>
+                          <Row label="Model">{rest.join(" ")}</Row>
+                          <Row label="Number plate">
+                            <strong>{vehicle.plate}</strong>
+                          </Row>
+                          <Row label="Type">
+                            {vehicle.category === "saloon" ? "Saloon" : vehicle.category === "suv" ? "SUV" : "4x4"}
+                            {vehicle.seats ? " · " + vehicle.seats + " seats" : ""}
+                          </Row>
+                          <Row label="Year">
+                            {vehicle.year ? vehicle.year + " (" + plural(thisYear - vehicle.year, "year") + " old)" : "Not entered"}
+                          </Row>
+                          <Row label="Odometer">{vehicle.km ? vehicle.km.toLocaleString("en-US") + " km" : "Not entered"}</Row>
+                          <Row label="Daily rate">{vehicle.rate ? ksh(vehicle.rate) : "—"}</Row>
+                          <Row label="Damage cover">{vehicle.addon ? ksh(vehicle.addon) + " a day" : "—"}</Row>
+                          <Row label="Now">
+                            {now ? (
+                              <button type="button" className="text-left underline" onClick={() => pick(now.id)}>
+                                {now.customerName}, back {short(now.returnOn)}
+                              </button>
+                            ) : (
+                              "Not on hire"
+                            )}
+                          </Row>
+                          <Row label="Next hire">
+                            {next ? (
+                              <button type="button" className="text-left underline" onClick={() => pick(next.id)}>
+                                {short(next.pickup)}, {next.customerName}
+                              </button>
+                            ) : (
+                              "Nothing booked"
+                            )}
+                          </Row>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {vehCards.length === 0 && (
+                <p className="mt-3 text-sm text-[#595959]">{vehQuery.trim() ? "Nothing matches your search." : "No vehicles listed."}</p>
               )}
             </>
           )}

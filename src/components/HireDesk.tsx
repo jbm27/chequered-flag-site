@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { addDays, dayNumber, exclusiveEnd, formatDay, ksh, todayNairobi, type PublicBookingResult, type StaffBooking } from "../lib/hire";
+import { addDays, balanceOf, dayNumber, exclusiveEnd, formatDay, ksh, todayNairobi, type PublicBookingResult, type StaffBooking } from "../lib/hire";
 import DeskAddBooking from "./DeskAddBooking";
 import DeskEditBooking from "./DeskEditBooking";
 import DeskDocuments from "./DeskDocuments";
@@ -37,6 +37,7 @@ const CHIP_PAID: Chip = { label: "Paid in full", bg: "#ceead6", fg: "#0d5a2a", b
 const CHIP_AWAIT: Chip = { label: "Awaiting payment", bg: "#feefc3", fg: "#5f4400", bd: "#f9d46b" };
 const CHIP_CODE: Chip = { label: "Payment code to check", bg: "#e8f0fe", fg: "#174ea6", bd: "#aecbfa" };
 const CHIP_LATE: Chip = { label: "Unpaid, pick-up reached", bg: "#fce8e6", fg: "#a50e0e", bd: "#f1a9a3" };
+const CHIP_PART: Chip = { label: "Part paid", bg: "#fff4e5", fg: "#7a3e00", bd: "#f7b267" };
 const CHIP_QUOTE: Chip = { label: "Quote, not held", bg: "#e8def8", fg: "#3c1f7a", bd: "#cdb9f0" };
 const CHIP_CLOSED: Chip = { label: "Closed", bg: "#e8eaed", fg: "#3c4043", bd: "#dadce0" };
 
@@ -135,10 +136,12 @@ function buildDays(first: number, todayNum: number) {
 }
 
 function chipFor(booking: StaffBooking, today: string): Chip {
-  if (booking.status === "confirmed") return CHIP_PAID;
+  const part = booking.amountPaid > 0 && balanceOf(booking) > 0;
+  if (booking.status === "confirmed") return part ? { ...CHIP_PART, label: "Balance owed" } : CHIP_PAID;
   if (booking.status === "quote") return CHIP_QUOTE;
   if (booking.status === "cancelled") return CHIP_CLOSED;
-  if (booking.pickup <= today) return CHIP_LATE;
+  if (booking.pickup <= today) return part ? { ...CHIP_LATE, label: "Balance owed, pick-up reached" } : CHIP_LATE;
+  if (part) return CHIP_PART;
   if (booking.mpesaCode) return CHIP_CODE;
   return CHIP_AWAIT;
 }
@@ -432,10 +435,12 @@ export default function HireDesk() {
   const coming = holds.filter((booking) => booking.pickup >= today && booking.pickup <= addDays(today, 6));
   const awaiting = current.filter((booking) => booking.status === "pending");
   const chase = awaiting.filter((booking) => booking.pickup <= today);
-  const awaitingTotal = awaiting.reduce((sum, booking) => sum + booking.total, 0);
-  const chaseTotal = chase.reduce((sum, booking) => sum + booking.total, 0);
+  // Money still to come in counts the balance, so part payments are taken off.
+  const awaitingTotal = awaiting.reduce((sum, booking) => sum + balanceOf(booking), 0);
+  const chaseTotal = chase.reduce((sum, booking) => sum + balanceOf(booking), 0);
   const paidCurrent = current.filter((booking) => booking.status === "confirmed");
-  const paidTotal = paidCurrent.reduce((sum, booking) => sum + booking.total, 0);
+  const fullPaidTotal = paidCurrent.reduce((sum, booking) => sum + booking.total, 0);
+  const paidTotal = current.reduce((sum, booking) => sum + Math.min(booking.amountPaid, booking.total), 0);
   const codesToCheck = bookings.filter((booking) => booking.status === "pending" && booking.mpesaCode);
   const quotes = bookings.filter((booking) => booking.status === "quote");
   const selected = bookings.find((booking) => booking.id === selectedId) || null;
@@ -561,10 +566,10 @@ export default function HireDesk() {
   const allVehOpen = vehCards.length > 0 && vehCards.every((card) => vehOpen[card.vehicle.id]);
 
   function downloadCsv() {
-    const header = ["Reference", "Status", "Customer", "Phone", "Email", "Vehicle", "Plate", "Pick-up", "Return", "Total (KSh)", "M-Pesa code", "Staff note"];
+    const header = ["Reference", "Status", "Customer", "Phone", "Email", "Vehicle", "Plate", "Pick-up", "Return", "Total (KSh)", "Paid so far (KSh)", "Balance (KSh)", "M-Pesa code", "Staff note"];
     const lines = [header.join(",")].concat(
       bookings.map((b) =>
-        [b.reference, chipFor(b, today).label, b.customerName, b.phone, b.email, b.model, b.plate || "", b.pickup, b.returnOn, b.total, b.mpesaCode, b.staffNote]
+        [b.reference, chipFor(b, today).label, b.customerName, b.phone, b.email, b.model, b.plate || "", b.pickup, b.returnOn, b.total, b.amountPaid, balanceOf(b), b.mpesaCode, b.staffNote]
           .map(csvCell)
           .join(","),
       ),
@@ -1311,9 +1316,16 @@ export default function HireDesk() {
                         ? ksh(selected.deliveryFee)
                         : "None"}
                   </Row>
-                  <Row label={selected.status === "confirmed" ? "Paid in full" : "Due in full"}>
+                  <Row label="Total">
                     <strong>
                       {ksh(selected.total)}
+                      {selected.deliveryManual ? " plus delivery" : ""}
+                    </strong>
+                  </Row>
+                  <Row label="Paid so far">{ksh(selected.amountPaid)}</Row>
+                  <Row label="Balance">
+                    <strong className={balanceOf(selected) > 0 ? "text-[#a50e0e]" : "text-[#0d5a2a]"}>
+                      {balanceOf(selected) > 0 ? ksh(balanceOf(selected)) : "Nothing owed"}
                       {selected.deliveryManual ? " plus delivery" : ""}
                     </strong>
                   </Row>
@@ -1519,6 +1531,11 @@ export default function HireDesk() {
                         <td className="px-2 py-2.5 font-bold">
                           {ksh(booking.total)}
                           {booking.deliveryManual ? " + delivery" : ""}
+                          {booking.amountPaid > 0 && balanceOf(booking) > 0 && (
+                            <span className="block text-xs font-normal text-[#7a3e00]">
+                              Paid {ksh(booking.amountPaid)} · balance {ksh(balanceOf(booking))}
+                            </span>
+                          )}
                         </td>
                         <td className="px-2 py-2.5">{booking.mpesaCode || <span className="text-[#595959]">—</span>}</td>
                         <td className="px-2 py-2.5">
@@ -1574,7 +1591,7 @@ export default function HireDesk() {
                   value={String(codesToCheck.length)}
                   note={ksh(codesToCheck.reduce((sum, b) => sum + b.total, 0)) + " if they all match"}
                 />
-                <MiniTile label="Paid in full, current and upcoming" value={ksh(paidTotal)} note={plural(paidCurrent.length, "booking")} />
+                <MiniTile label="Received so far, current and upcoming" value={ksh(paidTotal)} note="Including part payments" />
                 <MiniTile label="Still to collect" value={ksh(awaitingTotal)} note={plural(awaiting.length, "booking") + " held"} />
               </div>
               <div className="mb-3.5">
@@ -1805,7 +1822,7 @@ export default function HireDesk() {
                     <div className="text-[13px] font-bold">Awaiting payment</div>
                     <div className="text-[22px] font-bold">{plural(awaiting.length, "booking")}</div>
                     <div className="text-[13px] text-[#3f3f3f]">
-                      Due in full <strong>{ksh(awaitingTotal)}</strong>
+                      Balance still due <strong>{ksh(awaitingTotal)}</strong>
                       <br />
                       {chase.length ? plural(chase.length, "booking") + " already at pick-up" : "None at pick-up yet"}
                     </div>
@@ -1814,7 +1831,7 @@ export default function HireDesk() {
                     <div className="text-[13px] font-bold">Paid in full</div>
                     <div className="text-[22px] font-bold">{plural(paidCurrent.length, "booking")}</div>
                     <div className="text-[13px] text-[#3f3f3f]">
-                      Collected <strong>{ksh(paidTotal)}</strong>
+                      Collected <strong>{ksh(fullPaidTotal)}</strong>
                       <br />
                       Nothing due
                     </div>
@@ -1915,6 +1932,11 @@ function HoverCard({
       <div className="mt-1">
         <strong>{booking.status === "confirmed" ? "Paid in full" : "Due in full"}:</strong> {ksh(booking.total)}
         {booking.deliveryManual ? " plus delivery" : ""}
+        {booking.amountPaid > 0 && balanceOf(booking) > 0 && (
+          <span className="block">
+            <strong>Balance:</strong> {ksh(balanceOf(booking))} (paid {ksh(booking.amountPaid)})
+          </span>
+        )}
       </div>
     </div>
   );

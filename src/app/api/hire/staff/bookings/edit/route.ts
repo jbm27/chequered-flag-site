@@ -38,6 +38,7 @@ export async function POST(request: Request) {
         mpesaCode: String(body.mpesaCode ?? ""),
         staffNote: String(body.staffNote ?? ""),
         deliveryFee: body.deliveryFee,
+        amountPaid: body.amountPaid,
       },
       staff.username,
     );

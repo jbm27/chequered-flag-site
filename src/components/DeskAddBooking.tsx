@@ -81,6 +81,7 @@ export default function DeskAddBooking({
   const [insure, setInsure] = useState(false);
   const [oohNote, setOohNote] = useState("");
   const [paid, setPaid] = useState(false);
+  const [paidSoFar, setPaidSoFar] = useState("");
   const [mpesaCode, setMpesaCode] = useState("");
   const [staffNote, setStaffNote] = useState("");
   const [terms, setTerms] = useState(false);
@@ -104,6 +105,9 @@ export default function DeskAddBooking({
   const hireTotal = model ? days * model.rate : 0;
   const coverTotal = model && insure ? days * model.addon : 0;
   const total = hireTotal + coverTotal;
+  const paidText = paidSoFar.replace(/,/g, "").trim();
+  const paidAmount = paid && !quote ? total : /^\d+$/.test(paidText) ? Number(paidText) : 0;
+  const balance = Math.max(0, total - paidAmount);
 
   async function save() {
     setError("");
@@ -111,6 +115,12 @@ export default function DeskAddBooking({
     if (dateError) return setError(dateError);
     if (!quote && freeCount === 0) return setError("No " + model.name + " is free for those dates. Choose other dates or another model.");
     if (paid && quote) return setError("A delivery booking is saved as a quote first. Untick 'paid' and set the delivery charge on the booking.");
+    if (!(paid && !quote) && paidText && !/^\d+$/.test(paidText)) {
+      return setError("Enter the amount paid so far as a whole number of shillings, or leave it blank.");
+    }
+    if (!(paid && !quote) && !quote && paidAmount > total) {
+      return setError("The amount paid so far cannot be more than the total of " + ksh(total) + ".");
+    }
     if (!terms) return setError("Tick the box to confirm the driver requirements were explained.");
     setSaving(true);
     try {
@@ -134,6 +144,7 @@ export default function DeskAddBooking({
           oohNote,
           mpesaCode,
           paid,
+          amountPaid: paid && !quote ? "" : paidText,
           staffNote,
           terms,
         }),
@@ -319,14 +330,31 @@ export default function DeskAddBooking({
           Driver is 25+ and will bring licence and ID
         </label>
       </div>
-      {!quote && (
-        <div className="mt-3 max-w-[320px]">
-          <label htmlFor="nbMpesa" className={label}>
-            M-Pesa code (optional)
-          </label>
-          <input id="nbMpesa" value={mpesaCode} onChange={(e) => setMpesaCode(e.target.value)} className={input} />
-        </div>
-      )}
+      <div className="mt-3 grid max-w-[660px] gap-3 [grid-template-columns:repeat(auto-fit,minmax(200px,1fr))]">
+        {!(paid && !quote) && (
+          <div>
+            <label htmlFor="nbPaid" className={label}>
+              Paid so far, KSh (optional)
+            </label>
+            <input
+              id="nbPaid"
+              inputMode="numeric"
+              value={paidSoFar}
+              onChange={(e) => setPaidSoFar(e.target.value)}
+              placeholder="0"
+              className={input}
+            />
+          </div>
+        )}
+        {!quote && (
+          <div>
+            <label htmlFor="nbMpesa" className={label}>
+              M-Pesa code (optional)
+            </label>
+            <input id="nbMpesa" value={mpesaCode} onChange={(e) => setMpesaCode(e.target.value)} className={input} />
+          </div>
+        )}
+      </div>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[#f5f5f3] px-4 py-3 text-sm">
         <div>
@@ -337,6 +365,12 @@ export default function DeskAddBooking({
               <strong>{model?.name}</strong> · {plural(days, "day")} · hire {ksh(hireTotal)}
               {coverTotal ? " + cover " + ksh(coverTotal) : ""} = <strong>{ksh(total)}</strong>
               {quote ? " plus delivery (set later)" : ""}
+              {paidAmount > 0 && (
+                <span className="block">
+                  Paid so far {ksh(paidAmount)} · <strong>Balance {ksh(balance)}</strong>
+                  {quote ? " plus delivery" : ""}
+                </span>
+              )}
               {freeCount !== null && !quote && (
                 <span className={"font-bold " + (freeCount > 0 ? "text-[#0d5a2a]" : "text-[#a50e0e]")}>
                   {" · "}

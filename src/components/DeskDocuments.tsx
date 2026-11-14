@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { buildBookingPdf, downloadPdf, type BookingPdfData } from "../lib/bookingPdf";
 import { CONTACT } from "../lib/contact";
 import { AGREEMENT_TEXT, AGREEMENT_TITLE, AGREEMENT_VERSION, type StoredDocuments } from "../lib/documents";
-import { formatDay, ksh, type StaffBooking } from "../lib/hire";
+import { balanceOf, formatDay, ksh, type StaffBooking } from "../lib/hire";
 
 // Desk view of a website booking's licences, drivers and signed hire agreement, with the booking PDF.
 // The photos are fetched only when a staff member opens the booking, and are never cached.
@@ -40,6 +40,11 @@ function pdfData(booking: StaffBooking, docs: StoredDocuments): BookingPdfData {
     });
   }
   const sameText = docs.agreementVersion === AGREEMENT_VERSION;
+  const partPaid = booking.amountPaid > 0 && balanceOf(booking) > 0;
+  if (partPaid) {
+    costs.push({ label: "Total", amount: ksh(booking.total) + (booking.deliveryManual ? " plus delivery" : "") });
+    costs.push({ label: "Paid so far", amount: "- " + ksh(booking.amountPaid) });
+  }
   return {
     reference: booking.reference,
     status: STATUS[booking.status],
@@ -50,8 +55,8 @@ function pdfData(booking: StaffBooking, docs: StoredDocuments): BookingPdfData {
     daysText: days,
     location: [booking.deliverySummary || booking.location, ...booking.deliveryDetail.split("\n")].filter(Boolean),
     costs,
-    totalLabel: booking.status === "confirmed" ? "Paid in full" : "Due in full",
-    total: ksh(booking.total) + (booking.deliveryManual ? " plus delivery" : ""),
+    totalLabel: partPaid ? "Balance due" : booking.status === "confirmed" ? "Paid in full" : "Due in full",
+    total: (partPaid ? ksh(balanceOf(booking)) : ksh(booking.total)) + (booking.deliveryManual ? " plus delivery" : ""),
     customer: { name: booking.customerName, phone: booking.phone, email: booking.email },
     drivers: docs.drivers,
     signature: docs.signature,

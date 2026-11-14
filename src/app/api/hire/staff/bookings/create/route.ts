@@ -9,7 +9,7 @@ const COOKIE = "cf_hire_session";
 
 // Staff add a booking by hand, for example one taken over the phone.
 // Same checks, prices and vehicle assignment as a website booking; email is optional,
-// and staff can mark it as already paid in full.
+// and staff can mark it as already paid in full, or record a part payment (amount paid so far).
 export async function POST(request: Request) {
   if (!databaseConfigured()) {
     return NextResponse.json({ error: "Bookings are not connected yet." }, { status: 503 });
@@ -48,7 +48,7 @@ export async function POST(request: Request) {
         mpesaCode: String(body.mpesaCode ?? ""),
         terms: Boolean(body.terms),
       },
-      { confirmed: Boolean(body.paid), staffNote, emailOptional: true },
+      { confirmed: Boolean(body.paid), staffNote, emailOptional: true, amountPaid: body.amountPaid },
     );
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

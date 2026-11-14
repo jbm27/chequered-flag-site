@@ -10,7 +10,7 @@ export const PRICING = { base: 1000, perKm: 50, freeKm: 5, maxKm: 150, roadFacto
 // "Deliver and collect" is charged for both trips.
 export const DELIVERY = {
   freeKm: 50,
-  perKm: { saloon: 40, suv: 50, "4x4": 65 } as Record<"saloon" | "suv" | "4x4", number>,
+  perKm: { saloon: 45, suv: 55, "4x4": 70 } as Record<"saloon" | "suv" | "4x4", number>,
 };
 
 export type VehicleCategory = "saloon" | "suv" | "4x4";

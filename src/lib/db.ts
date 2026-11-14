@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { Pool, type PoolClient } from "pg";
 import { FLEET, fleetModels, modelById, vehicleById } from "./fleet";
 import type { BookingDocuments, StoredDocuments } from "./documents";
+import { VEHICLE_RECORDS } from "./vehicleRecords";
 import {
   addDays,
   assessBooking,
@@ -140,6 +141,16 @@ async function setup() {
       agreement_version text NOT NULL,
       signed_at timestamptz NOT NULL DEFAULT now()
     );
+    -- Vehicle records that staff keep up to date on the desk (odometer, year, condition notes).
+    -- updated_at is also how the desk knows a vehicle has been checked since it last came back from a hire.
+    CREATE TABLE IF NOT EXISTS vehicle_records (
+      vehicle_id text PRIMARY KEY REFERENCES vehicles(id),
+      year integer,
+      odometer_km integer,
+      notes text NOT NULL DEFAULT '',
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      updated_by text NOT NULL DEFAULT ''
+    );
   `);
 
   for (const vehicle of FLEET) {
@@ -158,6 +169,17 @@ async function setup() {
     );
   }
   await db.query(`UPDATE vehicles SET active = false WHERE NOT (id = ANY($1::text[]))`, [FLEET.map((vehicle) => vehicle.id)]);
+
+  // First run only: start each vehicle record from the fleet list. Existing records are never overwritten.
+  for (const vehicle of FLEET) {
+    const start = VEHICLE_RECORDS[vehicle.id];
+    await db.query(
+      `INSERT INTO vehicle_records (vehicle_id, year, odometer_km, updated_by)
+       VALUES ($1, $2, $3, 'fleet list')
+       ON CONFLICT (vehicle_id) DO NOTHING`,
+      [vehicle.id, start?.year ?? null, start?.km ?? null],
+    );
+  }
 
   const count = await db.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM staff_users");
   if (count.rows[0].n === 0) {
@@ -851,6 +873,75 @@ export async function updateBooking(id: string, action: string, note: string, de
     (error as Error & { status?: number }).status = 409;
     throw error;
   }
+  return { ok: true };
+}
+
+export type VehicleRecord = {
+  year: number | null;
+  km: number | null;
+  notes: string;
+  updatedAt: string;
+  updatedBy: string;
+};
+
+// Staff only: the saved record for every vehicle, by vehicle id.
+export async function listVehicleRecords(): Promise<Record<string, VehicleRecord>> {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const result = await db.query<{
+    vehicle_id: string;
+    year: number | null;
+    odometer_km: number | null;
+    notes: string;
+    updated_at: Date;
+    updated_by: string;
+  }>(`SELECT vehicle_id, year, odometer_km, notes, updated_at, updated_by FROM vehicle_records`);
+  const out: Record<string, VehicleRecord> = {};
+  for (const row of result.rows) {
+    out[row.vehicle_id] = {
+      year: row.year === null ? null : Number(row.year),
+      km: row.odometer_km === null ? null : Number(row.odometer_km),
+      notes: row.notes || "",
+      updatedAt: new Date(row.updated_at).toISOString(),
+      updatedBy: row.updated_by || "",
+    };
+  }
+  return out;
+}
+
+// Staff update a vehicle record on the desk. Saving also marks the vehicle as checked after its last return.
+export async function updateVehicleRecord(id: string, raw: { year?: unknown; km?: unknown; notes?: unknown }, updatedBy: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  if (!FLEET.some((vehicle) => vehicle.id === id)) throw staffError("That vehicle was not found.", 404);
+  const whole = (value: unknown) => {
+    const text = String(value ?? "").trim().replace(/[,\s]/g, "");
+    if (!text) return null;
+    return /^\d+$/.test(text) ? Number(text) : NaN;
+  };
+  const year = whole(raw.year);
+  const thisYear = Number(todayNairobi().slice(0, 4));
+  if (year !== null && (Number.isNaN(year) || year < 1950 || year > thisYear + 1)) {
+    throw staffError("Enter the year as four digits, for example 2012, or leave it blank.", 400);
+  }
+  const km = whole(raw.km);
+  if (km !== null && (Number.isNaN(km) || km > 3_000_000)) {
+    throw staffError("Enter the odometer reading in whole kilometres, or leave it blank.", 400);
+  }
+  const notes = String(raw.notes ?? "").replace(/\r/g, "").trim().slice(0, 1000);
+  await db.query(
+    `INSERT INTO vehicle_records (vehicle_id, year, odometer_km, notes, updated_at, updated_by)
+     VALUES ($1, $2, $3, $4, now(), $5)
+     ON CONFLICT (vehicle_id) DO UPDATE SET
+       year = EXCLUDED.year,
+       odometer_km = EXCLUDED.odometer_km,
+       notes = EXCLUDED.notes,
+       updated_at = now(),
+       updated_by = EXCLUDED.updated_by`,
+    [id, year, km, notes, updatedBy.slice(0, 60)],
+  );
   return { ok: true };
 }
 

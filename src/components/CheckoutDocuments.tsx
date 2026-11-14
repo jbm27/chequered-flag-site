@@ -39,6 +39,92 @@ export async function compressPhoto(file: File): Promise<DocImage> {
   }
 }
 
+// Live camera view for taking the licence photo (phone or laptop camera). Uses the rear camera when there is one.
+function CameraCapture({ onPhoto, onCancel, onUnavailable }: {
+  onPhoto: (file: File) => void;
+  onCancel: () => void;
+  onUnavailable: (message: string) => void;
+}) {
+  const video = useRef<HTMLVideoElement>(null);
+  const stream = useRef<MediaStream | null>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
+      .then((media) => {
+        if (!live) {
+          media.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        stream.current = media;
+        if (video.current) {
+          video.current.srcObject = media;
+          video.current.play().catch(() => undefined);
+        }
+      })
+      .catch(() => {
+        if (live) onUnavailable("The camera could not be opened. Allow camera access, or use Upload a photo instead.");
+      });
+    return () => {
+      live = false;
+      stream.current?.getTracks().forEach((track) => track.stop());
+      stream.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function snap() {
+    const el = video.current;
+    if (!el || !el.videoWidth) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = el.videoWidth;
+    canvas.height = el.videoHeight;
+    canvas.getContext("2d")!.drawImage(el, 0, 0);
+    canvas.toBlob(
+      (blob) => {
+        if (blob) onPhoto(new File([blob], "licence.jpg", { type: "image/jpeg" }));
+      },
+      "image/jpeg",
+      0.92,
+    );
+  }
+
+  return (
+    <div className="w-full">
+      <div className="relative overflow-hidden rounded-lg bg-black">
+        <video
+          ref={video}
+          playsInline
+          muted
+          autoPlay
+          onLoadedMetadata={() => setReady(true)}
+          aria-label="Camera view"
+          className="block aspect-[4/3] w-full object-cover"
+        />
+        <div className="pointer-events-none absolute inset-[10%] rounded-xl border-2 border-dashed border-white/80" />
+        <p className="pointer-events-none absolute inset-x-0 bottom-2 text-center text-xs font-semibold text-white [text-shadow:0_1px_2px_#000]">
+          {ready ? "Fit the front of the licence inside the frame" : "Opening the camera…"}
+        </p>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={snap}
+          disabled={!ready}
+          className="min-h-[44px] rounded-lg bg-[#171717] px-4 text-sm font-bold text-white disabled:opacity-50"
+        >
+          Take photo
+        </button>
+        <button type="button" onClick={onCancel} className="min-h-[44px] rounded-lg border border-[#171717] bg-white px-4 text-sm font-bold">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function LicencePicker({
   id,
   label,
@@ -52,50 +138,106 @@ export function LicencePicker({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [camera, setCamera] = useState(false);
+  const cameraInput = useRef<HTMLInputElement>(null);
+
+  async function use(file: File | undefined) {
+    if (!file) return;
+    setBusy(true);
+    setError("");
+    try {
+      onChange(await compressPhoto(file));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That photo could not be used.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openCamera() {
+    setError("");
+    // A live camera view where the browser allows it; otherwise the phone's own camera app.
+    if (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && window.isSecureContext) setCamera(true);
+    else cameraInput.current?.click();
+  }
+
+  const btn =
+    "inline-flex min-h-[40px] cursor-pointer items-center rounded-md border border-[#171717] bg-white px-3 text-[13px] font-bold";
+
   return (
     <div>
-      <label htmlFor={id} className="mb-1.5 block text-[13px] text-[#595959]">
+      <div className="mb-1.5 text-[13px] text-[#595959]" id={id + "-label"}>
         {label}
-      </label>
+      </div>
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-[#c8c8c8] bg-[#fafaf8] p-3">
-        {value ? (
-          <img src={value.data} alt="Licence photo preview" className="h-20 w-auto max-w-[140px] rounded border border-[#e5e5e5] object-cover" />
-        ) : (
-          <div className="grid h-20 w-[120px] place-items-center rounded border border-[#e5e5e5] bg-white text-center text-[11px] text-[#595959]">
-            Front of licence
-          </div>
-        )}
-        <div className="min-w-0 flex-1 text-sm">
-          <input
-            id={id}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="block w-full text-[13px] file:mr-3 file:cursor-pointer file:rounded-md file:border file:border-[#171717] file:bg-white file:px-3 file:py-1.5 file:text-[13px] file:font-bold"
-            onChange={async (event) => {
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              if (!file) return;
-              setBusy(true);
-              setError("");
-              try {
-                onChange(await compressPhoto(file));
-              } catch (err) {
-                setError(err instanceof Error ? err.message : "That photo could not be used.");
-              } finally {
-                setBusy(false);
-              }
+        {camera ? (
+          <CameraCapture
+            onPhoto={(file) => {
+              setCamera(false);
+              use(file);
+            }}
+            onCancel={() => setCamera(false)}
+            onUnavailable={(message) => {
+              setCamera(false);
+              setError(message);
             }}
           />
-          <p className="mt-1 text-xs text-[#595959]">
-            {busy ? "Preparing photo…" : value ? "Photo added. Choose again to replace it." : "Take a clear photo of the front, with all four corners showing."}
-          </p>
-          {error && <p className="mt-1 text-xs font-bold text-[#9b1c1c]">{error}</p>}
-        </div>
-        {value && (
-          <button type="button" onClick={() => onChange(null)} className="text-[13px] font-semibold underline">
-            Remove
-          </button>
+        ) : (
+          <>
+            {value ? (
+              <img src={value.data} alt="Licence photo preview" className="h-20 w-auto max-w-[140px] rounded border border-[#e5e5e5] object-cover" />
+            ) : (
+              <div className="grid h-20 w-[120px] place-items-center rounded border border-[#e5e5e5] bg-white text-center text-[11px] text-[#595959]">
+                Front of licence
+              </div>
+            )}
+            <div className="min-w-0 flex-1 text-sm">
+              <div className="flex flex-wrap gap-2" role="group" aria-labelledby={id + "-label"}>
+                <button type="button" onClick={openCamera} className={btn}>
+                  {value ? "Retake photo" : "Take a photo"}
+                </button>
+                <label htmlFor={id} className={btn}>
+                  {value ? "Upload another" : "Upload a photo"}
+                </label>
+              </div>
+              {/* Upload from the gallery or files */}
+              <input
+                id={id}
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  use(file);
+                }}
+              />
+              {/* Fallback when the live camera is not available: opens the phone's camera app */}
+              <input
+                ref={cameraInput}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                tabIndex={-1}
+                aria-hidden="true"
+                className="sr-only"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  use(file);
+                }}
+              />
+              <p className="mt-1.5 text-xs text-[#595959]">
+                {busy ? "Preparing photo…" : value ? "Photo added." : "Use your camera or upload a clear photo of the front, with all four corners showing."}
+              </p>
+              {error && <p className="mt-1 text-xs font-bold text-[#9b1c1c]">{error}</p>}
+            </div>
+            {value && (
+              <button type="button" onClick={() => onChange(null)} className="text-[13px] font-semibold underline">
+                Remove
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>

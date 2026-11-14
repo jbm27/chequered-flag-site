@@ -10,6 +10,7 @@ import {
   AGREEMENT_TITLE,
   AGREEMENT_VERSION,
   MAX_DRIVERS,
+  agreementLine,
   type DocImage,
 } from "../lib/documents";
 import {
@@ -311,14 +312,14 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   }
 
   function driversProblem() {
-    if (!mainLicence) return "Upload a photo of the front of your driving licence.";
+    if (!mainLicence) return "Add a photo of the front of your driving licence.";
     for (let index = 0; index < extraDrivers.length; index += 1) {
       const driver = extraDrivers[index];
       const n = index + 2;
       if (driver.name.trim().length < 2) return "Enter the full name of driver " + n + ".";
       const digits = driver.phone.replace(/\D/g, "");
       if (digits.length < 9 || digits.length > 15) return "Enter a mobile number for driver " + n + ".";
-      if (!driver.licence) return "Upload a photo of the front of driver " + n + "'s licence.";
+      if (!driver.licence) return "Add a photo of the front of driver " + n + "'s licence.";
     }
     return "";
   }
@@ -977,7 +978,15 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                         </div>
                       </div>
                       <div className="mt-4">
-                        <LicencePicker id="licMain" label="Your driving licence (front)" value={mainLicence} onChange={setMainLicence} />
+                        <LicencePicker
+                          id="licMain"
+                          label="Your driving licence (front)"
+                          value={mainLicence}
+                          onChange={(image) => {
+                            setMainLicence(image);
+                            if (image && /licence/i.test(formError)) setFormError("");
+                          }}
+                        />
                       </div>
 
                       <div className="mt-5">
@@ -1034,7 +1043,10 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                                 id={"dLic" + index}
                                 label={"Driver " + (index + 2) + "'s driving licence (front)"}
                                 value={driver.licence}
-                                onChange={(image) => setExtraDrivers((list) => list.map((d, i) => (i === index ? { ...d, licence: image } : d)))}
+                                onChange={(image) => {
+                                  setExtraDrivers((list) => list.map((d, i) => (i === index ? { ...d, licence: image } : d)));
+                                  if (image && /licence/i.test(formError)) setFormError("");
+                                }}
                               />
                             </div>
                           </div>
@@ -1145,13 +1157,16 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                           tabIndex={0}
                           role="region"
                           aria-label={AGREEMENT_TITLE}
-                          className="mt-2 h-[240px] overflow-y-auto overscroll-contain rounded-lg border border-[#c8c8c8] bg-white px-4 py-3 text-sm leading-relaxed text-[#3f3f3f] focus:outline focus:outline-2 focus:outline-[#171717]"
+                          className="mt-2 h-[300px] overflow-y-auto overscroll-contain rounded-lg border border-[#c8c8c8] bg-white px-4 py-3 text-sm leading-relaxed text-[#3f3f3f] focus:outline focus:outline-2 focus:outline-[#171717]"
                         >
-                          {AGREEMENT_TEXT.map((paragraph, index) => (
-                            <p key={index} className={"mb-2.5 " + (index === 0 ? "font-bold text-[#9b1c1c]" : "")}>
-                              {paragraph}
-                            </p>
-                          ))}
+                          {AGREEMENT_TEXT.map((paragraph, index) => {
+                            const { level, text } = agreementLine(paragraph);
+                            return (
+                              <p key={index} className={level === 2 ? "mb-1 pl-8" : level === 1 ? "mb-2 pl-4" : "mb-2"}>
+                                {text}
+                              </p>
+                            );
+                          })}
                           <p className="mt-3 text-xs text-[#595959]">Version {AGREEMENT_VERSION}</p>
                         </div>
                       </div>

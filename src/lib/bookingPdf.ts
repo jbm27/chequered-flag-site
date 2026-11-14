@@ -2,7 +2,7 @@
 // Text uses the PDF's built-in Helvetica fonts; licence photos and drawn signatures are embedded as JPEGs.
 // Used on the booking page (the customer's copy) and on the staff desk (from the saved documents).
 
-import type { DocImage } from "./documents";
+import { agreementLine, type DocImage } from "./documents";
 
 export type BookingPdfData = {
   reference: string;
@@ -225,8 +225,9 @@ export function buildBookingPdf(data: BookingPdfData): Uint8Array {
   para("Version " + data.agreementVersion + " · signed by " + data.signature.name + " on " + data.signedAt, 9, false, true);
   rule();
   for (const paragraph of data.agreementText) {
-    para(paragraph, 10);
-    gap(5);
+    const { level, text: words } = agreementLine(paragraph);
+    para(words, 9.5, false, false, level * 16);
+    gap(level === 2 ? 2 : 4);
   }
 
   // Licences

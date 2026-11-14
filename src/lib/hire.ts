@@ -588,4 +588,11 @@ export type StaffBooking = {
   oohNote: string;
   mpesaCode: string;
   staffNote: string;
+  hasDocuments?: boolean;
+  amountPaid: number; // KSh received so far, entered by staff (part payments). Full when confirmed.
 };
+
+// What is still owed on a booking. A delivery that has not been priced yet only counts the hire so far.
+export function balanceOf(booking: Pick<StaffBooking, "total" | "amountPaid">) {
+  return Math.max(0, booking.total - booking.amountPaid);
+}

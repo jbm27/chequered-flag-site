@@ -3,6 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { CONTACT } from "../lib/contact";
 import PinMap, { type LatLng } from "./PinMap";
+import { LicencePicker, SignatureBox } from "./CheckoutDocuments";
+import { buildBookingPdf, downloadPdf, type BookingPdfData } from "../lib/bookingPdf";
+import {
+  AGREEMENT_TEXT,
+  AGREEMENT_TITLE,
+  AGREEMENT_VERSION,
+  MAX_DRIVERS,
+  agreementLine,
+  type DocImage,
+} from "../lib/documents";
 import {
   addDays,
   assessBooking,
@@ -124,6 +134,13 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const [insure, setInsure] = useState(false);
   const [mpesaCode, setMpesaCode] = useState("");
   const [terms, setTerms] = useState(false);
+  // Security update: licence photos for every driver, extra drivers, and the signed hire agreement.
+  const [mainLicence, setMainLicence] = useState<DocImage | null>(null);
+  const [extraDrivers, setExtraDrivers] = useState<{ name: string; phone: string; licence: DocImage | null }[]>([]);
+  const [sigMode, setSigMode] = useState<"drawn" | "typed">("drawn");
+  const [sigImage, setSigImage] = useState<DocImage | null>(null);
+  const [sigName, setSigName] = useState("");
+  const [pdfData, setPdfData] = useState<BookingPdfData | null>(null);
   const [availability, setAvailability] = useState<AvailabilityResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -294,8 +311,39 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
     scrollToId("checkout");
   }
 
+  function driversProblem() {
+    if (!mainLicence) return "Add a photo of the front of your driving licence.";
+    for (let index = 0; index < extraDrivers.length; index += 1) {
+      const driver = extraDrivers[index];
+      const n = index + 2;
+      if (driver.name.trim().length < 2) return "Enter the full name of driver " + n + ".";
+      const digits = driver.phone.replace(/\D/g, "");
+      if (digits.length < 9 || digits.length > 15) return "Enter a mobile number for driver " + n + ".";
+      if (!driver.licence) return "Add a photo of the front of driver " + n + "'s licence.";
+    }
+    return "";
+  }
+
+  function signatureProblem() {
+    if (sigMode === "drawn" && !sigImage) return "Draw your signature in the box, or choose to type your name.";
+    if (sigMode === "typed" && sigName.trim().length < 2) return "Type your full name to sign the hire agreement.";
+    return "";
+  }
+
+  function documentsPayload() {
+    return {
+      drivers: [
+        { name, phone, licence: mainLicence },
+        ...extraDrivers.map((driver) => ({ name: driver.name, phone: driver.phone, licence: driver.licence })),
+      ],
+      signature:
+        sigMode === "drawn" ? { kind: "drawn", name, image: sigImage } : { kind: "typed", name: sigName.trim() },
+      agreementVersion: AGREEMENT_VERSION,
+    };
+  }
+
   function goStep2() {
-    const problem = check(true);
+    const problem = check(true) || driversProblem();
     if (problem) {
       setFormError(problem);
       return;
@@ -307,7 +355,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
 
   async function submit() {
     if (!selected) return;
-    const problem = check(terms);
+    const problem = check(true) || driversProblem() || signatureProblem() || (terms ? "" : "Tick the box to confirm you have read and signed the hire agreement.");
     if (problem) {
       setFormError(problem);
       return;
@@ -318,11 +366,16 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       const response = await fetch("/api/hire/bookings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bookingInput(terms)),
+        body: JSON.stringify({ ...bookingInput(terms), documents: documentsPayload() }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "The booking could not be saved.");
+      setPdfData(pdfFor(body as PublicBookingResult));
       remember(body);
+      setMainLicence(null);
+      setExtraDrivers([]);
+      setSigImage(null);
+      setSigName("");
       setSelectedId("");
       setStep(1);
       setTerms(false);
@@ -334,6 +387,53 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // The customer's PDF copy is made here in the browser from what they have just entered,
+  // so their licence photos are never served back over the internet.
+  function pdfFor(booking: PublicBookingResult): BookingPdfData {
+    const now = new Date();
+    const stamp = now.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Africa/Nairobi" });
+    const locationLines =
+      delivery === "none"
+        ? ["Collect from our workshop: " + CONTACT.locationShort + ".", "Return the vehicle to the same place."]
+        : [
+            booking.summary,
+            pin ? "Pin: " + pin.lat.toFixed(5) + ", " + pin.lng.toFixed(5) + " · about " + straightKm(pin.lat, pin.lng) + " km in a straight line from our workshop" : "",
+            note.trim() ? "Delivery instructions: " + note.trim() : "",
+          ].filter(Boolean);
+    const costs = [{ label: "Hire, " + plural(booking.days) + " × " + ksh(booking.days ? booking.hireTotal / booking.days : 0), amount: ksh(booking.hireTotal) }];
+    if (booking.insuranceTotal) costs.push({ label: "Damage cover, " + plural(booking.days), amount: ksh(booking.insuranceTotal) });
+    if (delivery !== "none") {
+      costs.push({
+        label: "Delivery" + (deliveryQuote.breakdown && !booking.manual ? ", " + deliveryQuote.breakdown : ""),
+        amount: booking.manual ? "Quoted by us before you pay" : booking.deliveryFee ? ksh(booking.deliveryFee) : "Free",
+      });
+    }
+    return {
+      reference: booking.reference,
+      status: booking.manual ? "Request received – delivery to be priced by us" : "Vehicle held – awaiting full payment",
+      created: stamp,
+      vehicle: booking.model,
+      pickupText: formatDay(booking.pickup) + ", " + booking.pickTime,
+      returnText: formatDay(booking.returnOn) + ", " + booking.retTime,
+      daysText: plural(booking.days),
+      location: locationLines,
+      costs,
+      totalLabel: booking.manual ? "Hire so far" : "Due in full",
+      total: ksh(booking.total),
+      customer: { name: name.trim(), phone: phone.trim(), email: email.trim() },
+      drivers: [
+        { name: name.trim(), phone: phone.trim(), licence: mainLicence! },
+        ...extraDrivers.map((driver) => ({ name: driver.name.trim(), phone: driver.phone.trim(), licence: driver.licence! })),
+      ],
+      signature: sigMode === "drawn" ? { kind: "drawn", name: name.trim(), image: sigImage! } : { kind: "typed", name: sigName.trim() },
+      signedAt: stamp,
+      agreementTitle: AGREEMENT_TITLE,
+      agreementVersion: AGREEMENT_VERSION,
+      agreementText: AGREEMENT_TEXT,
+      footer: "Chequered Flag · " + CONTACT.locationShort + " · " + CONTACT.phoneDisplay,
+    };
   }
 
   async function sendCode(event: React.FormEvent) {
@@ -363,6 +463,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
 
   function bookAnother() {
     setResult(null);
+    setPdfData(null);
     setCodeMessage("");
     try {
       sessionStorage.removeItem(STORED);
@@ -777,6 +878,26 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                     </>
                   )}
                 </div>
+                {pdfData && pdfData.reference === result.reference ? (
+                  <div className="mx-auto mb-[18px] max-w-[520px] rounded-lg border-2 border-[#171717] bg-white p-4 text-left">
+                    <strong className="block">Your booking PDF</strong>
+                    <p className="mt-1 text-[13px] text-[#595959]">
+                      Your details, signed agreement, licence photos, dates and costs. Please download and keep it as your
+                      confirmation.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => downloadPdf(buildBookingPdf(pdfData), "Chequered-Flag-" + pdfData.reference + ".pdf")}
+                      className={btnDark + " mt-3"}
+                    >
+                      Download booking PDF
+                    </button>
+                  </div>
+                ) : (
+                  <p className="mx-auto mb-[18px] max-w-[520px] text-[13px] text-[#595959]">
+                    Your booking PDF is kept on our booking desk. Contact us if you need a copy.
+                  </p>
+                )}
                 {!result.manual && (
                   <form
                     onSubmit={sendCode}
@@ -856,9 +977,92 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                           />
                         </div>
                       </div>
+                      <div className="mt-4">
+                        <LicencePicker
+                          id="licMain"
+                          label="Your driving licence (front)"
+                          value={mainLicence}
+                          onChange={(image) => {
+                            setMainLicence(image);
+                            if (image && /licence/i.test(formError)) setFormError("");
+                          }}
+                        />
+                      </div>
+
+                      <div className="mt-5">
+                        <div className="text-[15px] font-bold">Other drivers</div>
+                        <p className="mt-0.5 text-[13px] text-[#595959]">
+                          Only drivers named here may drive the vehicle. Add anyone else who might drive it during the hire.
+                        </p>
+                        {extraDrivers.map((driver, index) => (
+                          <div key={index} className="mt-3 rounded-lg border border-[#e5e5e5] bg-white p-3.5">
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <strong className="text-sm">Driver {index + 2}</strong>
+                              <button
+                                type="button"
+                                onClick={() => setExtraDrivers((list) => list.filter((_, i) => i !== index))}
+                                className="text-[13px] font-semibold underline"
+                              >
+                                Remove driver
+                              </button>
+                            </div>
+                            <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(200px,1fr))]">
+                              <div>
+                                <label htmlFor={"dName" + index} className={label}>
+                                  Full name
+                                </label>
+                                <input
+                                  id={"dName" + index}
+                                  value={driver.name}
+                                  onChange={(event) =>
+                                    setExtraDrivers((list) => list.map((d, i) => (i === index ? { ...d, name: event.target.value } : d)))
+                                  }
+                                  autoComplete="off"
+                                  className={field}
+                                />
+                              </div>
+                              <div>
+                                <label htmlFor={"dPhone" + index} className={label}>
+                                  Mobile number
+                                </label>
+                                <input
+                                  id={"dPhone" + index}
+                                  type="tel"
+                                  value={driver.phone}
+                                  onChange={(event) =>
+                                    setExtraDrivers((list) => list.map((d, i) => (i === index ? { ...d, phone: event.target.value } : d)))
+                                  }
+                                  autoComplete="off"
+                                  placeholder="+254"
+                                  className={field}
+                                />
+                              </div>
+                            </div>
+                            <div className="mt-3">
+                              <LicencePicker
+                                id={"dLic" + index}
+                                label={"Driver " + (index + 2) + "'s driving licence (front)"}
+                                value={driver.licence}
+                                onChange={(image) => {
+                                  setExtraDrivers((list) => list.map((d, i) => (i === index ? { ...d, licence: image } : d)));
+                                  if (image && /licence/i.test(formError)) setFormError("");
+                                }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                        {extraDrivers.length < MAX_DRIVERS - 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setExtraDrivers((list) => [...list, { name: "", phone: "", licence: null }])}
+                            className={btnLight + " mt-3"}
+                          >
+                            + Add driver
+                          </button>
+                        )}
+                      </div>
                       <p className="mt-3 text-[13px] text-[#595959]">
-                        Please bring your driving licence and ID to collection. We check them at handover, so there is
-                        nothing to upload now.
+                        Every driver must be at least 25. Please also bring the licences and ID to collection.
                       </p>
                       {formError && (
                         <p role="alert" className="mt-3 text-sm font-bold text-[#9b1c1c]">
@@ -946,6 +1150,41 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                         </div>
                       )}
 
+                      <div className="mt-5">
+                        <div className="text-[15px] font-bold">{AGREEMENT_TITLE}</div>
+                        <p className="mt-0.5 text-[13px] text-[#595959]">Scroll inside the box to read it all.</p>
+                        <div
+                          tabIndex={0}
+                          role="region"
+                          aria-label={AGREEMENT_TITLE}
+                          className="mt-2 h-[300px] overflow-y-auto overscroll-contain rounded-lg border border-[#c8c8c8] bg-white px-4 py-3 text-sm leading-relaxed text-[#3f3f3f] focus:outline focus:outline-2 focus:outline-[#171717]"
+                        >
+                          {AGREEMENT_TEXT.map((paragraph, index) => {
+                            const { level, text } = agreementLine(paragraph);
+                            return (
+                              <p key={index} className={level === 2 ? "mb-1 pl-8" : level === 1 ? "mb-2 pl-4" : "mb-2"}>
+                                {text}
+                              </p>
+                            );
+                          })}
+                          <p className="mt-3 text-xs text-[#595959]">Version {AGREEMENT_VERSION}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4">
+                        <div className="mb-1 text-[15px] font-bold">Sign the agreement</div>
+                        <SignatureBox
+                          mode={sigMode}
+                          onMode={setSigMode}
+                          typedName={sigName}
+                          onTypedName={setSigName}
+                          onDrawn={(image) => {
+                            setSigImage(image);
+                            if (image && /signature|sign the hire/i.test(formError)) setFormError("");
+                          }}
+                        />
+                      </div>
+
                       <div className="mt-3.5 flex items-start gap-2.5">
                         <input
                           id="termsBox"
@@ -955,7 +1194,8 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                           className="mt-px h-[22px] w-[22px] flex-none"
                         />
                         <label htmlFor="termsBox" className="text-sm leading-normal">
-                          I am at least 25 and I will bring a valid driving licence and ID to collection.
+                          I have read and signed the hire agreement, and every driver named on this booking is at least 25
+                          with a valid driving licence.
                         </label>
                       </div>
                       {formError && (

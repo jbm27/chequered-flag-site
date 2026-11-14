@@ -85,6 +85,7 @@ export default function DeskEditBooking({
   const [insure, setInsure] = useState(booking.insuranceTotal > 0);
   const [oohNote, setOohNote] = useState(booking.oohNote);
   const [mpesaCode, setMpesaCode] = useState(booking.mpesaCode);
+  const [paidSoFar, setPaidSoFar] = useState(String(booking.amountPaid || 0));
   const [staffNote, setStaffNote] = useState(editableNote(booking.staffNote));
   const delivered = !booking.deliverySummary.startsWith("Collect at");
   const feeEditable = booking.status !== "quote" && delivered && booking.deliveryFee !== null;
@@ -113,9 +114,17 @@ export default function DeskEditBooking({
   const coverTotal = model && insure ? days * model.addon : 0;
   const fee = feeEditable ? Number(deliveryFee.replace(/,/g, "")) || 0 : booking.deliveryFee || 0;
   const total = hireTotal + coverTotal + fee;
+  const paidText = paidSoFar.replace(/,/g, "").trim();
+  const paidAmount = /^\d+$/.test(paidText) ? Number(paidText) : 0;
+  const unpricedDelivery = booking.deliveryManual || (delivered && booking.deliveryFee === null);
+  const balance = Math.max(0, total - paidAmount);
 
   async function save() {
     setError("");
+    if (paidText && !/^\d+$/.test(paidText)) return setError("Enter the amount paid so far as a whole number of shillings.");
+    if (!unpricedDelivery && paidAmount > total) {
+      return setError("The amount paid so far cannot be more than the total of " + ksh(total) + ".");
+    }
     if (!model) return setError("Choose a vehicle model.");
     if (!validDates) return setError("Choose valid dates.");
     if (holdsVehicle && freeCount === 0) return setError("No " + model.name + " is free for those dates.");
@@ -140,6 +149,7 @@ export default function DeskEditBooking({
           mpesaCode,
           staffNote,
           deliveryFee: feeEditable ? deliveryFee : undefined,
+          amountPaid: paidText || "0",
         }),
       });
       const body = await response.json();
@@ -159,7 +169,8 @@ export default function DeskEditBooking({
           <h3 className="text-lg font-bold">Edit {booking.reference}</h3>
           <p className="mt-0.5 max-w-[640px] text-[13px] text-[#595959]">
             Correct any details. If you change the dates or model, the desk checks a vehicle is free and recalculates
-            the total. The payment status stays the same.
+            the total. The payment status stays the same. Update "Paid so far" when the customer pays part of the
+            balance.
           </p>
         </div>
         <button type="button" onClick={onClose} className={btnLight}>
@@ -249,6 +260,12 @@ export default function DeskEditBooking({
           </label>
           <input id="ebMpesa" value={mpesaCode} onChange={(e) => setMpesaCode(e.target.value)} className={input} />
         </div>
+        <div>
+          <label htmlFor="ebPaid" className={label}>
+            Paid so far, KSh
+          </label>
+          <input id="ebPaid" inputMode="numeric" value={paidSoFar} onChange={(e) => setPaidSoFar(e.target.value)} className={input} />
+        </div>
         {feeEditable && (
           <div>
             <label htmlFor="ebFee" className={label}>
@@ -299,6 +316,10 @@ export default function DeskEditBooking({
               {coverTotal ? " + cover " + ksh(coverTotal) : ""}
               {fee ? " + delivery " + ksh(fee) : ""} = <strong>{ksh(total)}</strong>
               {booking.status === "quote" ? " plus delivery (set when you hold it)" : ""}
+              <span className="block">
+                Paid so far {ksh(paidAmount)} · <strong>Balance {ksh(balance)}</strong>
+                {unpricedDelivery ? " plus delivery" : ""}
+              </span>
               {holdsVehicle && freeCount !== null && (
                 <span className={"font-bold " + (freeCount > 0 ? "text-[#0d5a2a]" : "text-[#a50e0e]")}>
                   {" · "}

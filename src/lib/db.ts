@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { Pool, type PoolClient } from "pg";
 import { FLEET, fleetModels, modelById, vehicleById } from "./fleet";
+import type { BookingDocuments, StoredDocuments } from "./documents";
 import {
   addDays,
   assessBooking,
@@ -21,6 +22,7 @@ import {
   type PublicBookingResult,
   type PublicModelCard,
   type StaffBooking,
+  ksh,
 } from "./hire";
 
 const SESSION_DAYS = 14;
@@ -125,8 +127,19 @@ async function setup() {
         OR (status IN ('pending', 'confirmed') AND vehicle_id IS NOT NULL)
       )
     );
+    -- Part payments, entered by staff on the desk. Added after launch, so existing bookings start at 0.
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS amount_paid integer NOT NULL DEFAULT 0;
     CREATE INDEX IF NOT EXISTS bookings_vehicle_status_idx ON bookings (vehicle_id, status);
     CREATE INDEX IF NOT EXISTS bookings_created_idx ON bookings (created_at DESC);
+    -- Licence photos, extra drivers and the signed hire agreement for a website booking (one row per booking).
+    -- Personal data: only returned to signed-in staff. Removed with the booking.
+    CREATE TABLE IF NOT EXISTS booking_documents (
+      booking_id uuid PRIMARY KEY REFERENCES bookings(id) ON DELETE CASCADE,
+      drivers jsonb NOT NULL,
+      signature jsonb NOT NULL,
+      agreement_version text NOT NULL,
+      signed_at timestamptz NOT NULL DEFAULT now()
+    );
   `);
 
   for (const vehicle of FLEET) {
@@ -309,7 +322,7 @@ function deliveryDetail(booking: {
 // confirmed (payment already received), a staff note, and an optional email address.
 export async function createBooking(
   raw: Partial<BookingInput>,
-  opts?: { confirmed?: boolean; staffNote?: string; emailOptional?: boolean },
+  opts?: { confirmed?: boolean; staffNote?: string; emailOptional?: boolean; documents?: BookingDocuments; amountPaid?: unknown },
 ): Promise<PublicBookingResult> {
   await ensureReady();
   const db = pool();
@@ -323,6 +336,17 @@ export async function createBooking(
     throw error;
   }
   const booking = assessed.booking;
+  let amountPaid = 0;
+  if (opts?.confirmed && !booking.manual) {
+    amountPaid = booking.total;
+  } else if (opts?.amountPaid !== undefined && String(opts.amountPaid).trim() !== "") {
+    const parsed = wholeShillings(opts.amountPaid);
+    if (parsed === null) throw staffError("Enter the amount paid so far as a whole number of shillings.", 400);
+    if (!booking.manual && parsed > booking.total) {
+      throw staffError("The amount paid so far cannot be more than the total of " + ksh(booking.total) + ".", 400);
+    }
+    amountPaid = parsed;
+  }
   const client = await db.connect();
   try {
     await client.query("BEGIN");
@@ -354,10 +378,12 @@ export async function createBooking(
     }
 
     let reference = "";
+    let bookingId = "";
     let inserted = false;
     for (let attempt = 0; attempt < 5 && !inserted; attempt += 1) {
       reference = referenceFor(booking.manual);
       const id = crypto.randomUUID();
+      bookingId = id;
       await client.query("SAVEPOINT booking_ref");
       try {
         await client.query(
@@ -366,13 +392,13 @@ export async function createBooking(
              pickup_on, return_on, pickup_time, return_time, pickup_location,
              delivery_mode, delivery_summary, delivery_detail, delivery_manual,
              days, daily_rate, hire_total, insurance_total, delivery_fee, total_due,
-             ooh, ooh_note, mpesa_code, status, staff_note, confirmed_at
+             ooh, ooh_note, mpesa_code, status, staff_note, confirmed_at, amount_paid
            ) VALUES (
              $1, $2, $3, $4, $5, $6, $7,
              $8, $9, $10, $11, $12,
              $13, $14, $15, $16,
              $17, $18, $19, $20, $21, $22,
-             $23, $24, $25, $26, $27, $28
+             $23, $24, $25, $26, $27, $28, $29
            )`,
           [
             id,
@@ -403,6 +429,7 @@ export async function createBooking(
             booking.manual ? "quote" : opts?.confirmed ? "confirmed" : "pending",
             (opts?.staffNote || "").slice(0, 500),
             !booking.manual && opts?.confirmed ? new Date().toISOString() : null,
+            amountPaid,
           ],
         );
         inserted = true;
@@ -413,6 +440,13 @@ export async function createBooking(
       }
     }
     if (!inserted) throw new Error("Could not save the booking. Please try again.");
+    if (opts?.documents) {
+      await client.query(
+        `INSERT INTO booking_documents (booking_id, drivers, signature, agreement_version)
+         VALUES ($1, $2::jsonb, $3::jsonb, $4)`,
+        [bookingId, JSON.stringify(opts.documents.drivers), JSON.stringify(opts.documents.signature), opts.documents.agreementVersion],
+      );
+    }
     await client.query("COMMIT");
     return {
       reference,
@@ -492,6 +526,7 @@ function mapStaff(row: Record<string, unknown>): StaffBooking {
     location: String(row.pickup_location),
     deliverySummary: String(row.delivery_summary),
     deliveryDetail: String(row.delivery_detail || ""),
+    hasDocuments: Boolean(row.has_documents),
     deliveryManual: Boolean(row.delivery_manual),
     hireTotal: Number(row.hire_total),
     insuranceTotal: Number(row.insurance_total),
@@ -501,6 +536,9 @@ function mapStaff(row: Record<string, unknown>): StaffBooking {
     oohNote: String(row.ooh_note || ""),
     mpesaCode: String(row.mpesa_code || ""),
     staffNote: String(row.staff_note || ""),
+    // Bookings confirmed before part payments existed have 0 stored; confirmed means paid in full.
+    amountPaid:
+      row.status === "confirmed" && !Number(row.amount_paid) ? Number(row.total_due) : Number(row.amount_paid || 0),
   };
 }
 
@@ -513,7 +551,8 @@ export async function listBookings() {
             pickup_on::text, return_on::text, pickup_time, return_time, pickup_location,
             delivery_mode, delivery_summary, delivery_detail, delivery_manual,
             days, daily_rate, hire_total, insurance_total, delivery_fee, total_due,
-            ooh, ooh_note, mpesa_code, status, staff_note, created_at
+            ooh, ooh_note, mpesa_code, status, staff_note, created_at, amount_paid,
+            EXISTS (SELECT 1 FROM booking_documents d WHERE d.booking_id = bookings.id) AS has_documents
      FROM bookings
      ORDER BY created_at DESC
      LIMIT 300`,
@@ -595,6 +634,7 @@ async function decideQuote(db: Pool, id: string, staffNote: string, nextStatus: 
            delivery_fee = $4,
            total_due = $5,
            delivery_manual = false,
+           amount_paid = CASE WHEN $2 = 'confirmed' THEN GREATEST(amount_paid, $5) ELSE amount_paid END,
            staff_note = CASE WHEN $6 = '' THEN staff_note ELSE $6 END,
            confirmed_at = CASE WHEN $2 = 'confirmed' THEN now() ELSE confirmed_at END
        WHERE id = $1 AND status = 'quote'`,
@@ -626,6 +666,7 @@ export type BookingEdit = {
   mpesaCode: string;
   staffNote: string;
   deliveryFee?: unknown;
+  amountPaid?: unknown;
 };
 
 // Staff correct a booking on the desk. Dates, times, model, customer details, damage cover, the M-Pesa code,
@@ -726,6 +767,15 @@ export async function editBooking(id: string, raw: Partial<BookingEdit>, editedB
     const hireTotal = days * model.rate;
     const insuranceTotal = raw.insure && model.addon > 0 ? days * model.addon : 0;
     const total = hireTotal + insuranceTotal + (fee || 0);
+    let amountPaid: number | null = null; // null keeps what is stored
+    if (raw.amountPaid !== undefined && String(raw.amountPaid).trim() !== "") {
+      amountPaid = wholeShillings(raw.amountPaid);
+      if (amountPaid === null) throw staffError("Enter the amount paid so far as a whole number of shillings.", 400);
+      const priced = !(row.delivery_manual || (row.delivery_mode !== "none" && fee === null));
+      if (priced && amountPaid > total) {
+        throw staffError("The amount paid so far cannot be more than the total of " + ksh(total) + ".", 400);
+      }
+    }
     const stamp = "Edited by " + editedBy + " on " + today + ".";
     const staffNote = (note ? note + " · " + stamp : stamp).slice(0, 500);
 
@@ -734,7 +784,8 @@ export async function editBooking(id: string, raw: Partial<BookingEdit>, editedB
        SET vehicle_id = $2, model_name = $3, customer_name = $4, email = $5, phone = $6,
            pickup_on = $7, return_on = $8, pickup_time = $9, return_time = $10, pickup_location = $11,
            days = $12, daily_rate = $13, hire_total = $14, insurance_total = $15, delivery_fee = $16, total_due = $17,
-           ooh = $18, ooh_note = $19, mpesa_code = $20, staff_note = $21
+           ooh = $18, ooh_note = $19, mpesa_code = $20, staff_note = $21,
+           amount_paid = COALESCE($22::integer, amount_paid)
        WHERE id = $1`,
       [
         id,
@@ -758,6 +809,7 @@ export async function editBooking(id: string, raw: Partial<BookingEdit>, editedB
         oohNote,
         mpesaCode,
         staffNote,
+        amountPaid,
       ],
     );
     await client.query("COMMIT");
@@ -789,6 +841,7 @@ export async function updateBooking(id: string, action: string, note: string, de
      SET status = $2,
          staff_note = CASE WHEN $3 = '' THEN staff_note ELSE $3 END,
          confirmed_at = CASE WHEN $2 = 'confirmed' THEN now() ELSE confirmed_at END,
+         amount_paid = CASE WHEN $2 = 'confirmed' THEN GREATEST(amount_paid, total_due) ELSE amount_paid END,
          closed_at = CASE WHEN $2 = 'cancelled' THEN now() ELSE closed_at END
      WHERE id = $1 AND status = $4`,
     [id, nextStatus, staffNote, expected],
@@ -799,6 +852,21 @@ export async function updateBooking(id: string, action: string, note: string, de
     throw error;
   }
   return { ok: true };
+}
+
+// Staff only: the licence photos, drivers and signature saved with a booking.
+export async function loadDocuments(id: string): Promise<StoredDocuments | null> {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  const result = await db.query<{ drivers: StoredDocuments["drivers"]; signature: StoredDocuments["signature"]; agreement_version: string; signed_at: Date }>(
+    `SELECT drivers, signature, agreement_version, signed_at FROM booking_documents WHERE booking_id = $1`,
+    [id],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return { drivers: row.drivers, signature: row.signature, agreementVersion: row.agreement_version, signedAt: new Date(row.signed_at).toISOString() };
 }
 
 export async function staffReady() {

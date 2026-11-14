@@ -30,7 +30,7 @@ const KNOW = [
     title: "Collection and delivery",
     body: "Collect from our workshop in Karen, or we deliver to you. Delivery is free within 50 km of the workshop, measured in a straight line. Beyond that, each km over 50 costs KSh 45 for a saloon, KSh 55 for an SUV and KSh 70 for a Prado or 4x4, for each trip. The charge is shown when you book.",
   },
-  { title: "Driver", body: "Minimum age 25. Bring a valid driving licence and ID to collection." },
+  { title: "Driver", body: "Minimum age 25. Add a photo of each driver's licence when you book, and bring the licences and ID to collection." },
   {
     title: "Mileage",
     body: "Saloon cars: 100 km a day included, then KSh 15 per extra km. Nissan X-Trail, Toyota Prado and Land Cruiser: unlimited mileage, with no extra km charge.",

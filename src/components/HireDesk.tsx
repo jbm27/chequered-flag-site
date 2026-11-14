@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { addDays, dayNumber, exclusiveEnd, formatDay, ksh, todayNairobi, type PublicBookingResult, type StaffBooking } from "../lib/hire";
 import DeskAddBooking from "./DeskAddBooking";
 import DeskEditBooking from "./DeskEditBooking";
+import DeskDocuments from "./DeskDocuments";
 
 // Staff desk laid out like Homer's fleet dashboard design (V1.5).
 // It only uses the data and actions the desk already had: bookings, the fleet list, staff logins,
@@ -1297,6 +1298,8 @@ export default function HireDesk() {
                   </Row>
                   {selected.ooh && <Row label="Out of hours">{selected.oohNote || "No note"}</Row>}
                 </DetailBox>
+
+                {selected.hasDocuments && <DeskDocuments booking={selected} />}
 
                 <DetailBox title="Payment">
                   <Row label="Hire">{ksh(selected.hireTotal)}</Row>

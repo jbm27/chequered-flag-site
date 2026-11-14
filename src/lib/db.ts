@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { Pool, type PoolClient } from "pg";
 import { FLEET, fleetModels, modelById, vehicleById } from "./fleet";
+import type { BookingDocuments, StoredDocuments } from "./documents";
 import {
   addDays,
   assessBooking,
@@ -127,6 +128,15 @@ async function setup() {
     );
     CREATE INDEX IF NOT EXISTS bookings_vehicle_status_idx ON bookings (vehicle_id, status);
     CREATE INDEX IF NOT EXISTS bookings_created_idx ON bookings (created_at DESC);
+    -- Licence photos, extra drivers and the signed hire agreement for a website booking (one row per booking).
+    -- Personal data: only returned to signed-in staff. Removed with the booking.
+    CREATE TABLE IF NOT EXISTS booking_documents (
+      booking_id uuid PRIMARY KEY REFERENCES bookings(id) ON DELETE CASCADE,
+      drivers jsonb NOT NULL,
+      signature jsonb NOT NULL,
+      agreement_version text NOT NULL,
+      signed_at timestamptz NOT NULL DEFAULT now()
+    );
   `);
 
   for (const vehicle of FLEET) {
@@ -309,7 +319,7 @@ function deliveryDetail(booking: {
 // confirmed (payment already received), a staff note, and an optional email address.
 export async function createBooking(
   raw: Partial<BookingInput>,
-  opts?: { confirmed?: boolean; staffNote?: string; emailOptional?: boolean },
+  opts?: { confirmed?: boolean; staffNote?: string; emailOptional?: boolean; documents?: BookingDocuments },
 ): Promise<PublicBookingResult> {
   await ensureReady();
   const db = pool();
@@ -354,10 +364,12 @@ export async function createBooking(
     }
 
     let reference = "";
+    let bookingId = "";
     let inserted = false;
     for (let attempt = 0; attempt < 5 && !inserted; attempt += 1) {
       reference = referenceFor(booking.manual);
       const id = crypto.randomUUID();
+      bookingId = id;
       await client.query("SAVEPOINT booking_ref");
       try {
         await client.query(
@@ -413,6 +425,13 @@ export async function createBooking(
       }
     }
     if (!inserted) throw new Error("Could not save the booking. Please try again.");
+    if (opts?.documents) {
+      await client.query(
+        `INSERT INTO booking_documents (booking_id, drivers, signature, agreement_version)
+         VALUES ($1, $2::jsonb, $3::jsonb, $4)`,
+        [bookingId, JSON.stringify(opts.documents.drivers), JSON.stringify(opts.documents.signature), opts.documents.agreementVersion],
+      );
+    }
     await client.query("COMMIT");
     return {
       reference,
@@ -492,6 +511,7 @@ function mapStaff(row: Record<string, unknown>): StaffBooking {
     location: String(row.pickup_location),
     deliverySummary: String(row.delivery_summary),
     deliveryDetail: String(row.delivery_detail || ""),
+    hasDocuments: Boolean(row.has_documents),
     deliveryManual: Boolean(row.delivery_manual),
     hireTotal: Number(row.hire_total),
     insuranceTotal: Number(row.insurance_total),
@@ -513,7 +533,8 @@ export async function listBookings() {
             pickup_on::text, return_on::text, pickup_time, return_time, pickup_location,
             delivery_mode, delivery_summary, delivery_detail, delivery_manual,
             days, daily_rate, hire_total, insurance_total, delivery_fee, total_due,
-            ooh, ooh_note, mpesa_code, status, staff_note, created_at
+            ooh, ooh_note, mpesa_code, status, staff_note, created_at,
+            EXISTS (SELECT 1 FROM booking_documents d WHERE d.booking_id = bookings.id) AS has_documents
      FROM bookings
      ORDER BY created_at DESC
      LIMIT 300`,
@@ -799,6 +820,21 @@ export async function updateBooking(id: string, action: string, note: string, de
     throw error;
   }
   return { ok: true };
+}
+
+// Staff only: the licence photos, drivers and signature saved with a booking.
+export async function loadDocuments(id: string): Promise<StoredDocuments | null> {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  const result = await db.query<{ drivers: StoredDocuments["drivers"]; signature: StoredDocuments["signature"]; agreement_version: string; signed_at: Date }>(
+    `SELECT drivers, signature, agreement_version, signed_at FROM booking_documents WHERE booking_id = $1`,
+    [id],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return { drivers: row.drivers, signature: row.signature, agreementVersion: row.agreement_version, signedAt: new Date(row.signed_at).toISOString() };
 }
 
 export async function staffReady() {

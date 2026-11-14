@@ -588,4 +588,5 @@ export type StaffBooking = {
   oohNote: string;
   mpesaCode: string;
   staffNote: string;
+  hasDocuments?: boolean;
 };

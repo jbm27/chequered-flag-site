@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { addDays, balanceOf, dayNumber, exclusiveEnd, formatDay, ksh, todayNairobi, type PublicBookingResult, type StaffBooking } from "../lib/hire";
 import DeskAddBooking from "./DeskAddBooking";
 import DeskEditBooking from "./DeskEditBooking";
+import DeskVehicleEdit from "./DeskVehicleEdit";
 import DeskCustomers from "./DeskCustomers";
 import DeskDocuments from "./DeskDocuments";
 
@@ -24,6 +25,9 @@ export type DeskVehicle = {
   addon?: number;
   year?: number | null;
   km?: number | null;
+  notes?: string;
+  updatedAt?: string; // when the record was last saved (ISO)
+  updatedBy?: string;
 };
 
 type Chip = { label: string; bg: string; fg: string; bd: string };
@@ -224,6 +228,8 @@ export default function HireDesk() {
   const [vehQuery, setVehQuery] = useState("");
   const [vehType, setVehType] = useState<(typeof TYPES)[number]["id"]>("all");
   const [vehOpen, setVehOpen] = useState<Record<string, boolean>>({});
+  const [vehEditing, setVehEditing] = useState("");
+  const [vehFlagOnly, setVehFlagOnly] = useState(false);
 
   async function loadSession() {
     const response = await fetch("/api/hire/session");
@@ -432,6 +438,19 @@ export default function HireDesk() {
     () => bookings.filter((booking) => (booking.status === "pending" || booking.status === "confirmed") && booking.vehicleId),
     [bookings],
   );
+  // A vehicle is flagged once a hire's return time has passed and its record has not been saved since.
+  const nowMs = Date.now();
+  const backFromHire = new Map<string, { booking: StaffBooking; at: number }>();
+  for (const vehicle of fleet) {
+    let last: { booking: StaffBooking; at: number } | null = null;
+    for (const booking of holds) {
+      if (booking.vehicleId !== vehicle.id) continue;
+      const at = Date.parse(booking.returnOn + "T" + booking.retTime + ":00+03:00");
+      if (Number.isFinite(at) && at <= nowMs && (!last || at > last.at)) last = { booking, at };
+    }
+    const saved = vehicle.updatedAt ? Date.parse(vehicle.updatedAt) : 0;
+    if (last && saved < last.at) backFromHire.set(vehicle.id, last);
+  }
   const current = holds.filter((booking) => lastHireDay(booking.pickup, booking.returnOn) >= today);
   const outToday = holds.filter((booking) => booking.pickup <= today && lastHireDay(booking.pickup, booking.returnOn) >= today);
   const coming = holds.filter((booking) => booking.pickup >= today && booking.pickup <= addDays(today, 6));
@@ -462,7 +481,7 @@ export default function HireDesk() {
     table: chaseText,
     payments: codesToCheck.length ? plural(codesToCheck.length, "payment code") + " to check" : "",
     customers: "",
-    vehicles: "",
+    vehicles: backFromHire.size ? plural(backFromHire.size, "vehicle") + " back from hire to check" : "",
     compare: chase.length ? plural(chase.length, "booking") + " unpaid at pick-up" : "",
     schedule: "",
   };
@@ -557,6 +576,7 @@ export default function HireDesk() {
   const thisYear = Number(today.slice(0, 4));
   const vehCards = fleet
     .filter((vehicle) => vehType === "all" || vehicle.category === vehType)
+    .filter((vehicle) => !vehFlagOnly || backFromHire.has(vehicle.id))
     .filter((vehicle) => matches(vehQuery, [vehicle.model, vehicle.plate, vehicle.year ? String(vehicle.year) : ""]))
     .map((vehicle) => {
       const mine = holds
@@ -1697,9 +1717,9 @@ export default function HireDesk() {
         <section className={card + " mt-[22px] p-[22px]"}>
           {sectionHead("vehicles", "Vehicle records")}
           <p className="mb-3.5 mt-1 max-w-[760px] text-sm text-[#595959]">
-            Make, plate, year, odometer and rates for each vehicle, with what it is doing now. Read-only for now: the year
-            and odometer come from the fleet list, and editing a record will be added once James sets up somewhere to save
-            it.
+            Make, plate, year, odometer, rates and condition notes for each vehicle, with what it is doing now. Open a
+            vehicle and press Edit record to update it. When a vehicle comes back from a hire it is flagged until its record
+            is updated.
           </p>
           {open.vehicles && (
             <>
@@ -1726,7 +1746,22 @@ export default function HireDesk() {
                   </button>
                 ))}
               </div>
-              <div className="mb-3.5">
+              <div className="mb-3.5 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  aria-pressed={vehFlagOnly}
+                  onClick={() => setVehFlagOnly((value) => !value)}
+                  className={
+                    pill +
+                    (vehFlagOnly
+                      ? " border-[#a50e0e] bg-[#a50e0e] text-white"
+                      : backFromHire.size
+                        ? " border-[#f1a9a3] bg-[#fce8e6] text-[#a50e0e]"
+                        : " bg-white text-[#171717]")
+                  }
+                >
+                  Back from hire, to check ({backFromHire.size})
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -1746,8 +1781,26 @@ export default function HireDesk() {
                     ? { label: "On hire now", bg: "#e8f0fe", fg: "#174ea6", bd: "#aecbfa" }
                     : { label: "Free today", bg: "#ceead6", fg: "#0d5a2a", bd: "#81c995" };
                   const [make, ...rest] = vehicle.model.split(" ");
+                  const back = backFromHire.get(vehicle.id);
+                  const backNote = back
+                    ? "Back from " +
+                      back.booking.customerName +
+                      "'s hire (" +
+                      back.booking.reference +
+                      ") on " +
+                      short(back.booking.returnOn) +
+                      " at " +
+                      back.booking.retTime +
+                      ". Check the vehicle, then update the odometer and notes."
+                    : "";
                   return (
-                    <div key={vehicle.id} className="self-start overflow-hidden rounded-[10px] border border-[#e5e5e5] bg-white">
+                    <div
+                      key={vehicle.id}
+                      className={
+                        "self-start overflow-hidden rounded-[10px] border bg-white " +
+                        (back ? "border-[#e58b84] shadow-[inset_4px_0_0_#d93025]" : "border-[#e5e5e5]")
+                      }
+                    >
                       <button
                         type="button"
                         aria-expanded={isOpen}
@@ -1757,6 +1810,11 @@ export default function HireDesk() {
                         <span className="min-w-0">
                           <strong className="block">{vehicle.model}</strong>
                           <span className="text-[13px] text-[#595959]">Number plate {vehicle.plate}</span>
+                          {back && (
+                            <span className="mt-1 block">
+                              <ChipView chip={{ label: "Back from hire: update record", bg: "#fce8e6", fg: "#a50e0e", bd: "#f1a9a3" }} />
+                            </span>
+                          )}
                         </span>
                         <span className="flex flex-none items-center gap-2">
                           <ChipView chip={status} />
@@ -1765,8 +1823,23 @@ export default function HireDesk() {
                           </span>
                         </span>
                       </button>
-                      {isOpen && (
+                      {isOpen && vehEditing === vehicle.id && (
+                        <DeskVehicleEdit
+                          vehicle={vehicle}
+                          returnNote={backNote}
+                          onClose={() => setVehEditing("")}
+                          onSaved={async () => {
+                            setVehEditing("");
+                            setNotice(vehicle.plate + " record saved.");
+                            await loadBookings();
+                          }}
+                        />
+                      )}
+                      {isOpen && vehEditing !== vehicle.id && (
                         <div className="grid gap-1.5 border-t border-[#e5e5e5] bg-[#f5f5f3] px-3.5 py-3">
+                          {back && (
+                            <p className="rounded-md border border-[#f1a9a3] bg-[#fce8e6] px-3 py-2 text-[13px] text-[#a50e0e]">{backNote}</p>
+                          )}
                           <Row label="Make">{make}</Row>
                           <Row label="Model">{rest.join(" ")}</Row>
                           <Row label="Number plate">
@@ -1801,6 +1874,24 @@ export default function HireDesk() {
                               "Nothing booked"
                             )}
                           </Row>
+                          <Row label="Condition notes">
+                            {vehicle.notes ? <span className="whitespace-pre-line">{vehicle.notes}</span> : <span className="text-[#595959]">None</span>}
+                          </Row>
+                          <Row label="Last updated">
+                            {vehicle.updatedAt ? (
+                              <span className="text-[#595959]">
+                                {short(new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Nairobi" }).format(new Date(vehicle.updatedAt)))}
+                                {vehicle.updatedBy ? " by " + vehicle.updatedBy : ""}
+                              </span>
+                            ) : (
+                              <span className="text-[#595959]">Never</span>
+                            )}
+                          </Row>
+                          <div className="mt-1.5">
+                            <button type="button" onClick={() => setVehEditing(vehicle.id)} className={back ? btnDark : btnLight}>
+                              {back ? "Update record" : "Edit record"}
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>

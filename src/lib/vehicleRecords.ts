@@ -1,6 +1,7 @@
 // Year of manufacture and odometer for each vehicle, from Homer's fleet dashboard (V1.5).
 // Desk only: read by the staff API after sign-in, never by the public pages.
-// Read-only for now. Editing these needs somewhere to save them, which is for James to approve.
+// Starting values only: setup() copies them into the vehicle_records table the first time it runs.
+// After that, staff edit the records on the desk and this list is not read again.
 
 export const VEHICLE_RECORDS: Record<string, { year: number | null; km: number | null }> = {
   v1: { year: 2008, km: 249359 }, // KCF 426V

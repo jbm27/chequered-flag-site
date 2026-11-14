@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { addDays, balanceOf, dayNumber, exclusiveEnd, formatDay, ksh, todayNairobi, type PublicBookingResult, type StaffBooking } from "../lib/hire";
 import DeskAddBooking from "./DeskAddBooking";
 import DeskEditBooking from "./DeskEditBooking";
+import DeskCustomers from "./DeskCustomers";
 import DeskDocuments from "./DeskDocuments";
 
 // Staff desk laid out like Homer's fleet dashboard design (V1.5).
@@ -26,7 +27,7 @@ export type DeskVehicle = {
 };
 
 type Chip = { label: string; bg: string; fg: string; bd: string };
-type SectionKey = "overview" | "calendar" | "table" | "payments" | "vehicles" | "compare" | "schedule";
+type SectionKey = "overview" | "calendar" | "table" | "payments" | "customers" | "vehicles" | "compare" | "schedule";
 
 const WIN = 28;
 const PAID = { bg: "#ceead6", fg: "#0d5a2a" };
@@ -201,6 +202,7 @@ export default function HireDesk() {
     calendar: true,
     table: false,
     payments: false,
+    customers: false,
     vehicles: false,
     compare: false,
     schedule: false,
@@ -459,6 +461,7 @@ export default function HireDesk() {
     calendar: "",
     table: chaseText,
     payments: codesToCheck.length ? plural(codesToCheck.length, "payment code") + " to check" : "",
+    customers: "",
     vehicles: "",
     compare: chase.length ? plural(chase.length, "booking") + " unpaid at pick-up" : "",
     schedule: "",
@@ -1679,6 +1682,16 @@ export default function HireDesk() {
           )}
         </section>
 
+
+        {/* Customer log */}
+        <section className={card + " mt-[22px] p-[22px]"}>
+          {sectionHead("customers", "Customer log")}
+          <p className="mb-3.5 mt-1 max-w-[760px] text-sm text-[#595959]">
+            Who hires from us, how often and how much. Customers are matched by mobile number. Open a customer to see
+            their hire history.
+          </p>
+          {open.customers && <DeskCustomers bookings={bookings} today={today} onOpenBooking={pick} />}
+        </section>
 
         {/* Vehicle records */}
         <section className={card + " mt-[22px] p-[22px]"}>

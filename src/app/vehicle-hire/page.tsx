@@ -28,7 +28,7 @@ const KNOW = [
   },
   {
     title: "Collection and delivery",
-    body: "Collect from Karen, JKIA or Wilson Airport at no extra charge. Delivery inside Nairobi is free during opening hours. Outside opening hours, and beyond Nairobi, delivery is charged by distance. Very long distances are quoted by hand.",
+    body: "Collect from our workshop in Karen, or we deliver to you. Delivery is free within 50 km of the workshop, measured in a straight line. Beyond that, each km over 50 costs KSh 40 for a saloon, KSh 50 for an SUV and KSh 65 for a Prado or 4x4, for each trip. The charge is shown when you book.",
   },
   { title: "Driver", body: "Minimum age 25. Bring a valid driving licence and ID to collection." },
   {
@@ -84,7 +84,7 @@ const FAQ = [
   },
   {
     q: "Can you deliver the vehicle to me?",
-    a: "Yes. Delivery inside Nairobi is free during our opening hours. Outside opening hours, or beyond Nairobi, delivery is charged by distance and shown when you book. Trips over 150 km are quoted before you pay, and the vehicle is not held until that amount is agreed. Choose a delivery option in Find your vehicle.",
+    a: "Yes. Choose a delivery option in Find your vehicle, then search for your address or drop a pin on the map. Delivery is free within 50 km of our workshop in Karen, measured in a straight line to your pin. Beyond that, each km over 50 costs KSh 40 for a saloon, KSh 50 for an SUV and KSh 65 for a Prado or 4x4. Deliver and collect is charged for both trips. The charge is shown and added to the full amount when you book.",
   },
   {
     q: "Can I collect or return outside opening hours?",

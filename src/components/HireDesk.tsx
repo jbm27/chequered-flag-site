@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { addDays, dayNumber, exclusiveEnd, formatDay, ksh, todayNairobi, type PublicBookingResult, type StaffBooking } from "../lib/hire";
 import DeskAddBooking from "./DeskAddBooking";
+import DeskEditBooking from "./DeskEditBooking";
 
 // Staff desk laid out like Homer's fleet dashboard design (V1.5).
 // It only uses the data and actions the desk already had: bookings, the fleet list, staff logins,
@@ -189,6 +190,7 @@ export default function HireDesk() {
   const [addingMember, setAddingMember] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState("");
 
   const [open, setOpen] = useState<Record<SectionKey, boolean>>({
     overview: false,
@@ -406,6 +408,7 @@ export default function HireDesk() {
 
   function pick(id: string) {
     setSelectedId(id);
+    setEditingId("");
     setDetailOpen(true);
     window.setTimeout(() => {
       document.getElementById("booking-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1194,11 +1197,46 @@ export default function HireDesk() {
                 <button type="button" aria-expanded={detailOpen} onClick={() => setDetailOpen((v) => !v)} className={btnLight + " rounded-full"}>
                   {detailOpen ? "Hide details ▲" : "Show details ▼"}
                 </button>
-                <button type="button" onClick={() => setSelectedId("")} className={btnLight + " rounded-full"}>
+                {selected.status !== "cancelled" && editingId !== selected.id && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingId(selected.id);
+                      setDetailOpen(true);
+                      setNotice("");
+                      setMessage("");
+                    }}
+                    className={btnDark + " rounded-full"}
+                  >
+                    Edit
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedId("");
+                    setEditingId("");
+                  }}
+                  className={btnLight + " rounded-full"}
+                >
                   Close
                 </button>
               </div>
             </div>
+            {editingId === selected.id && (
+              <DeskEditBooking
+                key={selected.id}
+                booking={selected}
+                fleet={fleet}
+                holds={holds}
+                onClose={() => setEditingId("")}
+                onSaved={async () => {
+                  setEditingId("");
+                  setNotice(selected.reference + " updated.");
+                  await loadBookings();
+                }}
+              />
+            )}
             {!detailOpen && (
               <p className="mt-2 text-sm text-[#595959]">
                 {selected.model} · {short(selected.pickup)} to {short(selected.returnOn)} · {ksh(selected.total)}
@@ -1243,6 +1281,19 @@ export default function HireDesk() {
                   <Row label="Delivery">
                     {selected.deliverySummary}
                     {selected.deliveryDetail && <span className="block whitespace-pre-line text-[#595959]">{selected.deliveryDetail}</span>}
+                    {(() => {
+                      const pin = /Pin: (-?\d+\.\d+), (-?\d+\.\d+)/.exec(selected.deliveryDetail);
+                      return pin ? (
+                        <a
+                          href={"https://www.google.com/maps/search/?api=1&query=" + pin[1] + "%2C" + pin[2]}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1 inline-block font-semibold underline"
+                        >
+                          Open pin in Google Maps
+                        </a>
+                      ) : null;
+                    })()}
                   </Row>
                   {selected.ooh && <Row label="Out of hours">{selected.oohNote || "No note"}</Row>}
                 </DetailBox>

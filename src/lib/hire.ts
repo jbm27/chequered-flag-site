@@ -5,6 +5,16 @@ export const YARD = { lat: -1.3185853, lng: 36.7161047, name: "Chequered Flag, K
 
 export const PRICING = { base: 1000, perKm: 50, freeKm: 5, maxKm: 150, roadFactor: 1.3 };
 
+// Delivery pricing set by Homer (Nov 2026): measured in a straight line from the workshop in Karen
+// to the customer's pin. The first 50 km are free; each km beyond that is charged per vehicle type.
+// "Deliver and collect" is charged for both trips.
+export const DELIVERY = {
+  freeKm: 50,
+  perKm: { saloon: 45, suv: 55, "4x4": 70 } as Record<"saloon" | "suv" | "4x4", number>,
+};
+
+export type VehicleCategory = "saloon" | "suv" | "4x4";
+
 export const PICKUP_LOCATIONS = ["Nairobi – Karen", "JKIA Airport", "Wilson Airport"] as const;
 
 export const HOURS = [
@@ -62,6 +72,7 @@ export type QuoteModel = {
   name: string;
   rate: number;
   addon: number;
+  category?: VehicleCategory;
 };
 
 export type BookingInput = {
@@ -73,6 +84,8 @@ export type BookingInput = {
   location: string;
   delivery: string;
   placeId: string;
+  pinLat?: number | string;
+  pinLng?: number | string;
   address: string;
   directions: string;
   note: string;
@@ -97,6 +110,8 @@ export type DeliveryAssessment = {
   breakdown: string;
   message: string;
   placeLabel: string;
+  lat?: number;
+  lng?: number;
 };
 
 export type OutOfHours = {
@@ -253,6 +268,19 @@ export function roadKm(lat: number, lng: number) {
   return Math.max(1, Math.round(haversineKm(YARD.lat, YARD.lng, lat, lng) * PRICING.roadFactor));
 }
 
+// Straight-line ("line of sight") distance in km from the workshop, to one decimal place.
+export function straightKm(lat: number, lng: number) {
+  return Math.round(haversineKm(YARD.lat, YARD.lng, lat, lng) * 10) / 10;
+}
+
+// The delivery charge for one trip and for the booking.
+export function deliveryCharge(km: number, category: VehicleCategory, trips: number) {
+  const chargedKm = Math.max(0, Math.ceil(km - DELIVERY.freeKm));
+  const rate = DELIVERY.perKm[category] ?? DELIVERY.perKm.saloon;
+  const perTrip = chargedKm * rate;
+  return { chargedKm, rate, perTrip, fee: perTrip * trips };
+}
+
 export function placeById(id: string) {
   return PLACES.find((place) => place.id === id) || null;
 }
@@ -265,6 +293,7 @@ export function quoteDelivery(input: {
   ooh: OutOfHours;
   directions: string;
   note: string;
+  category?: VehicleCategory;
 }): DeliveryAssessment {
   const label = DELIVERY_LABELS[input.delivery];
   if (input.delivery === "none") {
@@ -301,65 +330,38 @@ export function quoteDelivery(input: {
   }
 
   const place = input.place;
-  const nbi = !place.outside && inNairobi(place.lat, place.lng);
-  const km = roadKm(place.lat, place.lng);
-  const kmText =
-    "About " + km + " km by road from our yard in Karen" + (nbi ? ", inside Nairobi" : ", outside Nairobi");
-  const trips = [{ name: "Delivery", late: input.ooh.pick }].concat(
-    input.delivery === "both" ? [{ name: "Collection", late: input.ooh.ret }] : [],
-  );
-  const charged = trips.filter((trip) => !(nbi && !trip.late));
-  const placeLabel = place.name + ", " + place.area;
+  const km = straightKm(place.lat, place.lng);
+  const kmText = "About " + km + " km in a straight line from our workshop in Karen";
+  const trips = input.delivery === "both" ? 2 : 1;
+  const category = input.category || "saloon";
+  const charge = deliveryCharge(km, category, trips);
+  const placeLabel = place.area ? place.name + ", " + place.area : place.name;
   const returned = input.delivery === "both" ? ", and collected from there" : ". You return it to " + input.location;
   const summary =
     "Delivered to " +
     placeLabel +
     returned +
     (input.directions.trim() ? ". Directions: " + input.directions.trim() : "");
-
-  if (charged.length && km > PRICING.maxKm) {
-    return {
-      mode: input.delivery,
-      label,
-      summary,
-      fee: null,
-      manual: true,
-      tooFar: true,
-      km,
-      kmText,
-      breakdown: "",
-      message:
-        "This is more than " +
-        PRICING.maxKm +
-        " km away, so we price it by hand. Send a request and we will contact you with the full amount before you pay. The vehicle is not held yet.",
-      placeLabel,
-    };
-  }
-
-  const perTrip = Math.ceil((PRICING.base + Math.max(0, km - PRICING.freeKm) * PRICING.perKm) / 50) * 50;
-  const fee = perTrip * charged.length;
-  const breakdown = trips
-    .map((trip) => {
-      const freeTrip = nbi && !trip.late;
-      const lateNote = trip.late && nbi ? " (out of hours)" : "";
-      return trip.name + " " + (freeTrip ? "free" : ksh(perTrip) + lateNote);
-    })
-    .join(" · ");
+  const breakdown = charge.fee
+    ? charge.chargedKm + " km over " + DELIVERY.freeKm + " km × " + ksh(charge.rate) + (trips === 2 ? " × 2 trips" : "")
+    : "Free: within " + DELIVERY.freeKm + " km";
 
   return {
     mode: input.delivery,
     label,
     summary,
-    fee,
+    fee: charge.fee,
     manual: false,
     tooFar: false,
     km,
     kmText,
     breakdown,
-    message: fee
+    message: charge.fee
       ? "The delivery charge is included in the full amount due now."
-      : "Free delivery: inside Nairobi during our opening hours.",
+      : "Free delivery: within " + DELIVERY.freeKm + " km of our workshop.",
     placeLabel,
+    lat: place.lat,
+    lng: place.lng,
   };
 }
 
@@ -402,12 +404,23 @@ export function assessBooking(
     return { ok: false, error: "Choose how you would like to collect the vehicle." };
   }
 
-  const place = raw.placeId ? placeById(cleanText(raw.placeId, 40)) : null;
-  if (raw.placeId && !place && delivery !== "none") {
-    return { ok: false, error: "Choose a delivery place from the list, or type the address for a quote." };
+  const address = cleanText(raw.address, 180);
+  // A pin dropped on the map (website) prices the delivery. Without a pin, the delivery is a quote for staff.
+  const pinLat = Number(raw.pinLat);
+  const pinLng = Number(raw.pinLng);
+  const hasPin =
+    raw.pinLat !== undefined && raw.pinLat !== "" && raw.pinLng !== undefined && raw.pinLng !== "" &&
+    Number.isFinite(pinLat) && Number.isFinite(pinLng) && Math.abs(pinLat) <= 90 && Math.abs(pinLng) <= 180;
+  let place: Place | null = hasPin
+    ? { id: "pin", name: address || "Pinned location", area: "", lat: pinLat, lng: pinLng }
+    : null;
+  if (!place && raw.placeId) {
+    place = placeById(cleanText(raw.placeId, 40));
+    if (!place && delivery !== "none") {
+      return { ok: false, error: "Choose a delivery place from the list, or type the address for a quote." };
+    }
   }
 
-  const address = cleanText(raw.address, 180);
   const directions = cleanText(raw.directions, 400);
   const note = cleanText(raw.note, 500);
   const ooh = outOfHours(pickup, returnOn, pickTime, retTime);
@@ -424,9 +437,10 @@ export function assessBooking(
     ooh,
     directions,
     note,
+    category: model.category,
   });
-  if (delivery !== "none" && address.length < 3) {
-    return { ok: false, error: "Enter the town or suburb for delivery." };
+  if (delivery !== "none" && address.length < 3 && !hasPin) {
+    return { ok: false, error: "Enter the delivery address or drop a pin on the map." };
   }
 
   const name = cleanText(raw.name, 120);
@@ -499,6 +513,7 @@ export type PublicModelCard = {
   id: string;
   name: string;
   group: "saloon" | "4x4";
+  category?: VehicleCategory;
   tag: string;
   seatsText: string;
   gear: string;

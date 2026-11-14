@@ -7,8 +7,13 @@ import {
   assessmentError,
   bookingMessage,
   dateProblem,
+  dayNumber,
   exclusiveEnd,
   hireDays,
+  HOURS,
+  normaliseMpesa,
+  outOfHours,
+  PICKUP_LOCATIONS,
   rangesOverlap,
   todayNairobi,
   type AvailabilityResponse,
@@ -242,6 +247,7 @@ export async function loadAvailability(pickup: string, returnOn: string, from: s
       id: model.id,
       name: model.name,
       group: model.group,
+      category: model.category,
       tag: model.tag,
       seatsText: model.seatsText,
       gear: model.gear,
@@ -285,8 +291,16 @@ function referenceFor(manual: boolean) {
   return (manual ? "CFQ-" : "CF-") + number;
 }
 
-function deliveryDetail(booking: { delivery: { kmText: string; breakdown: string }; directions: string; note: string }) {
-  return [booking.delivery.kmText, booking.delivery.breakdown, booking.directions ? "Directions: " + booking.directions : "", booking.note ? "Note: " + booking.note : ""]
+function deliveryDetail(booking: {
+  delivery: { kmText: string; breakdown: string; lat?: number; lng?: number };
+  directions: string;
+  note: string;
+}) {
+  const pin =
+    typeof booking.delivery.lat === "number" && typeof booking.delivery.lng === "number"
+      ? "Pin: " + booking.delivery.lat.toFixed(5) + ", " + booking.delivery.lng.toFixed(5)
+      : "";
+  return [pin, booking.delivery.kmText, booking.delivery.breakdown, booking.directions ? "Directions: " + booking.directions : "", booking.note ? "Note: " + booking.note : ""]
     .filter(Boolean)
     .join("\n");
 }
@@ -589,6 +603,165 @@ async function decideQuote(db: Pool, id: string, staffNote: string, nextStatus: 
     if (saved.rowCount !== 1) throw staffError("That booking has already been updated.", 409);
     await client.query("COMMIT");
     return { ok: true };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export type BookingEdit = {
+  modelId: string;
+  pickup: string;
+  returnOn: string;
+  pickTime: string;
+  retTime: string;
+  location: string;
+  name: string;
+  phone: string;
+  email: string;
+  insure: boolean;
+  oohNote: string;
+  mpesaCode: string;
+  staffNote: string;
+  deliveryFee?: unknown;
+};
+
+// Staff correct a booking on the desk. Dates, times, model, customer details, damage cover, the M-Pesa code,
+// the note and (for a priced delivery) the delivery charge can change. The status stays the same.
+// If the model or dates change on a held or paid booking, a free vehicle is found again, keeping the
+// current vehicle when it is still free. Totals are recalculated from the model's daily rate.
+export async function editBooking(id: string, raw: Partial<BookingEdit>, editedBy: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const text = (value: unknown, max: number) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+
+  const model = raw.modelId ? modelById(String(raw.modelId)) : null;
+  if (!model) throw staffError("Choose a vehicle model.", 400);
+  const pickup = text(raw.pickup, 10);
+  const returnOn = text(raw.returnOn, 10);
+  const pickTime = text(raw.pickTime, 5);
+  const retTime = text(raw.retTime, 5);
+  const location = text(raw.location, 40);
+  const name = text(raw.name, 120);
+  const phone = text(raw.phone, 40);
+  const email = text(raw.email, 160);
+  const oohNote = text(raw.oohNote, 500);
+  const mpesaCode = normaliseMpesa(text(raw.mpesaCode, 40));
+  const note = text(raw.staffNote, 400);
+
+  if (dayNumber(pickup) === null || dayNumber(returnOn) === null) throw staffError("Choose valid dates.", 400);
+  if (returnOn < pickup) throw staffError("The return date must be on or after the pick-up date.", 400);
+  if (hireDays(pickup, returnOn) > 90) throw staffError("Hires longer than 90 days are arranged directly.", 400);
+  if (!(HOURS as readonly string[]).includes(pickTime) || !(HOURS as readonly string[]).includes(retTime)) {
+    throw staffError("Choose a pick-up time and a return time.", 400);
+  }
+  if (!(PICKUP_LOCATIONS as readonly string[]).includes(location)) throw staffError("Choose a pick-up location.", 400);
+  if (name.length < 2) throw staffError("Enter the customer's name.", 400);
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length < 9 || digits.length > 15) throw staffError("Enter a mobile number with at least 9 digits.", 400);
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw staffError("Enter a valid email address, or leave it blank.", 400);
+  if (mpesaCode && (mpesaCode.length < 5 || mpesaCode.length > 12)) throw staffError("Enter a valid M-Pesa code, or leave it blank.", 400);
+  const ooh = outOfHours(pickup, returnOn, pickTime, retTime);
+  if (ooh.any && oohNote.length < 3) throw staffError("Add a short note about the out-of-hours pick-up or return.", 400);
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query<{
+      status: string;
+      vehicle_id: string | null;
+      model_name: string;
+      pickup_on: string;
+      delivery_mode: string;
+      delivery_fee: number | null;
+      delivery_manual: boolean;
+      staff_note: string;
+    }>(
+      `SELECT status, vehicle_id, model_name, pickup_on::text, delivery_mode, delivery_fee, delivery_manual, staff_note
+       FROM bookings WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    const row = current.rows[0];
+    if (!row) throw staffError("That booking was not found.", 404);
+    if (row.status === "cancelled") throw staffError("Closed bookings cannot be edited.", 409);
+    const today = todayNairobi();
+    if (pickup < today && pickup !== row.pickup_on) throw staffError("The pick-up date cannot be moved into the past.", 400);
+
+    // Delivery charge: staff can correct it on a priced delivery. Quotes keep using Hold the vehicle.
+    let fee = row.delivery_fee === null || row.delivery_fee === undefined ? null : Number(row.delivery_fee);
+    if (row.status !== "quote" && row.delivery_mode !== "none" && raw.deliveryFee !== undefined && raw.deliveryFee !== "") {
+      const parsed = wholeShillings(raw.deliveryFee);
+      if (parsed === null) throw staffError("Enter the delivery charge as a whole number of shillings.", 400);
+      fee = parsed;
+    }
+
+    let vehicleId: string | null = row.vehicle_id;
+    if (row.status === "pending" || row.status === "confirmed") {
+      const end = exclusiveEnd(pickup, returnOn);
+      const free = await client.query<{ id: string }>(
+        `SELECT v.id
+         FROM vehicles v
+         WHERE v.active = true
+           AND v.model = $1
+           AND NOT EXISTS (
+             SELECT 1 FROM bookings b
+             WHERE b.vehicle_id = v.id
+               AND b.id <> $4
+               AND b.status IN ('pending', 'confirmed')
+               AND b.pickup_on < $3::date
+               AND $2::date < CASE WHEN b.return_on > b.pickup_on THEN b.return_on ELSE b.pickup_on + 1 END
+           )
+         ORDER BY (v.id = $5) DESC, v.id
+         FOR UPDATE OF v`,
+        [model.name, pickup, end, id, row.vehicle_id || ""],
+      );
+      vehicleId = free.rows[0]?.id || null;
+      if (!vehicleId) throw staffError("No " + model.name + " is free for those dates.", 409);
+    }
+
+    const days = hireDays(pickup, returnOn);
+    const hireTotal = days * model.rate;
+    const insuranceTotal = raw.insure && model.addon > 0 ? days * model.addon : 0;
+    const total = hireTotal + insuranceTotal + (fee || 0);
+    const stamp = "Edited by " + editedBy + " on " + today + ".";
+    const staffNote = (note ? note + " · " + stamp : stamp).slice(0, 500);
+
+    await client.query(
+      `UPDATE bookings
+       SET vehicle_id = $2, model_name = $3, customer_name = $4, email = $5, phone = $6,
+           pickup_on = $7, return_on = $8, pickup_time = $9, return_time = $10, pickup_location = $11,
+           days = $12, daily_rate = $13, hire_total = $14, insurance_total = $15, delivery_fee = $16, total_due = $17,
+           ooh = $18, ooh_note = $19, mpesa_code = $20, staff_note = $21
+       WHERE id = $1`,
+      [
+        id,
+        vehicleId,
+        model.name,
+        name,
+        email,
+        phone,
+        pickup,
+        returnOn,
+        pickTime,
+        retTime,
+        location,
+        days,
+        model.rate,
+        hireTotal,
+        insuranceTotal,
+        fee,
+        total,
+        ooh.any,
+        oohNote,
+        mpesaCode,
+        staffNote,
+      ],
+    );
+    await client.query("COMMIT");
+    return { ok: true, total };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

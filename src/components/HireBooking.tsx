@@ -2,23 +2,26 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CONTACT } from "../lib/contact";
+import PinMap, { type LatLng } from "./PinMap";
 import {
   addDays,
   assessBooking,
   assessmentError,
   dateProblem,
   dayNumber,
+  DELIVERY,
   DELIVERY_LABELS,
+  deliveryCharge,
   formatDay,
   HOURS,
   hoursReason,
   ksh,
   outOfHours,
   PICKUP_LOCATIONS,
-  PLACES,
-  PRICING,
   quoteDelivery,
+  straightKm,
   todayNairobi,
+  YARD,
   type AvailabilityResponse,
   type BookingInput,
   type DeliveryMode,
@@ -96,7 +99,8 @@ function scrollToId(id: string) {
 export default function HireBooking({ modelCount = 9 }: { modelCount?: number }) {
   const today = todayNairobi();
   const initialDates = useState(defaultWindow)[0];
-  const [location, setLocation] = useState<(typeof PICKUP_LOCATIONS)[number]>(PICKUP_LOCATIONS[0]);
+  // Customers either collect from the workshop in Karen or choose delivery to a pin on the map.
+  const location = PICKUP_LOCATIONS[0];
   const [pickup, setPickup] = useState(initialDates.pickup);
   const [returnOn, setReturnOn] = useState(initialDates.returnOn);
   const [pickTime, setPickTime] = useState("09:00");
@@ -104,8 +108,11 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const [type, setType] = useState("all");
   const [delivery, setDelivery] = useState<DeliveryMode>("none");
   const [address, setAddress] = useState("");
-  const [placeId, setPlaceId] = useState("");
-  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [pin, setPin] = useState<LatLng | null>(null);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<{ label: string; lat: number; lng: number }[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchNote, setSearchNote] = useState("");
   const directions = "";
   const [note, setNote] = useState("");
   const [oohNote, setOohNote] = useState("");
@@ -161,25 +168,80 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   }, [pickup, returnOn, refreshToken, dateError]);
 
   const hours = outOfHours(pickup, returnOn, pickTime, retTime);
-  // Every delivery stays a quote, as on the live page: staff set the delivery charge and the vehicle is
-  // not held until then. The place list only helps the customer type the address.
-  const deliveryQuote = quoteDelivery({ delivery, place: null, address, location, ooh: hours, directions, note });
+  // Delivery is priced from the pin: free within 50 km in a straight line of the workshop, then per km over 50
+  // by vehicle type. The server works the price out again from the same pin, so this is only a preview.
   const models = useMemo(() => {
     const list = availability?.models || [];
     return type === "all" ? list : list.filter((model) => model.group === type);
   }, [availability, type]);
   const selected = (availability?.models || []).find((model) => model.id === selectedId) || null;
+  const pinPlace =
+    delivery !== "none" && pin ? { id: "pin", name: address || "Pinned location", area: "", lat: pin.lat, lng: pin.lng } : null;
+  const deliveryQuote = quoteDelivery({
+    delivery,
+    place: pinPlace,
+    address,
+    location,
+    ooh: hours,
+    directions,
+    note,
+    category: selected?.category,
+  });
   const days = availability?.days || 0;
   const hireTotal = selected ? days * selected.rate : 0;
   const insuranceTotal = selected && insure ? days * selected.addon : 0;
   const pricedDelivery = deliveryQuote.manual ? 0 : deliveryQuote.fee || 0;
   const total = hireTotal + insuranceTotal + pricedDelivery;
 
-  const suggestions = useMemo(() => {
-    const query = address.trim().toLowerCase();
-    if (query.length < 2 || placeId) return [];
-    return PLACES.filter((item) => (item.name + " " + item.area).toLowerCase().includes(query)).slice(0, 6);
-  }, [address, placeId]);
+  // Address search and pin names use OpenStreetMap's Nominatim service. Its rules allow a search when the
+  // visitor asks (button or Enter) but not search-as-you-type.
+  async function searchAddress() {
+    const q = query.trim();
+    if (q.length < 3) {
+      setSearchNote("Type at least 3 letters of your address, area or a nearby landmark.");
+      return;
+    }
+    setSearching(true);
+    setSearchNote("");
+    setResults([]);
+    try {
+      const response = await fetch(
+        "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=ke&q=" + encodeURIComponent(q),
+        { headers: { "Accept-Language": "en" } },
+      );
+      const body = (await response.json()) as { display_name: string; lat: string; lon: string }[];
+      const found = body.map((item) => ({ label: item.display_name, lat: Number(item.lat), lng: Number(item.lon) }));
+      setResults(found);
+      if (!found.length) setSearchNote("No match found. Try a nearby landmark, or tap the map to drop your pin.");
+    } catch {
+      setSearchNote("The address search is not available right now. Tap the map to drop your pin instead.");
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function choosePlace(item: { label: string; lat: number; lng: number }) {
+    setPin({ lat: item.lat, lng: item.lng });
+    setAddress(item.label.split(",").slice(0, 4).join(",").trim());
+    setResults([]);
+    setSearchNote("");
+  }
+
+  async function dropPin(point: LatLng) {
+    setPin(point);
+    setResults([]);
+    setAddress("Pinned location");
+    try {
+      const response = await fetch(
+        "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&lat=" + point.lat + "&lon=" + point.lng,
+        { headers: { "Accept-Language": "en" } },
+      );
+      const body = (await response.json()) as { display_name?: string };
+      if (body.display_name) setAddress("Pin near " + body.display_name.split(",").slice(0, 3).join(",").trim());
+    } catch {
+      /* the pin is enough; the name is a convenience */
+    }
+  }
 
   function bookingInput(acceptTerms: boolean): Partial<BookingInput> {
     return {
@@ -191,6 +253,8 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       location,
       delivery,
       placeId: "",
+      pinLat: delivery !== "none" && pin ? pin.lat : "",
+      pinLng: delivery !== "none" && pin ? pin.lng : "",
       address: delivery === "none" ? "" : address,
       directions: delivery === "none" ? "" : directions,
       note: delivery === "none" ? "" : note,
@@ -206,8 +270,9 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
 
   function check(acceptTerms: boolean) {
     if (!selected) return "Choose a vehicle.";
+    if (delivery !== "none" && !pin) return "For delivery, search for your address or tap the map to drop a pin.";
     const checked = assessBooking(
-      { id: selected.id, name: selected.name, rate: selected.rate, addon: selected.addon },
+      { id: selected.id, name: selected.name, rate: selected.rate, addon: selected.addon, category: selected.category },
       bookingInput(acceptTerms),
     );
     return assessmentError(checked) || (checked.ok ? "" : "Check the booking details.");
@@ -310,12 +375,18 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const wa = "https://wa.me/" + CONTACT.whatsappE164.replace(/\D/g, "");
   const tel = "tel:" + CONTACT.phoneE164.replace(/\s/g, "");
   const summaryLine = availability
-    ? plural(availability.days) + " · " + formatDay(pickup) + " to " + formatDay(returnOn) + " · " + location
+    ? plural(availability.days) +
+      " · " +
+      formatDay(pickup) +
+      " to " +
+      formatDay(returnOn) +
+      " · " +
+      (delivery === "none" ? "Collect in Karen" : "Delivered to you")
     : "Choose your dates to see availability and totals";
   const deliveryHelp =
     delivery === "both"
       ? "Tell us where to deliver the vehicle and where to collect it at the end."
-      : "Tell us where to deliver the vehicle. You return it to " + location + ".";
+      : "Tell us where to deliver the vehicle. You return it to our workshop in Karen.";
   const showCheckout = Boolean(selected || result);
   const manual = deliveryQuote.manual;
 
@@ -328,24 +399,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
           className="scroll-mt-28 border border-[#d9d1b8] bg-white px-5 py-[22px] text-[#171717] shadow-[0_6px_18px_rgba(60,50,20,0.08)] sm:px-6"
         >
           <h2 className="mb-4 text-[22px] font-bold tracking-[-0.02em]">Find your vehicle</h2>
-          <div className="grid items-end gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(190px,1fr))]">
-            <div>
-              <label htmlFor="loc" className={label}>
-                Pick-up location
-              </label>
-              <select
-                id="loc"
-                value={location}
-                onChange={(event) => setLocation(event.target.value as (typeof PICKUP_LOCATIONS)[number])}
-                className={field}
-              >
-                {PICKUP_LOCATIONS.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div className="grid items-end gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr))]">
             <div>
               <label htmlFor="pdate" className={label}>
                 Pick-up date and time
@@ -422,7 +476,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                 onChange={(event) => setDelivery(event.target.value as DeliveryMode)}
                 className={field}
               >
-                <option value="none">No, I will collect it</option>
+                <option value="none">No, I will collect it in Karen</option>
                 <option value="deliver">Deliver to me</option>
                 <option value="both">Deliver and collect</option>
               </select>
@@ -436,78 +490,108 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
             <div className="mt-[18px] border-t border-[#e5e5e5] pt-4">
               <div className="text-base font-bold">Where should we deliver?</div>
               <p className="mb-3 mt-0.5 text-[13px] text-[#595959]">
-                {deliveryHelp} Search for a place, or type the address.
+                {deliveryHelp} Search for your address, or tap the map to drop a pin where you want the vehicle.
               </p>
-              <div className="relative">
-                <label htmlFor="daddr" className={label}>
-                  Delivery address
+              <form
+                className="flex gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  searchAddress();
+                }}
+              >
+                <label htmlFor="daddr" className="sr-only">
+                  Search for your address
                 </label>
                 <input
                   id="daddr"
-                  type="text"
+                  type="search"
                   autoComplete="off"
-                  value={address}
-                  onChange={(event) => {
-                    setAddress(event.target.value);
-                    setPlaceId("");
-                    setShowSuggestions(true);
-                  }}
-                  onFocus={() => setShowSuggestions(true)}
-                  onBlur={() => window.setTimeout(() => setShowSuggestions(false), 150)}
-                  placeholder="Start typing, e.g. Village Market or Naivasha"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Address, area or landmark, e.g. Village Market, Gigiri"
                   className={roundField}
                 />
-                {showSuggestions && suggestions.length > 0 && (
-                  <div
-                    role="listbox"
-                    aria-label="Suggested places"
-                    className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-lg border border-[#c8c8c8] bg-white shadow-[0_8px_24px_rgba(0,0,0,0.12)]"
-                  >
-                    {suggestions.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        role="option"
-                        aria-selected={false}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => {
-                          setPlaceId(item.id);
-                          setAddress(item.name + ", " + item.area);
-                          setShowSuggestions(false);
-                        }}
-                        className="block w-full cursor-pointer border-0 border-b border-[#f0f0f0] bg-white px-3.5 py-2.5 text-left text-sm text-[#171717] hover:bg-[#f7f7f5]"
-                      >
-                        <strong>{item.name}</strong> <span className="text-[#595959]">· {item.area}</span>
-                      </button>
-                    ))}
-                    <div className="bg-[#f7f7f5] px-3.5 py-1.5 text-[11px] text-[#595959]">
-                      Not in the list? Type the full address.
-                    </div>
-                  </div>
-                )}
+                <button type="submit" disabled={searching} className={btnDark + " h-[46px] flex-none px-5"}>
+                  {searching ? "Searching…" : "Search"}
+                </button>
+              </form>
+              {results.length > 0 && (
+                <div role="listbox" aria-label="Matching places" className="mt-2 overflow-hidden rounded-lg border border-[#c8c8c8] bg-white">
+                  {results.map((item) => (
+                    <button
+                      key={item.lat + "," + item.lng}
+                      type="button"
+                      role="option"
+                      aria-selected={false}
+                      onClick={() => choosePlace(item)}
+                      className="block w-full cursor-pointer border-0 border-b border-[#f0f0f0] bg-white px-3.5 py-2.5 text-left text-sm text-[#171717] last:border-b-0 hover:bg-[#f7f7f5]"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {searchNote && <p className="mt-2 text-[13px] text-[#5f4b00]">{searchNote}</p>}
+
+              <div className="mt-3">
+                <PinMap pin={pin} home={{ ...YARD, label: "Our workshop" }} onPick={dropPin} />
+                <p className="mt-1.5 text-xs text-[#595959]">
+                  Can&apos;t find your address? Drag the map to your area, zoom in, and tap the exact spot.
+                </p>
               </div>
 
-              {manual && address.trim().length >= 3 && (
-                <div className="mt-3.5">
-                  <p className="rounded-lg bg-[#fef7e0] px-3 py-2.5 text-sm text-[#5f4b00]">{deliveryQuote.message}</p>
-                  <label htmlFor="lnote" className="mb-1.5 mt-3 block text-sm font-bold">
-                    Delivery details
-                  </label>
-                  <textarea
-                    id="lnote"
-                    rows={3}
-                    value={note}
-                    onChange={(event) => setNote(event.target.value)}
-                    placeholder="Exact place, and when you need the vehicle there"
-                    className={area}
-                  />
+              {pin && (
+                <div className="mt-3 rounded-[10px] border border-[#e5e5e5] bg-[#f5f5f3] px-4 py-3.5">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5">
+                    <div className="min-w-0">
+                      <strong className="break-words">{address}</strong>
+                      <div className="text-[13px] text-[#595959]">
+                        About {straightKm(pin.lat, pin.lng)} km in a straight line from our workshop in Karen
+                      </div>
+                    </div>
+                    {selected && (
+                      <div className="text-right">
+                        <div className="text-xl font-bold">{deliveryQuote.fee ? ksh(deliveryQuote.fee) : "Free"}</div>
+                        <div className="text-[13px] text-[#595959]">{deliveryQuote.breakdown}</div>
+                      </div>
+                    )}
+                  </div>
+                  {!selected && (
+                    <p className="mt-2 text-sm text-[#3f3f3f]">
+                      {(() => {
+                        const km = straightKm(pin.lat, pin.lng);
+                        const trips = delivery === "both" ? 2 : 1;
+                        if (km <= DELIVERY.freeKm) return "Delivery is free for every vehicle.";
+                        const price = (cat: "saloon" | "suv" | "4x4") => ksh(deliveryCharge(km, cat, trips).fee);
+                        return (
+                          "Delivery charge: saloon " + price("saloon") + " · SUV " + price("suv") + " · Prado or 4x4 " + price("4x4") +
+                          (trips === 2 ? " (delivery and collection)" : "") +
+                          ". It is added to the full amount when you book."
+                        );
+                      })()}
+                    </p>
+                  )}
                 </div>
               )}
 
+              <label htmlFor="lnote" className="mb-1.5 mt-3.5 block text-[13px] text-[#595959]">
+                Delivery instructions (optional)
+              </label>
+              <textarea
+                id="lnote"
+                rows={2}
+                maxLength={500}
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                placeholder="e.g. Gate B, ask for me at reception, or call when you arrive"
+                className={area}
+              />
+
               <p className="mt-2.5 text-xs text-[#595959]">
-                Collection from Karen, JKIA or Wilson Airport is included. Delivery inside Nairobi is free during opening
-                hours. Otherwise it is {ksh(PRICING.base)} per trip plus {ksh(PRICING.perKm)} per km after the first{" "}
-                {PRICING.freeKm} km, measured by road from our workshop in Karen.
+                Delivery is free within {DELIVERY.freeKm} km of our workshop in Karen, measured in a straight line to your
+                pin. Beyond that, each km over {DELIVERY.freeKm} costs {ksh(DELIVERY.perKm.saloon)} for a saloon,{" "}
+                {ksh(DELIVERY.perKm.suv)} for an SUV and {ksh(DELIVERY.perKm["4x4"])} for a Prado or 4x4
+                {delivery === "both" ? ", for each trip" : ""}.
               </p>
             </div>
           )}
@@ -529,7 +613,6 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
               <p className="mb-2.5 mt-1 text-sm">
                 We are open Monday to Friday 08:00–17:00 and Saturday 08:00–13:00. Tell us what you need below and we will
                 arrange it with you.
-                {delivery !== "none" && " Delivery inside Nairobi is charged by distance outside opening hours."}
               </p>
               <label htmlFor="oohNote" className="mb-1.5 block text-[13px] font-bold text-[#3f3f3f]">
                 Out-of-hours details
@@ -923,10 +1006,12 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                     <div>
                       to {formatDay(returnOn)}, {retTime}
                     </div>
-                    <div>{location}</div>
-                    {delivery !== "none" && (
+                    {delivery === "none" ? (
+                      <div>Collect from our workshop in Karen</div>
+                    ) : (
                       <div>
                         <strong>Delivery:</strong> {DELIVERY_LABELS[delivery]}
+                        {address ? " · " + address : ""}
                       </div>
                     )}
                   </div>

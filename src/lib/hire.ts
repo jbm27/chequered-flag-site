@@ -567,7 +567,7 @@ export function bookingMessage(input: { manual: boolean; reference: string; tota
     input.model +
     " is held for you. Pay " +
     ksh(input.total) +
-    " in full by M-Pesa or bank transfer within 48 hours and quote this reference, or the hold is released. We confirm the booking once we have checked the payment. Nothing is taken on this page."
+    " in full by M-Pesa or bank transfer and quote this reference. We confirm the booking once we have checked the payment. Nothing is taken on this page."
   );
 }
 
@@ -654,9 +654,8 @@ export type StaffBooking = {
   hasDocuments?: boolean;
   licenceOnFile?: boolean; // the main driver's licence was reused from one on file: check it at handover
   paymentLog?: PaymentEntry[];
-  source?: "website" | "desk"; // desk bookings are never released automatically
-  keepHold?: boolean; // staff chose "Don't release automatically"
-  heldAt?: string; // when the vehicle was first held (ISO); the 48-hour clock starts here // payments recorded on the desk with "Match a payment"
+  source?: "website" | "desk"; // desk bookings aren't flagged as unpaid holds
+  heldAt?: string; // when the vehicle was first held (ISO); unpaid website holds are flagged 24 hours after this // payments recorded on the desk with "Match a payment"
   amountPaid: number; // KSh received so far, entered by staff (part payments). Full when confirmed.
 };
 

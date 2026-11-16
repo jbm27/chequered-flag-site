@@ -145,18 +145,13 @@ function buildDays(first: number, todayNum: number) {
   });
 }
 
-// Unpaid website holds: flagged after 24 hours, released automatically after 48 (see releaseStaleHolds on the server).
+// Unpaid website holds are flagged after 24 hours, so staff can chase the customer or release the hold by hand.
 const HOLD_FLAG_HOURS = 24;
-const HOLD_RELEASE_HOURS = 48;
 
 function holdInfo(booking: StaffBooking) {
-  const auto =
-    booking.status === "pending" && booking.source !== "desk" && !booking.keepHold && booking.amountPaid === 0 && !booking.mpesaCode;
-  const held = Date.parse(booking.heldAt || booking.createdAt);
-  const hours = (Date.now() - held) / 3.6e6;
-  const releaseAt = new Date(held + HOLD_RELEASE_HOURS * 3.6e6);
-  const when = releaseAt.toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Africa/Nairobi" });
-  return { auto, flagged: auto && hours >= HOLD_FLAG_HOURS, hours, when };
+  const watch = booking.status === "pending" && booking.source !== "desk" && booking.amountPaid === 0 && !booking.mpesaCode;
+  const hours = (Date.now() - Date.parse(booking.heldAt || booking.createdAt)) / 3.6e6;
+  return { flagged: watch && hours >= HOLD_FLAG_HOURS, hours: Math.floor(hours) };
 }
 
 function chipFor(booking: StaffBooking, today: string): Chip {
@@ -166,7 +161,7 @@ function chipFor(booking: StaffBooking, today: string): Chip {
   if (booking.status === "cancelled") return CHIP_CLOSED;
   if (booking.pickup <= today) return part ? { ...CHIP_LATE, label: "Balance owed, pick-up reached" } : CHIP_LATE;
   const hold = holdInfo(booking);
-  if (hold.flagged) return { label: "Unpaid 24h+, releases " + hold.when, bg: "#fff4e5", fg: "#7a3e00", bd: "#f7b267" };
+  if (hold.flagged) return { label: "Unpaid for " + (hold.hours >= 48 ? Math.floor(hold.hours / 24) + " days" : "24h+"), bg: "#fff4e5", fg: "#7a3e00", bd: "#f7b267" };
   if (part) return CHIP_PART;
   if (booking.mpesaCode) return CHIP_CODE;
   return CHIP_AWAIT;
@@ -1400,31 +1395,13 @@ export default function HireDesk() {
                       {selected.deliveryManual ? " plus delivery" : ""}
                     </strong>
                   </Row>
-                  {(() => {
-                    const hold = holdInfo(selected);
-                    if (selected.status !== "pending") return null;
-                    if (selected.keepHold) {
-                      return <Row label="Hold">Kept by staff: it won&apos;t be released automatically.</Row>;
-                    }
-                    if (!hold.auto) return null;
-                    return (
-                      <Row label="Hold">
-                        <span className={hold.flagged ? "font-bold text-[#7a3e00]" : "text-[#3f3f3f]"}>
-                          {hold.flagged ? "Unpaid for over 24 hours. " : "Unpaid. "}
-                          Released automatically on {hold.when} unless a payment or M-Pesa code comes in.
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            act(selected, "keep", "Keep holding " + selected.reference + " without releasing it automatically?")
-                          }
-                          className="mt-1 block text-[13px] font-semibold underline"
-                        >
-                          Don&apos;t release automatically
-                        </button>
-                      </Row>
-                    );
-                  })()}
+                  {holdInfo(selected).flagged && (
+                    <Row label="Hold">
+                      <span className="font-bold text-[#7a3e00]">
+                        Unpaid for over 24 hours. Chase the customer, or release the hold if they won&apos;t be paying.
+                      </span>
+                    </Row>
+                  )}
                   <Row label="M-Pesa code">
                     {selected.mpesaCode || "None sent yet"}
                     {selected.mpesaCode && !looksLikeMpesaCode(selected.mpesaCode) && (

@@ -145,12 +145,11 @@ async function setup() {
     );
     -- Part payments, entered by staff on the desk. Added after launch, so existing bookings start at 0.
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS amount_paid integer NOT NULL DEFAULT 0;
-    -- Unpaid website holds: flagged on the desk after 24 hours, released automatically after 48 (releaseStaleHolds).
-    -- source: 'website' or 'desk' (desk bookings are never released automatically). held_at: when the vehicle was
-    -- first held (a quote is held later than it was made). keep_hold: staff chose "Don't release automatically".
+    -- Unpaid website holds are flagged on the desk after 24 hours (staff chase or release them by hand).
+    -- source: 'website' or 'desk' (desk bookings aren't flagged). held_at: when the vehicle was first held
+    -- (a quote is held later than it was made).
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'website';
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS held_at timestamptz;
-    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS keep_hold boolean NOT NULL DEFAULT false;
     UPDATE bookings SET source = 'desk' WHERE source = 'website' AND staff_note LIKE 'Added on the desk by%';
     -- Payments recorded on the desk (code, amount, who, when), used to spot a code used twice.
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_log jsonb NOT NULL DEFAULT '[]'::jsonb;
@@ -303,7 +302,6 @@ export async function loadAvailability(pickup: string, returnOn: string, from: s
   await ensureReady();
   const db = pool();
   if (!db) throw new Error("DATABASE_URL is not set");
-  await releaseStaleHolds(db);
   const problem = dateProblem(pickup, returnOn);
   if (problem) {
     const error = new Error(problem);
@@ -428,7 +426,6 @@ export async function createBooking(
     throw error;
   }
   const booking = assessed.booking;
-  await releaseStaleHolds(db);
   let amountPaid = 0;
   if (opts?.confirmed && !booking.manual) {
     amountPaid = booking.total;
@@ -668,7 +665,6 @@ function mapStaff(row: Record<string, unknown>): StaffBooking {
     deliveryDetail: String(row.delivery_detail || ""),
     hasDocuments: Boolean(row.has_documents),
     source: row.source === "desk" ? "desk" : "website",
-    keepHold: Boolean(row.keep_hold),
     heldAt: row.held_at ? new Date(String(row.held_at)).toISOString() : "",
     paymentLog: Array.isArray(row.payment_log) ? (row.payment_log as StaffBooking["paymentLog"]) : [],
     licenceOnFile: Boolean(row.licence_on_file),
@@ -687,42 +683,17 @@ function mapStaff(row: Record<string, unknown>): StaffBooking {
   };
 }
 
-// Unpaid website holds are released after HOLD_RELEASE_HOURS, so abandoned bookings don't block vehicles.
-// Only when nothing has been paid or sent: no amount recorded, no M-Pesa code waiting to be checked, and staff
-// haven't chosen "Don't release automatically". Desk bookings are never released this way. There is no
-// scheduled job, so this runs whenever availability is checked, a booking is made, or the desk loads.
-export const HOLD_FLAG_HOURS = 24;
-export const HOLD_RELEASE_HOURS = 48;
-
-export async function releaseStaleHolds(db: Pool) {
-  const result = await db.query<{ reference: string }>(
-    `UPDATE bookings
-     SET status = 'cancelled',
-         closed_at = now(),
-         staff_note = left(
-           CASE WHEN staff_note = '' THEN '' ELSE staff_note || ' · ' END ||
-           'Released automatically: no payment within ' || $1::int || ' hours.', 500)
-     WHERE status = 'pending' AND source = 'website' AND NOT keep_hold
-       AND amount_paid = 0 AND mpesa_code = ''
-       AND COALESCE(held_at, created_at) < now() - ($1::int * interval '1 hour')
-     RETURNING reference`,
-    [HOLD_RELEASE_HOURS],
-  );
-  return result.rows.map((row) => row.reference);
-}
-
 export async function listBookings() {
   await ensureReady();
   const db = pool();
   if (!db) throw new Error("DATABASE_URL is not set");
-  await releaseStaleHolds(db);
   const result = await db.query(
     `SELECT id, reference, vehicle_id, model_name, customer_name, email, phone,
             pickup_on::text, return_on::text, pickup_time, return_time, pickup_location,
             delivery_mode, delivery_summary, delivery_detail, delivery_manual,
             days, daily_rate, hire_total, insurance_total, delivery_fee, total_due,
             ooh, ooh_note, mpesa_code, status, staff_note, created_at, amount_paid, payment_log,
-            source, keep_hold, COALESCE(held_at, created_at) AS held_at,
+            source, COALESCE(held_at, created_at) AS held_at,
             EXISTS (SELECT 1 FROM booking_documents d WHERE d.booking_id = bookings.id) AS has_documents,
             COALESCE((SELECT d.drivers->0->>'fromFile' = 'true' FROM booking_documents d WHERE d.booking_id = bookings.id), false)
               AS licence_on_file
@@ -1069,18 +1040,6 @@ export async function updateBooking(id: string, action: string, note: string, de
   const staffNote = note.trim().slice(0, 500);
   if (action === "hold" || action === "settle") {
     return decideQuote(db, id, staffNote, action === "settle" ? "confirmed" : "pending", deliveryFee);
-  }
-  // Staff keep an unpaid website hold beyond HOLD_RELEASE_HOURS (for example, a trusted customer paying late).
-  if (action === "keep") {
-    const kept = await db.query(
-      `UPDATE bookings
-       SET keep_hold = true,
-           staff_note = CASE WHEN $2 = '' THEN staff_note ELSE $2 END
-       WHERE id = $1 AND status = 'pending'`,
-      [id, staffNote],
-    );
-    if (kept.rowCount !== 1) throw staffError("That booking is no longer held.", 409);
-    return { ok: true };
   }
   const expected =
     action === "confirm" ? "pending" : action === "release" ? "pending" : action === "cancel" ? "confirmed" : action === "dismiss" ? "quote" : "";

@@ -19,8 +19,9 @@ export const MAX_IMAGE_SIDE = 4000;
 // Change AGREEMENT_VERSION whenever the text changes, so each booking records which version the customer signed.
 // Layout: "# " starts a heading; "{{SCHEDULE}}" is where the Booking Schedule table goes.
 // Version history: online-hire-agreement-2026-11-revised (Homer's revised text); -b adds the Land Cruiser
-// at KES 200,000, the same as the Prado (Homer, 16 Nov 2026), in the class mapping and clause 7.2.
-export const AGREEMENT_VERSION = "online-hire-agreement-2026-11-revised-b";
+// at KES 200,000, the same as the Prado (Homer, 16 Nov 2026), in the class mapping and clause 7.2;
+// -c adds clause 1.4: every booking is subject to review and may be cancelled with a full refund (Homer).
+export const AGREEMENT_VERSION = "online-hire-agreement-2026-11-revised-c";
 export const AGREEMENT_TITLE = "Self-drive vehicle hire agreement";
 export const AGREEMENT_TEXT: string[] = [
   "Contracting company: The Chequered Flag Ltd. (“Company”, “we”, “us”). Registered address: " + COMPANY.postal + ". Booking enquiries and incident contact: " + CONTACT.phoneDisplay + ", " + CONTACT.email + ".",
@@ -32,6 +33,7 @@ export const AGREEMENT_TEXT: string[] = [
   "1.1 The Company hires the vehicle identified in the Booking Schedule (or an agreed equivalent or better replacement) to the Hirer for the stated period, subject to these Terms. A booking is confirmed only once full payment has been received and the Company has issued confirmation.",
   "1.2 The Company shall show the full price, cancellation policy, applicable damage liability limit, fuel and mileage policy, and material restrictions before the Hirer pays. The Hirer must be able to download or receive a durable copy of the accepted agreement.",
   "1.3 The vehicle remains the property of the Company or its lawful owner. No ownership rights pass to the Hirer. Any change to the booking after confirmation requires both parties’ agreement and a revised confirmation.",
+  "1.4 Every booking is subject to review by the Company after it is placed. If the booked vehicle becomes unavailable before collection, for example because of a breakdown, accident or damage, and the Company cannot provide an agreed equivalent or better replacement, the Company may cancel the booking. The Company shall tell the Hirer as soon as practicable, and the Hirer shall receive a full refund of all amounts paid for that booking, as set out in clause 4.5.",
   "# 2. Eligibility and authorised drivers",
   "2.1 Every driver must be at least 25 years old, hold a valid licence recognised in Kenya for the vehicle class and satisfy the Company’s reasonable identity and licence checks. The Company may refuse handover if the checks fail and shall apply any cancellation/no-show charges only as permitted by applicable law.",
   "2.2 Only drivers specifically listed in the Booking Schedule or subsequently authorised by the Company in writing may drive. The Hirer remains responsible for ensuring that authorised drivers comply with this agreement.",

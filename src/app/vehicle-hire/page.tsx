@@ -54,7 +54,7 @@ const KNOW = [
   },
   {
     title: "Cancellations",
-    body: "Cancel at least 14 days before collection for a full refund. After that, and for no-shows, we keep 20% of the booking price and refund 80%.",
+    body: "Cancel at least 14 days before collection for a full refund. After that, and for no-shows, we keep 20% of the booking price and refund 80%. If your vehicle becomes unavailable and we can't offer an equivalent, we may cancel and refund you in full.",
   },
   { title: "Prices", body: "All rates include VAT." },
 ];
@@ -125,7 +125,7 @@ const FAQ = [
   },
   {
     q: "Can I cancel or change my booking?",
-    a: "Cancel at least 14 days before collection for a full refund. After that, and for no-shows, we keep 20% of the booking price and refund 80%. Refunds go back to the way you paid within 7 business days. If we cancel or can't supply a suitable vehicle, you get a full refund. To change a booking, contact us as early as possible; changes after confirmation need both of us to agree.",
+    a: "Cancel at least 14 days before collection for a full refund. After that, and for no-shows, we keep 20% of the booking price and refund 80%. Refunds go back to the way you paid within 7 business days. Every booking is reviewed after it is placed: if your vehicle becomes unavailable before collection (for example after a breakdown or accident) and we can't offer you an equivalent or better one, we may cancel the booking and you get a full refund. To change a booking, contact us as early as possible; changes after confirmation need both of us to agree.",
   },
   {
     q: "What do you do with my information?",

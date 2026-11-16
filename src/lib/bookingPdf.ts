@@ -226,8 +226,10 @@ export function buildBookingPdf(data: BookingPdfData): Uint8Array {
   // Page 1: laid out like The Chequered Flag invoice
   const right = PAGE_W - MARGIN;
   const colX = 330;
+  let logoRef = 0; // XObject number of the logo, reused on the agreement page
   if (data.logo) {
     images.push(data.logo);
+    logoRef = images.length;
     const lw = 190;
     const lh = (data.logo.h / data.logo.w) * lw;
     ops += "q " + lw + " 0 0 " + lh.toFixed(2) + " " + (MARGIN - 6) + " " + (PAGE_H - MARGIN - 18 - lh).toFixed(2) + " cm /Im" + images.length + " Do Q\n";
@@ -380,10 +382,28 @@ export function buildBookingPdf(data: BookingPdfData): Uint8Array {
     image(data.signature.image, 220, 90);
   }
 
-  // Agreement text
+  // Agreement text, with the logo at the top right of its first page
   newPage();
-  para(data.agreementTitle, 14, true);
-  para("Version " + data.agreementVersion + " · signed by " + data.signature.name + " on " + data.signedAt, 9, false, true);
+  const agreementTop = y;
+  let textW = WIDTH;
+  if (logoRef && data.logo) {
+    const lw = 118;
+    const lh = (data.logo.h / data.logo.w) * lw;
+    ops += "q " + lw + " 0 0 " + lh.toFixed(2) + " " + (PAGE_W - MARGIN - lw + 4).toFixed(2) + " " + (agreementTop - lh + 6).toFixed(2) + " cm /Im" + logoRef + " Do Q\n";
+    textW = WIDTH - lw - 12;
+    for (const part of wrap(data.agreementTitle, 14, textW, true)) {
+      y -= 14 * 1.45;
+      text(part, MARGIN, 14, true);
+    }
+    for (const part of wrap("Version " + data.agreementVersion + " · signed by " + data.signature.name + " on " + data.signedAt, 9, textW, false)) {
+      y -= 9 * 1.45;
+      text(part, MARGIN, 9, false, true);
+    }
+    y = Math.min(y, agreementTop - lh + 2);
+  } else {
+    para(data.agreementTitle, 14, true);
+    para("Version " + data.agreementVersion + " · signed by " + data.signature.name + " on " + data.signedAt, 9, false, true);
+  }
   rule();
   for (const paragraph of data.agreementText) {
     const line = agreementLine(paragraph);
@@ -435,6 +455,7 @@ export function buildBookingPdf(data: BookingPdfData): Uint8Array {
   const total = pages.length;
   const withFooter = pages.map(
     (content, index) =>
+      chequerStrip(PAGE_H) +
       content +
       "0.8 G 0.5 w " + MARGIN + " 40 m " + (PAGE_W - MARGIN) + " 40 l S\n" +
       "0.45 g BT /F1 7.5 Tf " + MARGIN + " 28 Td (" + escape(data.footer) + ") Tj ET\n" +
@@ -442,6 +463,19 @@ export function buildBookingPdf(data: BookingPdfData): Uint8Array {
   );
 
   return assemblePdf(withFooter, images);
+}
+
+// The faint chequered strip down the left edge of each page, as on The Chequered Flag letterhead.
+// Drawn as vector squares (not an image), so it stays sharp when zoomed or printed. Drawn first, behind the text.
+export function chequerStrip(pageH: number, square = 10.5, columns = 2, shade = 0.925) {
+  let out = "q " + shade + " g\n";
+  const rows = Math.ceil(pageH / square);
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < columns; c += 1) {
+      if ((r + c) % 2 === 0) out += (c * square).toFixed(2) + " " + (r * square).toFixed(2) + " " + square + " " + square + " re\n";
+    }
+  }
+  return out + "f Q\n";
 }
 
 // Writes the PDF file: one content stream per page, Helvetica and Helvetica-Bold, and JPEG images

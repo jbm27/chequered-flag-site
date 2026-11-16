@@ -1331,9 +1331,25 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                           tabIndex={0}
                           role="region"
                           aria-label={AGREEMENT_TITLE}
-                          className="mt-2 h-[300px] overflow-y-auto overscroll-contain rounded-lg border border-[#c8c8c8] bg-white px-4 py-3 text-sm leading-relaxed text-[#3f3f3f] focus:outline focus:outline-2 focus:outline-[#171717]"
+                          className="mt-2 h-[300px] overflow-y-auto overscroll-contain rounded-lg border border-[#c8c8c8] bg-white text-sm leading-relaxed text-[#3f3f3f] focus:outline focus:outline-2 focus:outline-[#171717]"
                         >
-                          <p className="mb-2 text-base font-bold text-[#171717]">{AGREEMENT_TITLE}</p>
+                          {/* Letterhead look: a faint chequered strip down the left and the logo top right, as in the PDF */}
+                          <div className="relative min-h-full py-3 pl-9 pr-4">
+                          <div
+                            aria-hidden="true"
+                            className="pointer-events-none absolute inset-y-0 left-0 w-[18px]"
+                            style={{ background: "repeating-conic-gradient(#ececea 0 25%, transparent 0 50%) 0 0 / 18px 18px" }}
+                          />
+                          <div className="mb-2 flex items-start justify-between gap-3">
+                            <p className="pt-1 text-base font-bold text-[#171717]">{AGREEMENT_TITLE}</p>
+                            <img
+                              src="/images/brand/chequered-flag-ltd.jpg"
+                              alt="The Chequered Flag Ltd"
+                              width={96}
+                              height={44}
+                              className="h-auto w-[96px] flex-none"
+                            />
+                          </div>
                           {AGREEMENT_TEXT.map((paragraph, index) => {
                             const line = agreementLine(paragraph);
                             if (line.kind === "heading") {
@@ -1362,6 +1378,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                             );
                           })}
                           <p className="mt-3 text-xs text-[#595959]">Version {AGREEMENT_VERSION}</p>
+                          </div>
                         </div>
                       </div>
 

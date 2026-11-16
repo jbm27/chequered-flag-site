@@ -227,7 +227,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   }, [pickup, returnOn, refreshToken, dateError]);
 
   const hours = outOfHours(pickup, returnOn, pickTime, retTime);
-  // Delivery is priced from the pin: free within 50 km in a straight line of the workshop, then per km over 50
+  // Delivery is priced from the pin: free within DELIVERY.freeKm (15 km) in a straight line of the workshop, then per km over that
   // by vehicle type. The server works the price out again from the same pin, so this is only a preview.
   const models = useMemo(() => {
     const list = availability?.models || [];

@@ -6,11 +6,12 @@ export const YARD = { lat: -1.3185853, lng: 36.7161047, name: "Chequered Flag, K
 export const PRICING = { base: 1000, perKm: 50, freeKm: 5, maxKm: 150, roadFactor: 1.3 };
 
 // Delivery pricing set by Homer (Nov 2026): measured in a straight line from the workshop in Karen
-// to the customer's pin. The first 50 km are free; each km beyond that is charged per vehicle type.
+// to the customer's pin. The first 15 km are free (changed from 50 km, Homer, Nov 2026); each km beyond that is
+// charged per vehicle type.
 // "Deliver and collect" is charged for both trips. If the customer is collected from somewhere else (a second
 // pin, for example delivered in Watamu and collected in Nanyuki), each trip is priced from its own pin.
 export const DELIVERY = {
-  freeKm: 50,
+  freeKm: 15,
   perKm: { saloon: 45, suv: 55, "4x4": 70 } as Record<"saloon" | "suv" | "4x4", number>,
 };
 

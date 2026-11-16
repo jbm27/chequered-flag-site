@@ -30,7 +30,7 @@ const KNOW = [
   },
   {
     title: "Collection and delivery",
-    body: "Collect from our workshop in Karen, or we deliver to you, and can collect from a different place. Delivery is free within 50 km of the workshop, measured in a straight line. Beyond that, each km over 50 costs KSh 45 for a saloon, KSh 55 for an SUV and KSh 70 for a Prado or 4x4, for each trip. The charge is shown when you book.",
+    body: "Collect from our workshop in Karen, or we deliver to you, and can collect from a different place. Delivery is free within 15 km of the workshop, measured in a straight line. Beyond that, each km over 15 costs KSh 45 for a saloon, KSh 55 for an SUV and KSh 70 for a Prado or 4x4, for each trip. The charge is shown when you book.",
   },
   {
     title: "Drivers",
@@ -97,7 +97,7 @@ const FAQ = [
   },
   {
     q: "Can you deliver the vehicle to me?",
-    a: "Yes. Choose a delivery option in Find your vehicle, then search for your address or drop a pin on the map. You can also have it collected from a different place. Delivery is free within 50 km of our workshop in Karen, measured in a straight line to your pin. Beyond that, each km over 50 costs KSh 45 for a saloon, KSh 55 for an SUV and KSh 70 for a Prado or 4x4, for each trip. The charge is shown and added to the full amount when you book.",
+    a: "Yes. Choose a delivery option in Find your vehicle, then search for your address or drop a pin on the map. You can also have it collected from a different place. Delivery is free within 15 km of our workshop in Karen, measured in a straight line to your pin. Beyond that, each km over 15 costs KSh 45 for a saloon, KSh 55 for an SUV and KSh 70 for a Prado or 4x4, for each trip. The charge is shown and added to the full amount when you book.",
   },
   {
     q: "Can I collect or return outside opening hours?",

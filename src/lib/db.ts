@@ -35,6 +35,7 @@ import {
 } from "./hire";
 
 const SESSION_DAYS = 14;
+const LOGIN_LIMIT = 8; // wrong passwords per username in 15 minutes before sign-in is paused
 const SETUP_MESSAGE =
   "Staff sign-in is not ready. In the Vercel project, add HIRE_STAFF_USERNAME and HIRE_STAFF_PASSWORD (at least 8 characters) for Production, Preview, and Development, then redeploy.";
 
@@ -100,6 +101,12 @@ async function setup() {
       staff_id integer NOT NULL REFERENCES staff_users(id) ON DELETE CASCADE,
       expires_at timestamptz NOT NULL
     );
+    -- Failed desk sign-ins, to slow down password guessing (see loginStaff). Rows older than a day are removed.
+    CREATE TABLE IF NOT EXISTS staff_login_failures (
+      username text NOT NULL,
+      at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS staff_login_failures_idx ON staff_login_failures (username, at);
     CREATE TABLE IF NOT EXISTS bookings (
       id uuid PRIMARY KEY,
       reference text NOT NULL UNIQUE,
@@ -680,8 +687,11 @@ export async function listBookings() {
             COALESCE((SELECT d.drivers->0->>'fromFile' = 'true' FROM booking_documents d WHERE d.booking_id = bookings.id), false)
               AS licence_on_file
      FROM bookings
-     ORDER BY created_at DESC
-     LIMIT 300`,
+     -- Every booking still current or upcoming (so one made months ahead never drops off the desk),
+     -- plus the 300 most recently made for history.
+     WHERE return_on >= (now() AT TIME ZONE 'Africa/Nairobi')::date - 60
+        OR id IN (SELECT id FROM bookings ORDER BY created_at DESC LIMIT 300)
+     ORDER BY created_at DESC`,
   );
   return result.rows.map((row) => mapStaff(row));
 }
@@ -1519,7 +1529,17 @@ export async function loginStaff(username: string, password: string) {
     (error as Error & { status?: number }).status = 503;
     throw error;
   }
-  const name = username.trim().toLowerCase();
+  const name = username.trim().toLowerCase().slice(0, 60);
+  // After LOGIN_LIMIT wrong attempts on a username within 15 minutes, refuse further tries for a while.
+  const recent = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM staff_login_failures WHERE username = $1 AND at > now() - interval '15 minutes'`,
+    [name],
+  );
+  if (recent.rows[0].n >= LOGIN_LIMIT) {
+    const error = new Error("Too many attempts. Please wait 15 minutes and try again.");
+    (error as Error & { status?: number }).status = 429;
+    throw error;
+  }
   const found = await db.query<{ id: number; password_hash: string; salt: string }>(
     "SELECT id, password_hash, salt FROM staff_users WHERE username = $1",
     [name],
@@ -1527,10 +1547,14 @@ export async function loginStaff(username: string, password: string) {
   const row = found.rows[0];
   const matches = row ? passwordMatches(password, row.salt, row.password_hash) : passwordMatches(password, "00".repeat(16), crypto.pbkdf2Sync("dummy-password", "00".repeat(16), 100000, 64, "sha512").toString("hex"));
   if (!row || !matches) {
+    await db.query(`INSERT INTO staff_login_failures (username) VALUES ($1)`, [name]);
     const error = new Error("Those details were not recognised.");
     (error as Error & { status?: number }).status = 401;
     throw error;
   }
+  // Tidy up: this user's failed attempts, old failures, and expired sessions.
+  await db.query(`DELETE FROM staff_login_failures WHERE username = $1 OR at < now() - interval '1 day'`, [name]);
+  await db.query(`DELETE FROM staff_sessions WHERE expires_at < now()`);
   const token = crypto.randomBytes(32).toString("hex");
   const expires = new Date(Date.now() + SESSION_DAYS * 86400000);
   await db.query("INSERT INTO staff_sessions (token_hash, staff_id, expires_at) VALUES ($1, $2, $3)", [

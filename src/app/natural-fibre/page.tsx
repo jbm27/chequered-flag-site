@@ -3,7 +3,7 @@ import DeferredVideo from "../../components/DeferredVideo";
 import { CONTACT } from "../../lib/contact";
 
 export const metadata: Metadata = {
-  title: "Natural Fibre Research & Development | Chequered Flag",
+  title: "Natural Fibre Research & Development",
   description:
     "Engineering-led natural fibre extraction: pineapple decortication, Mananasi Fibre, and circular bioeconomy innovation in East Africa.",
 };

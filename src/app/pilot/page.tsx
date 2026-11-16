@@ -1,5 +1,11 @@
 import { CONTACT } from "../../lib/contact";
 
+export const metadata = {
+  title: "Pilot programmes",
+  description:
+    "Small, invitation-only trials with trusted customers and partner organisations.",
+};
+
 export default function PilotPage() {
   const waHref = `https://wa.me/${CONTACT.whatsappE164.replace("+", "")}`;
 

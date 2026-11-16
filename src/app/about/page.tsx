@@ -1,3 +1,9 @@
+export const metadata = {
+  title: "About us",
+  description:
+    "The Chequered Flag: vehicle engineering, workshop and hire in Karen, Nairobi since 1975.",
+};
+
 export default function AboutPage() {
   return (
     <main className="min-h-screen bg-white text-neutral-900">

@@ -1,5 +1,11 @@
 import { CONTACT } from "../../lib/contact";
 
+export const metadata = {
+  title: "Contact",
+  description:
+    "Call, WhatsApp or email The Chequered Flag on Ngong Road, Karen, Nairobi.",
+};
+
 export default function ContactPage() {
   const telHref = `tel:${CONTACT.phoneE164}`;
   const waHref = `https://wa.me/${CONTACT.whatsappE164.replace("+","")}`;

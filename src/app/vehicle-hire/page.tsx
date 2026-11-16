@@ -110,6 +110,12 @@ const FAQ = [
   },
 ];
 
+export const metadata = {
+  title: "Vehicle hire",
+  description:
+    "Self-drive saloons, SUVs, Prados and a Land Cruiser for hire in Nairobi. Book online, with delivery available.",
+};
+
 export default function VehicleHirePage() {
   const tel = "tel:" + CONTACT.phoneE164.replace(/\s/g, "");
   const wa = "https://wa.me/" + CONTACT.whatsappE164.replace(/\D/g, "");

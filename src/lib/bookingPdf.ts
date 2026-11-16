@@ -66,7 +66,7 @@ const WINANSI: Record<string, number> = {
   "”": 0x94, "™": 0x99,
 };
 
-function toWinAnsi(text: string) {
+export function toWinAnsi(text: string) {
   let out = "";
   for (const ch of text) {
     const code = ch.charCodeAt(0);
@@ -79,7 +79,7 @@ function toWinAnsi(text: string) {
   return out;
 }
 
-function widthOf(text: string, size: number, bold: boolean) {
+export function widthOf(text: string, size: number, bold: boolean) {
   let units = 0;
   for (const ch of text) {
     const code = ch.charCodeAt(0);
@@ -88,7 +88,7 @@ function widthOf(text: string, size: number, bold: boolean) {
   return (units / 1000) * size * (bold ? 1.06 : 1);
 }
 
-function wrap(text: string, size: number, maxWidth: number, bold: boolean) {
+export function wrap(text: string, size: number, maxWidth: number, bold: boolean) {
   const lines: string[] = [];
   for (const paragraph of text.split("\n")) {
     let line = "";
@@ -105,11 +105,11 @@ function wrap(text: string, size: number, maxWidth: number, bold: boolean) {
   return lines;
 }
 
-function escape(text: string) {
+export function escape(text: string) {
   return toWinAnsi(text).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
 
-function base64Bytes(dataUrl: string) {
+export function base64Bytes(dataUrl: string) {
   const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -117,7 +117,7 @@ function base64Bytes(dataUrl: string) {
   return bytes;
 }
 
-function latin1(text: string) {
+export function latin1(text: string) {
   const bytes = new Uint8Array(text.length);
   for (let i = 0; i < text.length; i += 1) bytes[i] = text.charCodeAt(i) & 0xff;
   return bytes;
@@ -441,7 +441,12 @@ export function buildBookingPdf(data: BookingPdfData): Uint8Array {
       "0.45 g BT /F1 7.5 Tf " + (PAGE_W - MARGIN - 50) + " 28 Td (" + escape("Page " + (index + 1) + " of " + total) + ") Tj ET\n",
   );
 
-  // Assemble the file
+  return assemblePdf(withFooter, images);
+}
+
+// Writes the PDF file: one content stream per page, Helvetica and Helvetica-Bold, and JPEG images
+// referenced as /Im1, /Im2… in the order given. Shared by the booking PDF and the performance report.
+export function assemblePdf(withFooter: string[], images: DocImage[], pageW = PAGE_W, pageH = PAGE_H): Uint8Array {
   const chunks: Uint8Array[] = [];
   const offsets: number[] = [];
   let length = 0;
@@ -484,7 +489,7 @@ export function buildBookingPdf(data: BookingPdfData): Uint8Array {
     const stream = latin1(content);
     obj(
       pageNum,
-      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + PAGE_W + " " + PAGE_H + "] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>" +
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + pageW + " " + pageH + "] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>" +
         (xobjects ? " /XObject << " + xobjects + " >>" : "") + " >> /Contents " + (pageNum + 1) + " 0 R >>",
     );
     obj(pageNum + 1, [stream], "<< /Length " + stream.length + " >>");

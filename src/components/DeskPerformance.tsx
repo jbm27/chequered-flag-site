@@ -2,20 +2,23 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ksh } from "../lib/hire";
+import {
+  DAILY_REVENUE_TARGET,
+  MONTHS,
+  MONTH_NAMES,
+  UTILISATION_TARGET,
+  group,
+  monthStats,
+  sampleYear,
+  type YearData,
+} from "../lib/performance";
+import { buildReport, downloadBytes, reportDocx, reportFileName, reportPdf, reportXlsx } from "../lib/performanceReport";
+import { loadPdfLogo } from "../lib/bookingPdf";
 
 // Performance analysis on the hire desk (owners only), modelled on the "Car Hire Analysis" spreadsheet:
 // cars out per day against the 70% utilisation target, income per day, utilisation and income per vehicle,
 // and a month-by-month summary. Months are chosen with the tabs underneath, like the spreadsheet's sheets.
 // Figures come from held and paid bookings on the desk. Income is net of 16% VAT and excludes delivery.
-
-export const UTILISATION_TARGET = 0.7;
-export const DAILY_REVENUE_TARGET = { saloon: 2500, suv: 8500 }; // per vehicle per hire day, net of VAT (as in the spreadsheet)
-
-type Vehicle = { id: string; plate: string; model: string; category: string; km: number | null };
-type YearData = { year: number; today: string; vehicles: Vehicle[]; days: Record<string, (number | null)[]> };
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 // Chart colours (light desk theme). Blue = the measure; orange = second group; ink for text and the target line.
 const C = {
@@ -27,7 +30,6 @@ const C = {
   track: "#efeeea",
 };
 
-const group = (category: string) => (category === "saloon" ? "saloon" : "suv");
 const pct = (n: number) => (Number.isFinite(n) ? Math.round(n * 100) + "%" : "–");
 const compact = (n: number) => (n >= 1_000_000 ? (n / 1_000_000).toFixed(1) + "M" : n >= 10_000 ? Math.round(n / 1000) + "K" : n.toLocaleString("en-US"));
 
@@ -40,96 +42,6 @@ function niceTicks(value: number) {
   const ticks: number[] = [];
   for (let v = 0; v <= top + step / 2; v += step) ticks.push(Math.round(v * 1000) / 1000);
   return { max: top, ticks };
-}
-
-type MonthStats = {
-  month: number; // 0-11
-  dim: number;
-  reportDays: number; // days counted so far (all days for a past month, up to today for this month)
-  perDay: { day: number; cars: number; income: number }[];
-  perVehicle: { v: Vehicle; days: number; income: number }[];
-  income: number;
-  hireDays: number;
-  util: { saloon: number; suv: number; all: number };
-  counts: { saloon: number; suv: number };
-  targetIncome: number;
-};
-
-function monthStats(data: YearData, month: number): MonthStats {
-  const startIdx = (Date.UTC(data.year, month, 1) - Date.UTC(data.year, 0, 1)) / 864e5;
-  const dim = new Date(Date.UTC(data.year, month + 1, 0)).getUTCDate();
-  const [ty, tm, td] = data.today.split("-").map(Number);
-  const reportDays = data.year < ty || (data.year === ty && month < tm - 1) ? dim : data.year === ty && month === tm - 1 ? td : 0;
-  const perDay = Array.from({ length: dim }, (_, i) => ({ day: i + 1, cars: 0, income: 0 }));
-  const perVehicle = data.vehicles.map((v) => ({ v, days: 0, income: 0 }));
-  perVehicle.forEach((row) => {
-    const list = data.days[row.v.id] || [];
-    for (let i = 0; i < reportDays; i += 1) {
-      const value = list[startIdx + i];
-      if (value === null || value === undefined) continue;
-      row.days += 1;
-      row.income += value;
-      perDay[i].cars += 1;
-      perDay[i].income += value;
-    }
-  });
-  const counts = { saloon: 0, suv: 0 };
-  const days = { saloon: 0, suv: 0 };
-  perVehicle.forEach((row) => {
-    counts[group(row.v.category)] += 1;
-    days[group(row.v.category)] += row.days;
-  });
-  const hireDays = days.saloon + days.suv;
-  const income = perVehicle.reduce((sum, row) => sum + row.income, 0);
-  const cap = (n: number) => n * reportDays;
-  return {
-    month,
-    dim,
-    reportDays,
-    perDay,
-    perVehicle,
-    income,
-    hireDays,
-    counts,
-    util: {
-      saloon: cap(counts.saloon) ? days.saloon / cap(counts.saloon) : NaN,
-      suv: cap(counts.suv) ? days.suv / cap(counts.suv) : NaN,
-      all: cap(counts.saloon + counts.suv) ? hireDays / cap(counts.saloon + counts.suv) : NaN,
-    },
-    targetIncome:
-      (DAILY_REVENUE_TARGET.saloon * counts.saloon + DAILY_REVENUE_TARGET.suv * counts.suv) * UTILISATION_TARGET * reportDays,
-  };
-}
-
-// Made-up figures so the section can be looked at before there are real bookings ("Show sample figures").
-// Generated in the browser from a fixed seed: nothing is saved, and the same sample shows each time.
-function sampleYear(real: YearData): YearData {
-  let seed = 20261116;
-  const rand = () => {
-    seed = (seed * 1664525 + 1013904223) % 4294967296;
-    return seed / 4294967296;
-  };
-  const rateFor = (v: Vehicle) =>
-    /land cruiser/i.test(v.model) ? 18000 : /prado/i.test(v.model) ? 13000 : /x-?trail/i.test(v.model) ? 7500 : 3500;
-  const length = real.days[real.vehicles[0]?.id]?.length || 365;
-  const [ty, tm, td] = real.today.split("-").map(Number);
-  const lastIndex =
-    real.year < ty ? length : real.year > ty ? 0 : (Date.UTC(ty, tm - 1, td) - Date.UTC(ty, 0, 1)) / 864e5 + 1;
-  const days: YearData["days"] = {};
-  for (const v of real.vehicles) {
-    const busy = group(v.category) === "saloon" ? 0.72 : 0.3; // roughly like the spreadsheet: saloons busy, SUVs less so
-    const list: (number | null)[] = Array.from({ length }, () => null);
-    let i = Math.floor(rand() * 4);
-    while (i < lastIndex) {
-      const hire = 2 + Math.floor(rand() * 8);
-      const gap = Math.max(0, Math.round(((1 - busy) / busy) * hire * (0.4 + rand() * 1.2)));
-      const perDay = (rateFor(v) * (0.85 + rand() * 0.15)) / 1.16;
-      for (let d = i; d < Math.min(i + hire, lastIndex); d += 1) list[d] = Math.round(perDay);
-      i += hire + gap;
-    }
-    days[v.id] = list;
-  }
-  return { ...real, days };
 }
 
 function Tile({ label, value, note, good }: { label: string; value: string; note?: string; good?: boolean | null }) {
@@ -276,6 +188,10 @@ export default function DeskPerformance({ today }: { today: string }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [sample, setSample] = useState(false);
+  const [showExport, setShowExport] = useState(false);
+  const [exportMonths, setExportMonths] = useState<number[]>([]);
+  const [exportFormat, setExportFormat] = useState<"pdf" | "docx" | "xlsx">("pdf");
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -325,6 +241,17 @@ export default function DeskPerformance({ today }: { today: string }) {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-4">
+        <button
+          type="button"
+          aria-expanded={showExport}
+          onClick={() => {
+            setShowExport((v) => !v);
+            setExportMonths((list) => (list.length ? list : [month]));
+          }}
+          className="inline-flex min-h-[40px] items-center rounded-lg bg-[#171717] px-4 text-[13px] font-bold text-white"
+        >
+          Download report
+        </button>
         <label className="flex items-center gap-2 text-sm font-semibold">
           <input id="perfSample" type="checkbox" checked={sample} onChange={(e) => setSample(e.target.checked)} className="h-5 w-5" />
           Show sample figures
@@ -341,6 +268,118 @@ export default function DeskPerformance({ today }: { today: string }) {
         </label>
         </div>
       </div>
+
+      {showExport && (
+        <div className="rounded-[10px] border border-[#171717] bg-white p-4">
+          <strong className="block text-[15px]">Download a report</strong>
+          <p className="mt-0.5 text-[13px] text-[#595959]">
+            Each month has a summary against target, revenue as the month goes on (day by day, with the running total
+            against the target to date) and figures by vehicle. Choose more than one month to get an overview too.
+          </p>
+          <fieldset className="mt-3">
+            <legend className="mb-1.5 text-[13px] font-semibold">Months ({year})</legend>
+            <div className="flex flex-wrap gap-1.5">
+              {MONTHS.map((label, m) => {
+                const available = Boolean(months[m] && months[m].reportDays > 0);
+                const on = exportMonths.includes(m);
+                return (
+                  <label
+                    key={label}
+                    className={
+                      "inline-flex min-h-[36px] cursor-pointer items-center gap-1.5 rounded-md border px-2.5 text-[13px] font-bold " +
+                      (!available
+                        ? "cursor-not-allowed border-[#e5e5e5] text-[#b5b5b0]"
+                        : on
+                          ? "border-[#171717] bg-[#171717] text-white"
+                          : "border-[#dadce0] bg-white text-[#171717]")
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      className="sr-only"
+                      disabled={!available}
+                      checked={on}
+                      onChange={() => setExportMonths((list) => (on ? list.filter((x) => x !== m) : [...list, m]))}
+                    />
+                    {label}
+                  </label>
+                );
+              })}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-3 text-[13px]">
+              <button type="button" className="font-semibold underline" onClick={() => setExportMonths([month])}>
+                Just {MONTH_NAMES[month]}
+              </button>
+              <button
+                type="button"
+                className="font-semibold underline"
+                onClick={() => setExportMonths(months.filter((m) => m.reportDays > 0).map((m) => m.month))}
+              >
+                All months so far
+              </button>
+              <button type="button" className="font-semibold underline" onClick={() => setExportMonths([])}>
+                Clear
+              </button>
+            </div>
+          </fieldset>
+          <fieldset className="mt-3">
+            <legend className="mb-1.5 text-[13px] font-semibold">Format</legend>
+            <div className="flex flex-wrap gap-4 text-sm">
+              {(
+                [
+                  ["pdf", "PDF"],
+                  ["docx", "Word (.docx)"],
+                  ["xlsx", "Excel (.xlsx)"],
+                ] as const
+              ).map(([id, label]) => (
+                <label key={id} className="flex items-center gap-2">
+                  <input type="radio" name="perfFormat" checked={exportFormat === id} onChange={() => setExportFormat(id)} className="h-4 w-4" />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={!exportMonths.length || exporting || !shown}
+              onClick={async () => {
+                if (!shown) return;
+                setExporting(true);
+                try {
+                  const report = buildReport(shown, exportMonths, sample);
+                  if (exportFormat === "pdf") {
+                    downloadBytes(reportPdf(report, await loadPdfLogo()), reportFileName(report, "pdf"), "application/pdf");
+                  } else if (exportFormat === "docx") {
+                    downloadBytes(
+                      reportDocx(report),
+                      reportFileName(report, "docx"),
+                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    );
+                  } else {
+                    downloadBytes(
+                      reportXlsx(report),
+                      reportFileName(report, "xlsx"),
+                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    );
+                  }
+                } finally {
+                  setExporting(false);
+                }
+              }}
+              className="inline-flex min-h-[40px] items-center rounded-lg bg-[#188038] px-4 text-[13px] font-bold text-white disabled:opacity-40"
+            >
+              {exporting
+                ? "Preparing…"
+                : "Download " +
+                  (exportMonths.length === 1 ? MONTH_NAMES[exportMonths[0]] : exportMonths.length + " months") +
+                  " as " +
+                  (exportFormat === "pdf" ? "PDF" : exportFormat === "docx" ? "Word" : "Excel")}
+            </button>
+            {sample && <span className="text-[13px] font-bold text-[#7a3e00]">Sample figures are on: the file will be marked SAMPLE.</span>}
+          </div>
+        </div>
+      )}
 
       {sample ? (
         <p role="status" className="rounded-lg border border-[#f9d46b] bg-[#feefc3] px-3.5 py-2.5 text-sm font-bold text-[#5f4400]">

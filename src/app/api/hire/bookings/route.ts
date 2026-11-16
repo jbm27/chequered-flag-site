@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createBooking, databaseConfigured, findLicenceOnFile, httpStatus, publicError } from "../../../../lib/db";
-import { validateDocuments } from "../../../../lib/documents";
+import { damageLimitFor, validateDocuments } from "../../../../lib/documents";
+import { CONTACT } from "../../../../lib/contact";
+import { modelById } from "../../../../lib/fleet";
 import type { BookingInput } from "../../../../lib/hire";
 
 export const runtime = "nodejs";
@@ -19,6 +21,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "The booking could not be read. If you added large photos, please try smaller ones." }, { status: 400 });
   }
   try {
+    // The hire agreement needs a damage liability limit for the vehicle before payment (clause 7.2).
+    const model = modelById(String(body.modelId ?? ""));
+    if (model && damageLimitFor(model.name, model.category) === null) {
+      return NextResponse.json(
+        { error: "The " + model.name + " can't be booked online yet. Please call us on " + CONTACT.phoneDisplay + " to book it." },
+        { status: 400 },
+      );
+    }
     const name = String(body.name ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
     const phone = String(body.phone ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
     const email = String(body.email ?? "").trim().slice(0, 160);

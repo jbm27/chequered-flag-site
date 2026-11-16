@@ -37,7 +37,7 @@ const KNOW = [
   },
   {
     title: "Damage cover",
-    body: "Optional cover for damage to the vehicle, repaired by our own workshop: KSh 1,500 a day for saloons, KSh 2,000 for SUVs and 4x4s. Without it, you pay for any damage to the vehicle.",
+    body: "Optional cover for damage to the vehicle, repaired by our own workshop: KSh 1,500 a day for saloons, KSh 2,000 for SUVs and 4x4s. Without it, you pay for damage to the vehicle up to its damage liability limit per hire: KSh 90,000 for a saloon, KSh 150,000 for the X-Trail and KSh 200,000 for a Prado.",
   },
   {
     title: "Fuel",
@@ -72,7 +72,7 @@ const FAQ = [
   },
   {
     q: "Is insurance included?",
-    a: "Every vehicle is insured as the law requires. You can add optional damage cover (KSh 1,500 a day for saloons, KSh 2,000 for SUVs and 4x4s), and our own workshop handles the repairs. Without it, you pay for damage to the vehicle. Damage from riots or natural disasters is not covered by insurance, and windscreens and tyres are the hirer's responsibility.",
+    a: "Every vehicle is insured as the law requires. You can add optional damage cover (KSh 1,500 a day for saloons, KSh 2,000 for SUVs and 4x4s), and our own workshop handles the repairs. Without it, accidental damage during your hire, including windscreens, tyres and wheels, is charged at the evidenced repair cost up to the vehicle's damage liability limit for the whole hire: KSh 90,000 for a saloon, KSh 150,000 for the X-Trail and KSh 200,000 for a Prado. You don't pay for genuine mechanical breakdowns or normal wear and tear.",
   },
   {
     q: "Is there a mileage limit?",
@@ -104,7 +104,8 @@ const FAQ = [
   },
   {
     q: "Can I cancel or change my booking?",
-    a: "Contact us as early as possible if your plans change.",
+    a:
+      "Cancel at least 14 days before collection for a full refund. After that, and for no-shows, we keep 20% of the total booking price and refund 80%. Refunds go back to the way you paid within 7 business days. To change a booking, contact us as early as possible; changes after confirmation need both of us to agree.",
   },
 ];
 

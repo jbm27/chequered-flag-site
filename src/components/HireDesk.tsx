@@ -6,6 +6,8 @@ import DeskAddBooking from "./DeskAddBooking";
 import DeskEditBooking from "./DeskEditBooking";
 import DeskVehicleEdit from "./DeskVehicleEdit";
 import DeskCustomers, { type LicenceOnFileRow } from "./DeskCustomers";
+import DeskPerformance from "./DeskPerformance";
+import { canSeePerformance } from "../lib/access";
 import DeskDocuments from "./DeskDocuments";
 
 // Staff desk laid out like Homer's fleet dashboard design (V1.5).
@@ -31,7 +33,7 @@ export type DeskVehicle = {
 };
 
 type Chip = { label: string; bg: string; fg: string; bd: string };
-type SectionKey = "overview" | "calendar" | "table" | "payments" | "customers" | "vehicles" | "compare" | "schedule";
+type SectionKey = "overview" | "calendar" | "table" | "payments" | "customers" | "performance" | "vehicles" | "compare" | "schedule";
 
 const WIN = 28;
 const PAID = { bg: "#ceead6", fg: "#0d5a2a" };
@@ -208,6 +210,7 @@ export default function HireDesk() {
     table: false,
     payments: false,
     customers: false,
+    performance: false,
     vehicles: false,
     compare: false,
     schedule: false,
@@ -483,6 +486,7 @@ export default function HireDesk() {
     table: chaseText,
     payments: codesToCheck.length ? plural(codesToCheck.length, "payment code") + " to check" : "",
     customers: "",
+    performance: "",
     vehicles: backFromHire.size ? plural(backFromHire.size, "vehicle") + " back from hire to check" : "",
     compare: chase.length ? plural(chase.length, "booking") + " unpaid at pick-up" : "",
     schedule: "",
@@ -1737,6 +1741,18 @@ export default function HireDesk() {
               }}
             />}
         </section>
+
+        {/* Performance (owners only: Homer and James). The server checks this too. */}
+        {canSeePerformance(signedIn) && (
+          <section className={card + " mt-[22px] p-[22px]"}>
+            {sectionHead("performance", "Performance")}
+            <p className="mb-3.5 mt-1 max-w-[760px] text-sm text-[#595959]">
+              Income, hire days and utilisation by month and by vehicle, against the 70% target. Only you and James can
+              see this section.
+            </p>
+            {open.performance && <DeskPerformance today={today} />}
+          </section>
+        )}
 
         {/* Vehicle records */}
         <section className={card + " mt-[22px] p-[22px]"}>

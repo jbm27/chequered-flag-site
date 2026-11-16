@@ -12,7 +12,11 @@ import {
   AGREEMENT_TITLE,
   AGREEMENT_VERSION,
   MAX_DRIVERS,
+  CANCELLATION_SUMMARY,
   agreementLine,
+  bookingSchedule,
+  damageLimitFor,
+  mileageFor,
   type DocImage,
 } from "../lib/documents";
 import {
@@ -279,6 +283,34 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
     };
   }
 
+  const selectedLimit = selected ? damageLimitFor(selected.name, selected.category) : null;
+
+  // The Booking Schedule shown at the top of the agreement, filled in from what the customer has entered.
+  function scheduleValues() {
+    const when = (day: string, time: string) => (day ? formatDay(day) + ", " + time + " EAT" : "");
+    const collectWhere = delivery === "none" ? location : "Delivered to " + (address || "your pin");
+    const returnWhere =
+      delivery === "none" ? location : delivery === "both" ? "Collected from " + (collectPlace ? collectAddress : address || "your pin") : location;
+    return {
+      reference: "",
+      hirer: { name: name.trim(), email: email.trim(), phone: phone.trim() },
+      verification: usingOnFile
+        ? "Licence photo on file from an earlier booking; checked at handover"
+        : "Licence photo uploaded for each driver; checked at handover",
+      drivers: [name.trim(), ...extraDrivers.map((driver) => driver.name.trim())],
+      vehicle: selected ? selected.name : "",
+      collect: collectWhere + ", " + when(pickup, pickTime),
+      ret: returnWhere + ", " + when(returnOn, retTime),
+      price:
+        "Hire " + ksh(hireTotal) +
+        (insuranceTotal ? " + damage cover " + ksh(insuranceTotal) : "") +
+        (deliveryQuote.manual ? " + delivery (to be quoted)" : pricedDelivery ? " + delivery " + ksh(pricedDelivery) : "") +
+        " = " + ksh(total) + " (VAT included)",
+      damageLimit: selectedLimit,
+      mileage: mileageFor(selected?.category),
+    };
+  }
+
   function check(acceptTerms: boolean) {
     if (!selected) return "Choose a vehicle.";
     if (delivery !== "none" && !pin) return "For delivery, search for your address or tap the map to drop a pin.";
@@ -445,6 +477,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       agreementTitle: AGREEMENT_TITLE,
       agreementVersion: AGREEMENT_VERSION,
       agreementText: AGREEMENT_TEXT,
+      schedule: bookingSchedule({ ...scheduleValues(), reference: booking.reference }),
       footer: COMPANY.name + " Ltd · " + COMPANY.postal + " · Tel " + CONTACT.phoneDisplay + " · " + CONTACT.email,
     };
   }
@@ -1225,6 +1258,22 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                           <div className="mb-3">
                             <PaymentDetails />
                           </div>
+                          <dl className="mb-3 grid gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3.5 py-3 text-[13px]">
+                            <div>
+                              <dt className="inline font-bold">Damage liability limit: </dt>
+                              <dd className="inline">
+                                {selectedLimit ? ksh(selectedLimit) + " per hire, the most you pay for damage to the vehicle (clause 7)." : "Not set"}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="inline font-bold">Cancellation: </dt>
+                              <dd className="inline">{CANCELLATION_SUMMARY}</dd>
+                            </div>
+                            <div>
+                              <dt className="inline font-bold">Mileage: </dt>
+                              <dd className="inline">{selected ? mileageFor(selected.category) : ""}</dd>
+                            </div>
+                          </dl>
                           <p className="text-[13px] text-[#595959]">Nothing is taken on this page.</p>
                           <label htmlFor="mpesa" className={label + " mt-3"}>
                             M-Pesa code (optional, if you have already paid)
@@ -1247,11 +1296,31 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                           aria-label={AGREEMENT_TITLE}
                           className="mt-2 h-[300px] overflow-y-auto overscroll-contain rounded-lg border border-[#c8c8c8] bg-white px-4 py-3 text-sm leading-relaxed text-[#3f3f3f] focus:outline focus:outline-2 focus:outline-[#171717]"
                         >
+                          <p className="mb-2 text-base font-bold text-[#171717]">{AGREEMENT_TITLE}</p>
                           {AGREEMENT_TEXT.map((paragraph, index) => {
-                            const { level, text } = agreementLine(paragraph);
+                            const line = agreementLine(paragraph);
+                            if (line.kind === "heading") {
+                              return (
+                                <p key={index} className="mb-1.5 mt-4 font-bold text-[#171717]">
+                                  {line.text}
+                                </p>
+                              );
+                            }
+                            if (line.kind === "schedule") {
+                              return (
+                                <dl key={index} className="mb-3 grid gap-px overflow-hidden rounded-md border border-[#e5e5e5] bg-[#e5e5e5] text-[13px]">
+                                  {bookingSchedule(scheduleValues()).map(([label, value]) => (
+                                    <div key={label} className="grid gap-x-3 bg-white px-3 py-1.5 sm:grid-cols-[190px_minmax(0,1fr)]">
+                                      <dt className="text-[#595959]">{label}</dt>
+                                      <dd className="text-[#171717]">{value}</dd>
+                                    </div>
+                                  ))}
+                                </dl>
+                              );
+                            }
                             return (
-                              <p key={index} className={level === 2 ? "mb-1 pl-8" : level === 1 ? "mb-2 pl-4" : "mb-2"}>
-                                {text}
+                              <p key={index} className={line.level === 2 ? "mb-1 pl-8" : line.level === 1 ? "mb-2 pl-4" : "mb-2"}>
+                                {line.text}
                               </p>
                             );
                           })}
@@ -1282,8 +1351,8 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                           className="mt-px h-[22px] w-[22px] flex-none"
                         />
                         <label htmlFor="termsBox" className="text-sm leading-normal">
-                          I have read and signed the hire agreement, and every driver named on this booking is at least 25
-                          with a valid driving licence.
+                          I agree to the Rental Terms. I have read and signed the hire agreement, and every driver named on
+                          this booking is at least 25 with a valid driving licence.
                         </label>
                       </div>
                       {formError && (
@@ -1441,7 +1510,15 @@ function VehicleCard({
           </div>
         )}
 
-        {model.available ? (
+        {damageLimitFor(model.name, model.category) === null ? (
+          // No damage liability limit in the hire agreement yet, so this vehicle is booked by phone.
+          <div className="mt-auto flex flex-col gap-2">
+            <div className="text-[13px] font-bold text-[#3f3f3f]">Book by phone</div>
+            <a href={"tel:" + CONTACT.phoneE164.replace(/\s/g, "")} className={btnLight + " min-h-[44px] w-full"}>
+              Call {CONTACT.phoneDisplay}
+            </a>
+          </div>
+        ) : model.available ? (
           <div className="mt-auto flex flex-col gap-2">
             <div className="text-[13px] font-bold text-[#1d6b3a]">
               Available for your dates

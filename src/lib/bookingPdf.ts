@@ -26,6 +26,7 @@ export type BookingPdfData = {
   agreementTitle: string;
   agreementVersion: string;
   agreementText: string[];
+  schedule?: [string, string][] | null; // Booking Schedule rows (section A of the agreement)
   footer: string;
   paid?: string; // amount paid so far, when known
   balance?: string; // amount still due, when known
@@ -70,6 +71,7 @@ function toWinAnsi(text: string) {
   for (const ch of text) {
     const code = ch.charCodeAt(0);
     if (WINANSI[ch] !== undefined) out += String.fromCharCode(WINANSI[ch]);
+    else if (ch === "→") out += "->";
     else if (code === 0x2212) out += "-";
     else if (code < 256) out += ch;
     else out += "?";
@@ -384,9 +386,36 @@ export function buildBookingPdf(data: BookingPdfData): Uint8Array {
   para("Version " + data.agreementVersion + " · signed by " + data.signature.name + " on " + data.signedAt, 9, false, true);
   rule();
   for (const paragraph of data.agreementText) {
-    const { level, text: words } = agreementLine(paragraph);
-    para(words, 9.5, false, false, level * 16);
-    gap(level === 2 ? 2 : 4);
+    const line = agreementLine(paragraph);
+    if (line.kind === "heading") {
+      gap(6);
+      need(40);
+      para(line.text, 10.5, true);
+      gap(2);
+      continue;
+    }
+    if (line.kind === "schedule") {
+      if (data.schedule && data.schedule.length) {
+        for (const [label, value] of data.schedule) {
+          const labelW = 170;
+          const lines = wrap(value || "-", 8.5, WIDTH - labelW, false);
+          const labelLines = wrap(label, 8.5, labelW - 10, true);
+          const h = Math.max(lines.length, labelLines.length) * 11.5 + 6;
+          need(h);
+          const top = y;
+          labelLines.forEach((part, index) => textAt(part, MARGIN + 4, top - 11 - index * 11.5, 8.5, true));
+          lines.forEach((part, index) => textAt(part, MARGIN + labelW, top - 11 - index * 11.5, 8.5));
+          y = top - h;
+          lineAt(MARGIN, y, PAGE_W - MARGIN, 0.85, 0.4);
+        }
+        gap(6);
+      } else {
+        para("The Booking Schedule is the booking summary on page 1.", 9, false, true);
+      }
+      continue;
+    }
+    para(line.text, 9.5, false, false, line.level * 16);
+    gap(line.level === 2 ? 2 : 4);
   }
 
   // Licences

@@ -1,7 +1,15 @@
 import crypto from "crypto";
 import { Pool, type PoolClient } from "pg";
 import { FLEET, fleetModels, modelById, vehicleById } from "./fleet";
-import { LICENCE_ON_FILE_MONTHS, type BookingDocuments, type LicenceOnFile, type StoredDocuments } from "./documents";
+import {
+  LICENCE_ON_FILE_MONTHS,
+  bookingSchedule,
+  damageLimitFor,
+  mileageFor,
+  type BookingDocuments,
+  type LicenceOnFile,
+  type StoredDocuments,
+} from "./documents";
 import { VEHICLE_RECORDS } from "./vehicleRecords";
 import {
   addDays,
@@ -143,6 +151,8 @@ async function setup() {
     );
     -- Licences kept on file for returning customers, only when the customer ticked the consent box.
     -- One per email. Reused at checkout when the email and mobile number both match, for LICENCE_ON_FILE_MONTHS.
+    -- The Booking Schedule the customer agreed to (revised hire agreement, clause 14.1). Older bookings have none.
+    ALTER TABLE booking_documents ADD COLUMN IF NOT EXISTS schedule jsonb;
     CREATE TABLE IF NOT EXISTS customer_licences (
       email text PRIMARY KEY,
       phone_key text NOT NULL,
@@ -337,6 +347,18 @@ function referenceFor(manual: boolean) {
   return (manual ? "CFQ-" : "CF-") + number;
 }
 
+// Where the vehicle is collected or returned, for the Booking Schedule.
+function scheduleWhere(
+  booking: { location: string; delivery: { mode: string; placeLabel: string; collectLabel?: string } },
+  which: "collect" | "return",
+) {
+  const d = booking.delivery;
+  if (d.mode === "none") return booking.location;
+  if (which === "collect") return "Delivered to " + (d.placeLabel || "the delivery address");
+  if (d.mode === "both") return "Collected from " + (d.collectLabel || d.placeLabel || "the delivery address");
+  return booking.location;
+}
+
 function deliveryDetail(booking: {
   delivery: { kmText: string; breakdown: string; lat?: number; lng?: number; collectLat?: number; collectLng?: number };
   directions: string;
@@ -479,9 +501,34 @@ export async function createBooking(
     if (!inserted) throw new Error("Could not save the booking. Please try again.");
     if (opts?.documents) {
       await client.query(
-        `INSERT INTO booking_documents (booking_id, drivers, signature, agreement_version)
-         VALUES ($1, $2::jsonb, $3::jsonb, $4)`,
-        [bookingId, JSON.stringify(opts.documents.drivers), JSON.stringify(opts.documents.signature), opts.documents.agreementVersion],
+        `INSERT INTO booking_documents (booking_id, drivers, signature, agreement_version, schedule)
+         VALUES ($1, $2::jsonb, $3::jsonb, $4, $5::jsonb)`,
+        [
+          bookingId,
+          JSON.stringify(opts.documents.drivers),
+          JSON.stringify(opts.documents.signature),
+          opts.documents.agreementVersion,
+          JSON.stringify(
+            bookingSchedule({
+              reference,
+              hirer: { name: booking.customer.name, email: booking.customer.email, phone: booking.customer.phone },
+              verification: opts.documents.drivers[0].fromFile
+                ? "Licence photo on file from an earlier booking; checked at handover"
+                : "Licence photo uploaded for each driver; checked at handover",
+              drivers: opts.documents.drivers.map((driver) => driver.name),
+              vehicle: booking.model.name,
+              collect: scheduleWhere(booking, "collect") + ", " + formatDay(booking.pickup) + ", " + booking.pickTime + " EAT",
+              ret: scheduleWhere(booking, "return") + ", " + formatDay(booking.returnOn) + ", " + booking.retTime + " EAT",
+              price:
+                "Hire " + ksh(booking.hireTotal) +
+                (booking.insuranceTotal ? " + damage cover " + ksh(booking.insuranceTotal) : "") +
+                (booking.manual ? " + delivery (to be quoted)" : booking.delivery.fee ? " + delivery " + ksh(booking.delivery.fee) : "") +
+                " = " + ksh(booking.total) + " (VAT included)",
+              damageLimit: damageLimitFor(booking.model.name, booking.model.category),
+              mileage: mileageFor(booking.model.category),
+            }),
+          ),
+        ],
       );
       if (opts.documents.keepOnFile && booking.customer.email) {
         await client.query(
@@ -967,6 +1014,62 @@ export async function removeLicenceOnFile(email: string) {
   return { ok: true };
 }
 
+// Performance analysis (owners only): hire days and income per vehicle per day for one year, built from held and
+// paid bookings. Income is the hire and damage cover charge spread evenly over the hire days, net of 16% VAT
+// (the hire rates include VAT); delivery charges are left out. Days after today are not counted.
+export type PerformanceYear = {
+  year: number;
+  today: string;
+  vehicles: { id: string; plate: string; model: string; category: string; km: number | null }[];
+  // days[vehicleId][dayOfYear-1] = income net of VAT that day, or null when the vehicle was not out
+  days: Record<string, (number | null)[]>;
+};
+
+export async function performanceYear(year: number): Promise<PerformanceYear> {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const first = year + "-01-01";
+  const last = year + "-12-31";
+  const today = todayNairobi();
+  const result = await db.query<{ vehicle_id: string; pickup_on: string; return_on: string; days: number; hire_total: number; insurance_total: number }>(
+    `SELECT vehicle_id, pickup_on::text, return_on::text, days, hire_total, insurance_total
+     FROM bookings
+     WHERE status IN ('pending', 'confirmed') AND vehicle_id IS NOT NULL
+       AND pickup_on <= $2::date AND return_on >= $1::date`,
+    [first, last],
+  );
+  const records = await listVehicleRecords();
+  const length = (Date.UTC(year + 1, 0, 1) - Date.UTC(year, 0, 1)) / 864e5;
+  const days: PerformanceYear["days"] = {};
+  for (const vehicle of FLEET) days[vehicle.id] = Array.from({ length }, () => null);
+  const start = Date.UTC(year, 0, 1);
+  for (const row of result.rows) {
+    const list = days[row.vehicle_id];
+    if (!list) continue;
+    const n = Math.max(1, Number(row.days));
+    const perDay = (Number(row.hire_total) + Number(row.insurance_total)) / n / 1.16;
+    const end = exclusiveEnd(row.pickup_on, row.return_on);
+    for (let d = row.pickup_on; d < end; d = addDays(d, 1)) {
+      if (d > today || d < first || d > last) continue;
+      const index = Math.round((Date.parse(d + "T00:00:00Z") - start) / 864e5);
+      list[index] = Math.round(((list[index] || 0) + perDay) * 100) / 100;
+    }
+  }
+  return {
+    year,
+    today,
+    vehicles: FLEET.map((vehicle) => ({
+      id: vehicle.id,
+      plate: vehicle.plate,
+      model: vehicle.model,
+      category: vehicle.category,
+      km: records[vehicle.id]?.km ?? null,
+    })),
+    days,
+  };
+}
+
 export type VehicleRecord = {
   year: number | null;
   km: number | null;
@@ -1042,13 +1145,25 @@ export async function loadDocuments(id: string): Promise<StoredDocuments | null>
   const db = pool();
   if (!db) throw new Error("DATABASE_URL is not set");
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
-  const result = await db.query<{ drivers: StoredDocuments["drivers"]; signature: StoredDocuments["signature"]; agreement_version: string; signed_at: Date }>(
-    `SELECT drivers, signature, agreement_version, signed_at FROM booking_documents WHERE booking_id = $1`,
+  const result = await db.query<{
+    drivers: StoredDocuments["drivers"];
+    signature: StoredDocuments["signature"];
+    agreement_version: string;
+    signed_at: Date;
+    schedule: StoredDocuments["schedule"];
+  }>(
+    `SELECT drivers, signature, agreement_version, signed_at, schedule FROM booking_documents WHERE booking_id = $1`,
     [id],
   );
   const row = result.rows[0];
   if (!row) return null;
-  return { drivers: row.drivers, signature: row.signature, agreementVersion: row.agreement_version, signedAt: new Date(row.signed_at).toISOString() };
+  return {
+    drivers: row.drivers,
+    signature: row.signature,
+    agreementVersion: row.agreement_version,
+    signedAt: new Date(row.signed_at).toISOString(),
+    schedule: row.schedule || null,
+  };
 }
 
 export async function staffReady() {

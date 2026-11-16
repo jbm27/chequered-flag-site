@@ -79,6 +79,7 @@ function pdfData(booking: StaffBooking, docs: StoredDocuments): BookingPdfData {
     signedAt: stamp(docs.signedAt),
     agreementTitle: AGREEMENT_TITLE,
     agreementVersion: docs.agreementVersion,
+    schedule: docs.schedule || null,
     agreementText: sameText
       ? AGREEMENT_TEXT
       : ["The customer signed version " + docs.agreementVersion + " of the hire agreement. That wording has since been replaced on the website."],

@@ -1285,7 +1285,10 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                           </div>
                           <ol className="mb-2.5 list-decimal pl-5 text-sm leading-[1.7] text-[#3f3f3f]">
                             <li>Submit the booking. We hold the vehicle and give you a booking reference.</li>
-                            <li>Pay the full amount by M-Pesa or bank transfer, and quote the booking reference.</li>
+                            <li>
+                              Pay the full amount by M-Pesa or bank transfer within 48 hours, and quote the booking reference.
+                              Unpaid holds are released after 48 hours.
+                            </li>
                             <li>We check the payment and confirm your booking.</li>
                           </ol>
                           <div className="mb-3">

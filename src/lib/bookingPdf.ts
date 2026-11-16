@@ -343,7 +343,7 @@ export function buildBookingPdf(data: BookingPdfData): Uint8Array {
       {
         s: paidInFull
           ? "Paid in full. Thank you."
-          : "The full amount is due when you book. Quote the booking reference " + data.reference + " when you pay.",
+          : "The full amount is due when you book. Quote the booking reference " + data.reference + " when you pay. Unpaid holds are released after 48 hours.",
         size: 8,
         gapAfter: 3,
       },

@@ -26,7 +26,7 @@ const NAV = [
 const KNOW = [
   {
     title: "Payment",
-    body: "The full booking price is due when you book, by M-Pesa or bank transfer using your booking reference. Your booking is confirmed once we have received the full payment and sent you confirmation. There is no security deposit.",
+    body: "The full booking price is due when you book, by M-Pesa or bank transfer using your booking reference. Pay within 48 hours, or the hold is released. Your booking is confirmed once we have received the full payment and sent you confirmation. There is no security deposit.",
   },
   {
     title: "Collection and delivery",
@@ -73,7 +73,7 @@ const FAQ = [
   },
   {
     q: "How much do I pay to book, and is there a deposit?",
-    a: "The full booking price is due when you book, including optional damage cover and any delivery charge. There is no security deposit. Your booking is confirmed once we have received the full payment and sent you confirmation. Nothing is added after you pay unless you agree to it.",
+    a: "The full booking price is due when you book, including optional damage cover and any delivery charge. There is no security deposit. We hold the vehicle for 48 hours while you pay; if no payment or M-Pesa code reaches us by then, the hold is released and the vehicle becomes available again. Your booking is confirmed once we have received the full payment and sent you confirmation. Nothing is added after you pay unless you agree to it.",
   },
   {
     q: "How can I pay?",

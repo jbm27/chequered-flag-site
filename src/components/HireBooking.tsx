@@ -53,7 +53,7 @@ import {
 
 const STORED = "cfHireRequest";
 
-// Photos from Homer's design, one per model. They are illustrative until real photos replace them.
+// One photo per model (from Homer's design; the Land Cruiser is Homer's own photo, with the plate blanked).
 const PHOTOS: Record<string, string> = {
   "toyota-axio": "/images/vehicle-hire/models/toyota-axio.webp",
   "toyota-fielder": "/images/vehicle-hire/models/toyota-fielder.webp",
@@ -1524,14 +1524,11 @@ function VehicleCard({
         <div className="relative">
           <img
             src={photo}
-            alt={model.name + ", illustrative photo"}
+            alt={model.name}
             loading="lazy"
             decoding="async"
             className="block h-[118px] w-full object-cover object-[center_60%]"
           />
-          <span className="absolute bottom-2 left-2 rounded bg-[rgba(23,23,23,0.78)] px-[7px] py-0.5 text-[11px] font-semibold text-white">
-            Illustrative photo
-          </span>
         </div>
       ) : (
         <div className="grid h-[118px] place-items-center bg-[#ececea] p-2.5 text-center text-[13px] text-[#595959]">

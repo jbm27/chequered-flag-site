@@ -18,14 +18,16 @@ export const MAX_IMAGE_SIDE = 4000;
 // The four bracketed blanks in the draft are filled with the website contact details and the company P.O Box.
 // Change AGREEMENT_VERSION whenever the text changes, so each booking records which version the customer signed.
 // Layout: "# " starts a heading; "{{SCHEDULE}}" is where the Booking Schedule table goes.
-export const AGREEMENT_VERSION = "online-hire-agreement-2026-11-revised";
+// Version history: online-hire-agreement-2026-11-revised (Homer's revised text); -b adds the Land Cruiser
+// at KES 200,000, the same as the Prado (Homer, 16 Nov 2026), in the class mapping and clause 7.2.
+export const AGREEMENT_VERSION = "online-hire-agreement-2026-11-revised-b";
 export const AGREEMENT_TITLE = "Self-drive vehicle hire agreement";
 export const AGREEMENT_TEXT: string[] = [
   "Contracting company: The Chequered Flag Ltd. (“Company”, “we”, “us”). Registered address: " + COMPANY.postal + ". Booking enquiries and incident contact: " + CONTACT.phoneDisplay + ", " + CONTACT.email + ".",
   "This agreement consists of the Booking Schedule, these Rental Terms and the Vehicle Handover/Return Records.",
   "# A. Booking Schedule",
   "{{SCHEDULE}}",
-  "Vehicle-class mapping (not editable by the customer): saloon → KES 90,000; Nissan X-Trail → KES 150,000; Toyota Prado → KES 200,000. Any other class must be configured and disclosed before payment; no automatic default is permitted.",
+  "Vehicle-class mapping (not editable by the customer): saloon → KES 90,000; Nissan X-Trail → KES 150,000; Toyota Prado → KES 200,000; Toyota Land Cruiser → KES 200,000. Any other class must be configured and disclosed before payment; no automatic default is permitted.",
   "# 1. Agreement and booking",
   "1.1 The Company hires the vehicle identified in the Booking Schedule (or an agreed equivalent or better replacement) to the Hirer for the stated period, subject to these Terms. A booking is confirmed only once full payment has been received and the Company has issued confirmation.",
   "1.2 The Company shall show the full price, cancellation policy, applicable damage liability limit, fuel and mileage policy, and material restrictions before the Hirer pays. The Hirer must be able to download or receive a durable copy of the accepted agreement.",
@@ -56,7 +58,7 @@ export const AGREEMENT_TEXT: string[] = [
   "6.3 The Hirer must not sell, pledge, sub-hire or materially modify the vehicle; tamper with the odometer or telematics; or authorise non-emergency repairs without the Company’s consent. The Hirer shall immediately notify the Company if the vehicle cannot safely continue.",
   "# 7. Vehicle damage, theft, insurance and the liability cap",
   "7.1 For accidental loss or damage to the hired vehicle during the rental, including collision, tyre blowout, wheel, suspension, windscreen or underbody damage, and customer-attributable breakdowns caused by misuse, impact, negligent driving or a road hazard, the Hirer is responsible for the Company’s reasonable, evidenced vehicle repair/replacement and related recovery costs, UP TO the single aggregate Damage Liability Limit stated in the Booking Schedule for that hire.",
-  "7.2 The Damage Liability Limit is KES 90,000 for a saloon, KES 150,000 for an X-Trail and KES 200,000 for a Prado. It applies in total across all customer-attributable vehicle-damage incidents during the same hire, not separately per incident or per component. Recovery/towing attributable to that vehicle damage counts within, not on top of, the cap. The cap is not an upfront fee, deductible automatically due, or authorisation to charge without evidence of loss.",
+  "7.2 The Damage Liability Limit is KES 90,000 for a saloon, KES 150,000 for an X-Trail and KES 200,000 for a Prado or a Land Cruiser. It applies in total across all customer-attributable vehicle-damage incidents during the same hire, not separately per incident or per component. Recovery/towing attributable to that vehicle damage counts within, not on top of, the cap. The cap is not an upfront fee, deductible automatically due, or authorisation to charge without evidence of loss.",
   "7.3 The Hirer does not pay for genuine mechanical/electrical breakdown, latent defects or ordinary wear and tear not caused or materially contributed to by the Hirer or an authorised driver. In a mixed-cause case, charges shall reflect reasonably evidenced customer-attributable loss and remain subject to the cap.",
   "7.4 The Company shall maintain motor insurance as required by Kenyan law and ensure that any represented self-drive and vehicle-damage protections are consistent with the actual policy. Nothing in this agreement purports to limit third-party legal rights or compulsory insurance protections. The Company must disclose material insurance restrictions relevant to the intended hire before payment.",
   "7.5 The vehicle-damage cap does not limit properly due rental charges, refuelling, tolls, fines or other independent debts. It does not limit liability for proven fraud, deliberate damage or other liability that cannot lawfully be limited, but no exclusion of the cap may be asserted merely because an accident occurred or on the basis of an undisclosed insurance term. Any proposed exceptions to the cap must be clearly disclosed before booking and checked against the insurer’s policy.",
@@ -110,10 +112,10 @@ export function agreementLine(line: string): { kind: "heading" | "schedule" | "t
 }
 
 // Damage Liability Limit per hire (clause 7.2): saloon KES 90,000, Nissan X-Trail KES 150,000, Toyota Prado
-// KES 200,000. The agreement says any other class must be set before payment, with no default, so a vehicle
-// without a limit (for now the Land Cruiser) cannot be booked online until one is added here.
+// KES 200,000; Toyota Land Cruiser KES 200,000 (Homer, 16 Nov 2026). The agreement says any other class must be
+// set before payment, with no default, so a vehicle without a limit here can't be booked online until one is added.
 export function damageLimitFor(model: string, category?: string): number | null {
-  if (/prado/i.test(model)) return 200_000;
+  if (/prado|land cruiser/i.test(model)) return 200_000;
   if (/x-?trail/i.test(model)) return 150_000;
   if (category === "saloon") return 90_000;
   return null;

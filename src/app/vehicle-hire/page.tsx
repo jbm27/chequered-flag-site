@@ -22,31 +22,39 @@ const NAV = [
   { href: "/contact", label: "Contact" },
 ];
 
+// Summary of the hire terms. Kept in line with the Self-drive vehicle hire agreement (src/lib/documents.ts).
 const KNOW = [
   {
     title: "Payment",
-    body: "The full hire amount is due when you book. Pay by M-Pesa or bank transfer using your booking reference. We hold the vehicle and confirm the booking once we have checked the payment.",
+    body: "The full booking price is due when you book, by M-Pesa or bank transfer using your booking reference. Your booking is confirmed once we have received the full payment and sent you confirmation. There is no security deposit.",
   },
   {
     title: "Collection and delivery",
-    body: "Collect from our workshop in Karen, or we deliver to you. Delivery is free within 50 km of the workshop, measured in a straight line. Beyond that, each km over 50 costs KSh 45 for a saloon, KSh 55 for an SUV and KSh 70 for a Prado or 4x4, for each trip. The charge is shown when you book.",
+    body: "Collect from our workshop in Karen, or we deliver to you, and can collect from a different place. Delivery is free within 50 km of the workshop, measured in a straight line. Beyond that, each km over 50 costs KSh 45 for a saloon, KSh 55 for an SUV and KSh 70 for a Prado or 4x4, for each trip. The charge is shown when you book.",
   },
-  { title: "Driver", body: "Minimum age 25. Add a photo of each driver's licence when you book, and bring the licences and ID to collection." },
+  {
+    title: "Drivers",
+    body: "Every driver must be at least 25, hold a valid licence recognised in Kenya and be named on the booking. Add a photo of each driver's licence when you book, and bring the licences and ID to collection.",
+  },
   {
     title: "Mileage",
     body: "Saloon cars: 100 km a day included, then KSh 15 per extra km. Nissan X-Trail, Toyota Prado and Land Cruiser: unlimited mileage, with no extra km charge.",
   },
   {
-    title: "Damage cover",
-    body: "Optional cover for damage to the vehicle, repaired by our own workshop: KSh 1,500 a day for saloons, KSh 2,000 for SUVs and 4x4s. Without it, you pay for damage to the vehicle up to its damage liability limit per hire: KSh 90,000 for a saloon, KSh 150,000 for the X-Trail and KSh 200,000 for a Prado.",
+    title: "Damage liability limit",
+    body: "If the vehicle is damaged during your hire, you pay the evidenced repair cost up to a limit for the whole hire: KSh 90,000 for a saloon, KSh 150,000 for the X-Trail, and KSh 200,000 for a Prado or Land Cruiser. You don't pay for genuine mechanical faults or normal wear and tear. Optional damage cover is also available: KSh 1,500 a day for saloons and KSh 2,000 for SUVs and 4x4s.",
   },
   {
     title: "Fuel",
-    body: "All our hire vehicles run on petrol. Return the vehicle with at least the fuel it had when you collected it. Fuel above that level is not refunded.",
+    body: "All our hire vehicles run on petrol. Return the vehicle with the fuel level it had at collection, which we record at handover. A shortfall may be charged, and extra fuel is not credited unless agreed in writing.",
   },
   {
-    title: "Hours and late returns",
-    body: "Open Monday to Friday 08:00–17:00 and Saturday 08:00–13:00. Pick-ups and returns outside these hours are by arrangement. Returns up to 59 minutes late are free; after that, a full extra day may be charged.",
+    title: "Hire days and late returns",
+    body: "A hire day is 24 hours from your collection time. Returns up to 59 minutes late are free; after that, an extra day may be charged. Open Monday to Friday 08:00–17:00 and Saturday 08:00–13:00; pick-ups and returns outside these hours are by arrangement.",
+  },
+  {
+    title: "Cancellations",
+    body: "Cancel at least 14 days before collection for a full refund. After that, and for no-shows, we keep 20% of the booking price and refund 80%.",
   },
   { title: "Prices", body: "All rates include VAT." },
 ];
@@ -61,19 +69,23 @@ const DIRECTIONS = [
 const FAQ = [
   {
     q: "What do I need to hire a vehicle?",
-    a: "You must be at least 25 and hold a valid driving licence recognised in Kenya. Bring your licence and your ID or passport when you collect the vehicle; we check them at handover.",
+    a: "Every driver must be at least 25 and hold a valid driving licence recognised in Kenya for the vehicle. When you book, add a photo of the front of each driver's licence. Bring the licences and your ID or passport when you collect the vehicle: we check them at handover, and can't hand the vehicle over if the checks fail.",
   },
   {
-    q: "How much do I pay to book?",
-    a: "The full hire amount is due when you book, including optional damage cover and any delivery charge. We hold the vehicle and confirm the booking once we have checked the payment.",
+    q: "How much do I pay to book, and is there a deposit?",
+    a: "The full booking price is due when you book, including optional damage cover and any delivery charge. There is no security deposit. Your booking is confirmed once we have received the full payment and sent you confirmation. Nothing is added after you pay unless you agree to it.",
   },
   {
     q: "How can I pay?",
-    a: "By M-Pesa or bank transfer, using your booking reference. This page does not take the payment itself. If you already have an M-Pesa code, you can add it to the booking.",
+    a: "By M-Pesa (Lipa na M-Pesa, Buy Goods, till 211143) or by bank transfer to The Chequered Flag Ltd at Standard Chartered, Karen. Quote your booking reference. This page doesn't take the payment itself. If you already have an M-Pesa code, you can add it to the booking.",
   },
   {
-    q: "Is insurance included?",
-    a: "Every vehicle is insured as the law requires. You can add optional damage cover (KSh 1,500 a day for saloons, KSh 2,000 for SUVs and 4x4s), and our own workshop handles the repairs. Without it, accidental damage during your hire, including windscreens, tyres and wheels, is charged at the evidenced repair cost up to the vehicle's damage liability limit for the whole hire: KSh 90,000 for a saloon, KSh 150,000 for the X-Trail and KSh 200,000 for a Prado. You don't pay for genuine mechanical breakdowns or normal wear and tear.",
+    q: "What happens if the vehicle is damaged?",
+    a: "Every vehicle is insured as the law requires. If the vehicle is damaged during your hire, for example in a collision, by a tyre blowout or to the windscreen, wheels or underbody, you pay the evidenced repair and recovery cost up to the damage liability limit: KSh 90,000 for a saloon, KSh 150,000 for the X-Trail, and KSh 200,000 for a Prado or Land Cruiser. The limit applies once to the whole hire, not to each incident, and it is not a fee taken in advance. We give you an itemised statement with evidence for any claim. You don't pay for genuine mechanical or electrical faults or normal wear and tear. You can also add optional damage cover (KSh 1,500 a day for saloons, KSh 2,000 for SUVs and 4x4s), repaired by our own workshop.",
+  },
+  {
+    q: "What should I check when I collect the vehicle?",
+    a: "Look the vehicle over before you drive away and tell us about any damage or missing accessories, with photos. We record the condition, fuel level and odometer reading at handover. Damage recorded before you drive away is never charged to you.",
   },
   {
     q: "Is there a mileage limit?",
@@ -81,11 +93,11 @@ const FAQ = [
   },
   {
     q: "What is the fuel policy?",
-    a: "All our hire vehicles run on petrol. Return the vehicle with at least the fuel it had when you collected it. Extra fuel is not refunded.",
+    a: "All our hire vehicles run on petrol. Return the vehicle with the fuel level it had at collection. A shortfall may be charged at our refuelling rate, and extra fuel is not credited unless agreed in writing.",
   },
   {
     q: "Can you deliver the vehicle to me?",
-    a: "Yes. Choose a delivery option in Find your vehicle, then search for your address or drop a pin on the map. Delivery is free within 50 km of our workshop in Karen, measured in a straight line to your pin. Beyond that, each km over 50 costs KSh 45 for a saloon, KSh 55 for an SUV and KSh 70 for a Prado or 4x4. Deliver and collect is charged for both trips. The charge is shown and added to the full amount when you book.",
+    a: "Yes. Choose a delivery option in Find your vehicle, then search for your address or drop a pin on the map. You can also have it collected from a different place. Delivery is free within 50 km of our workshop in Karen, measured in a straight line to your pin. Beyond that, each km over 50 costs KSh 45 for a saloon, KSh 55 for an SUV and KSh 70 for a Prado or 4x4, for each trip. The charge is shown and added to the full amount when you book.",
   },
   {
     q: "Can I collect or return outside opening hours?",
@@ -93,20 +105,31 @@ const FAQ = [
   },
   {
     q: "What if I return the vehicle late?",
-    a: "Up to 59 minutes late is free. After that, a full extra day may be charged, so call or WhatsApp us if you are running late.",
+    a: "A hire day is 24 hours from your collection time. Up to 59 minutes late is free. After that, an extra day may be charged. Call or WhatsApp us as soon as you know you'll be late: a late return doesn't automatically extend your insurance or permission to drive.",
   },
   {
     q: "Can someone else drive?",
-    a: "Only drivers we have approved in writing. Give us their details before your hire.",
+    a: "Only drivers named on your booking, or approved by us in writing. Add them with + Add driver when you book, with a photo of their licence. They must also be at least 25. You stay responsible for how they use the vehicle.",
+  },
+  {
+    q: "Where can I take the vehicle?",
+    a: "Anywhere in Kenya, on roads and tracks suitable for the vehicle. Travel outside Kenya needs our written consent and confirmed insurance first. The vehicle must not be used for racing, towing, carrying passengers or goods for payment, or driven under the influence of alcohol or drugs.",
   },
   {
     q: "What happens if the vehicle breaks down or I have an accident?",
-    a: "Call us straight away on " + CONTACT.phoneDisplay + ". Please do not arrange repairs yourself, as repairs need our approval first.",
+    a: "Stop safely and call us straight away on " + CONTACT.phoneDisplay + ". For an accident or theft, report it to the police where required and take photos if it is safe. Please don't arrange repairs or recovery yourself unless it's an emergency. If the fault is mechanical and not caused by you, we pay for recovery and repairs and try to give you a replacement at no extra cost; if we can't, you get a refund for the days you couldn't use the vehicle.",
+  },
+  {
+    q: "Who pays traffic fines, parking and tolls?",
+    a: "You do, for anything that happens during your hire, unless we caused it. These are separate from the damage liability limit.",
   },
   {
     q: "Can I cancel or change my booking?",
-    a:
-      "Cancel at least 14 days before collection for a full refund. After that, and for no-shows, we keep 20% of the total booking price and refund 80%. Refunds go back to the way you paid within 7 business days. To change a booking, contact us as early as possible; changes after confirmation need both of us to agree.",
+    a: "Cancel at least 14 days before collection for a full refund. After that, and for no-shows, we keep 20% of the booking price and refund 80%. Refunds go back to the way you paid within 7 business days. If we cancel or can't supply a suitable vehicle, you get a full refund. To change a booking, contact us as early as possible; changes after confirmation need both of us to agree.",
+  },
+  {
+    q: "What do you do with my information?",
+    a: "We use your details, licence photos and booking records to run your hire, check drivers, handle payments and claims, and meet the law. Licence photos are only seen by our staff. You can ask to see, correct or delete your information by emailing " + CONTACT.email + ", or complain to Kenya's Office of the Data Protection Commissioner.",
   },
 ];
 

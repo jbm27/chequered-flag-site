@@ -101,6 +101,37 @@ function monthStats(data: YearData, month: number): MonthStats {
   };
 }
 
+// Made-up figures so the section can be looked at before there are real bookings ("Show sample figures").
+// Generated in the browser from a fixed seed: nothing is saved, and the same sample shows each time.
+function sampleYear(real: YearData): YearData {
+  let seed = 20261116;
+  const rand = () => {
+    seed = (seed * 1664525 + 1013904223) % 4294967296;
+    return seed / 4294967296;
+  };
+  const rateFor = (v: Vehicle) =>
+    /land cruiser/i.test(v.model) ? 18000 : /prado/i.test(v.model) ? 13000 : /x-?trail/i.test(v.model) ? 7500 : 3500;
+  const length = real.days[real.vehicles[0]?.id]?.length || 365;
+  const [ty, tm, td] = real.today.split("-").map(Number);
+  const lastIndex =
+    real.year < ty ? length : real.year > ty ? 0 : (Date.UTC(ty, tm - 1, td) - Date.UTC(ty, 0, 1)) / 864e5 + 1;
+  const days: YearData["days"] = {};
+  for (const v of real.vehicles) {
+    const busy = group(v.category) === "saloon" ? 0.72 : 0.3; // roughly like the spreadsheet: saloons busy, SUVs less so
+    const list: (number | null)[] = Array.from({ length }, () => null);
+    let i = Math.floor(rand() * 4);
+    while (i < lastIndex) {
+      const hire = 2 + Math.floor(rand() * 8);
+      const gap = Math.max(0, Math.round(((1 - busy) / busy) * hire * (0.4 + rand() * 1.2)));
+      const perDay = (rateFor(v) * (0.85 + rand() * 0.15)) / 1.16;
+      for (let d = i; d < Math.min(i + hire, lastIndex); d += 1) list[d] = Math.round(perDay);
+      i += hire + gap;
+    }
+    days[v.id] = list;
+  }
+  return { ...real, days };
+}
+
 function Tile({ label, value, note, good }: { label: string; value: string; note?: string; good?: boolean | null }) {
   return (
     <div className="min-w-0 rounded-[10px] border border-[#e5e5e5] bg-white px-4 py-3">
@@ -244,6 +275,7 @@ export default function DeskPerformance({ today }: { today: string }) {
   const [data, setData] = useState<YearData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sample, setSample] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -262,7 +294,8 @@ export default function DeskPerformance({ today }: { today: string }) {
     };
   }, [year]);
 
-  const months = useMemo(() => (data && data.year === year ? MONTHS.map((_, m) => monthStats(data, m)) : []), [data, year]);
+  const shown = useMemo(() => (data && sample ? sampleYear(data) : data), [data, sample]);
+  const months = useMemo(() => (shown && shown.year === year ? MONTHS.map((_, m) => monthStats(shown, m)) : []), [shown, year]);
   const stats = months[month];
 
   if (error) return <p className="text-sm font-bold text-[#a50e0e]">{error}</p>;
@@ -291,6 +324,11 @@ export default function DeskPerformance({ today }: { today: string }) {
             {fleet} vehicles · target {pct(UTILISATION_TARGET)} utilisation
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-4">
+        <label className="flex items-center gap-2 text-sm font-semibold">
+          <input id="perfSample" type="checkbox" checked={sample} onChange={(e) => setSample(e.target.checked)} className="h-5 w-5" />
+          Show sample figures
+        </label>
         <label className="flex items-center gap-2 text-sm">
           <span className="text-[#595959]">Year</span>
           <select value={year} onChange={(e) => setYear(Number(e.target.value))} className="h-10 rounded-lg border border-[#c8c8c8] bg-white px-2 text-sm">
@@ -301,7 +339,22 @@ export default function DeskPerformance({ today }: { today: string }) {
             ))}
           </select>
         </label>
+        </div>
       </div>
+
+      {sample ? (
+        <p role="status" className="rounded-lg border border-[#f9d46b] bg-[#feefc3] px-3.5 py-2.5 text-sm font-bold text-[#5f4400]">
+          Sample figures, not real. These are made up so you can see how the section looks. Untick &quot;Show sample
+          figures&quot; to see the real figures from bookings.
+        </p>
+      ) : (
+        months.every((m) => m.hireDays === 0) && (
+          <p className="rounded-lg bg-[#f5f5f3] px-3.5 py-2.5 text-sm text-[#595959]">
+            No hire days in {year} yet. Figures appear here as bookings are held and paid. Tick &quot;Show sample figures&quot;
+            to see how the section looks with a full year.
+          </p>
+        )
+      )}
 
       <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fit,minmax(170px,1fr))]">
         <Tile

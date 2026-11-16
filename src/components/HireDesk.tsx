@@ -6,6 +6,7 @@ import DeskAddBooking from "./DeskAddBooking";
 import DeskEditBooking from "./DeskEditBooking";
 import DeskVehicleEdit from "./DeskVehicleEdit";
 import DeskMatchPayment from "./DeskMatchPayment";
+import DeskReviews, { AskForReview } from "./DeskReviews";
 import { bookingCodes, duplicateCodes, looksLikeMpesaCode, normaliseCode } from "../lib/payments";
 import DeskCustomers, { type LicenceOnFileRow } from "./DeskCustomers";
 import DeskPerformance from "./DeskPerformance";
@@ -35,7 +36,7 @@ export type DeskVehicle = {
 };
 
 type Chip = { label: string; bg: string; fg: string; bd: string };
-type SectionKey = "overview" | "calendar" | "table" | "payments" | "customers" | "performance" | "vehicles" | "compare" | "schedule";
+type SectionKey = "overview" | "calendar" | "table" | "payments" | "customers" | "performance" | "vehicles" | "compare" | "schedule" | "reviews";
 
 const WIN = 28;
 const PAID = { bg: "#ceead6", fg: "#0d5a2a" };
@@ -216,6 +217,7 @@ export default function HireDesk() {
     vehicles: false,
     compare: false,
     schedule: false,
+    reviews: false,
   });
   const [selectedId, setSelectedId] = useState("");
   const [detailOpen, setDetailOpen] = useState(true);
@@ -235,6 +237,7 @@ export default function HireDesk() {
   const [vehType, setVehType] = useState<(typeof TYPES)[number]["id"]>("all");
   const [vehOpen, setVehOpen] = useState<Record<string, boolean>>({});
   const [vehEditing, setVehEditing] = useState("");
+  const [reviewsWaiting, setReviewsWaiting] = useState(0);
   const [vehFlagOnly, setVehFlagOnly] = useState(false);
 
   async function loadSession() {
@@ -497,6 +500,7 @@ export default function HireDesk() {
     vehicles: backFromHire.size ? plural(backFromHire.size, "vehicle") + " back from hire to check" : "",
     compare: chase.length ? plural(chase.length, "booking") + " unpaid at pick-up" : "",
     schedule: "",
+    reviews: reviewsWaiting ? plural(reviewsWaiting, "review") + " waiting for approval" : "",
   };
 
   // Calendar
@@ -1409,6 +1413,11 @@ export default function HireDesk() {
                     </Row>
                   )}
                   {selected.staffNote && <Row label="Note">{selected.staffNote}</Row>}
+                  {(selected.status === "pending" || selected.status === "confirmed") && selected.pickup <= today && (
+                    <Row label="Review">
+                      <AskForReview key={selected.id} bookingId={selected.id} name={selected.customerName} phone={selected.phone} model={selected.model} />
+                    </Row>
+                  )}
 
                   {(selected.status === "pending" || selected.status === "confirmed" || selected.status === "quote") && (
                     <div className="mt-3 space-y-2.5">
@@ -2085,6 +2094,19 @@ export default function HireDesk() {
                 )}
               </>
             )}
+          </div>
+        </section>
+
+        {/* Customer reviews */}
+        <section className={card + " mt-[22px] p-[22px]"}>
+          {sectionHead("reviews", "Customer reviews")}
+          <p className="mb-3.5 mt-1 max-w-[760px] text-sm text-[#595959]">
+            Reviews customers leave after their hire. Approve a review to show it on the hire page, or hide it. To ask a
+            customer for a review, open their booking and press Ask for a review.
+          </p>
+          {/* Always mounted so the header can show how many are waiting; the list only shows when opened. */}
+          <div hidden={!open.reviews}>
+            <DeskReviews onOpenBooking={pick} onCount={setReviewsWaiting} />
           </div>
         </section>
       </main>

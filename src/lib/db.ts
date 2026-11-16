@@ -164,6 +164,22 @@ async function setup() {
       reference text NOT NULL DEFAULT '',
       saved_at timestamptz NOT NULL DEFAULT now()
     );
+    -- Customer reviews. One per booking; the token is the private key in the customer's review link.
+    -- status: requested (link made), skipped, pending (waiting for staff), approved (shown on the website), hidden.
+    CREATE TABLE IF NOT EXISTS reviews (
+      booking_id uuid PRIMARY KEY REFERENCES bookings(id) ON DELETE CASCADE,
+      token text NOT NULL UNIQUE,
+      status text NOT NULL DEFAULT 'requested',
+      rating integer,
+      comment text NOT NULL DEFAULT '',
+      display_name text NOT NULL DEFAULT '',
+      created_at timestamptz NOT NULL DEFAULT now(),
+      submitted_at timestamptz,
+      decided_at timestamptz,
+      decided_by text NOT NULL DEFAULT '',
+      CONSTRAINT reviews_status_check CHECK (status IN ('requested', 'skipped', 'pending', 'approved', 'hidden')),
+      CONSTRAINT reviews_rating_check CHECK (rating IS NULL OR rating BETWEEN 1 AND 5)
+    );
     -- Vehicle records that staff keep up to date on the desk (odometer, year, condition notes).
     -- updated_at is also how the desk knows a vehicle has been checked since it last came back from a hire.
     CREATE TABLE IF NOT EXISTS vehicle_records (
@@ -550,8 +566,11 @@ export async function createBooking(
         );
       }
     }
+    const reviewToken = newReviewToken();
+    await client.query(`INSERT INTO reviews (booking_id, token) VALUES ($1, $2)`, [bookingId, reviewToken]);
     await client.query("COMMIT");
     return {
+      reviewToken,
       reference,
       status: booking.manual ? "quote" : opts?.confirmed ? "confirmed" : "pending",
       manual: booking.manual,
@@ -1022,6 +1041,214 @@ export async function updateBooking(id: string, action: string, note: string, de
     throw error;
   }
   return { ok: true };
+}
+
+// ---------- Customer reviews ----------
+
+function newReviewToken() {
+  return crypto.randomBytes(18).toString("base64url");
+}
+
+function firstNameAndInitial(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "";
+  return parts.length > 1 ? parts[0] + " " + parts[parts.length - 1][0].toUpperCase() + "." : parts[0];
+}
+
+export type ReviewInfo = {
+  reference: string;
+  model: string;
+  pickup: string;
+  returnOn: string;
+  suggestedName: string;
+  status: "requested" | "skipped" | "pending" | "approved" | "hidden";
+  started: boolean; // a review can be left once the hire has started
+  rating: number | null;
+  comment: string;
+  displayName: string;
+};
+
+async function reviewRow(reference: string, token: string) {
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  if (!/^[A-Za-z0-9_-]{16,40}$/.test(token)) return null;
+  const result = await db.query<{
+    booking_id: string; reference: string; model_name: string; customer_name: string; pickup_on: string; return_on: string;
+    status: ReviewInfo["status"]; rating: number | null; comment: string; display_name: string; booking_status: string;
+  }>(
+    `SELECT r.booking_id, b.reference, b.model_name, b.customer_name, b.pickup_on::text, b.return_on::text,
+            r.status, r.rating, r.comment, r.display_name, b.status AS booking_status
+     FROM reviews r JOIN bookings b ON b.id = r.booking_id
+     WHERE r.token = $1 AND upper(b.reference) = upper($2)`,
+    [token, reference.trim()],
+  );
+  return result.rows[0] || null;
+}
+
+// The customer's review page: only with the booking reference and its private token.
+export async function reviewInfo(reference: string, token: string): Promise<ReviewInfo | null> {
+  await ensureReady();
+  const row = await reviewRow(reference, token);
+  if (!row || row.booking_status === "cancelled") return null;
+  return {
+    reference: row.reference,
+    model: row.model_name,
+    pickup: row.pickup_on,
+    returnOn: row.return_on,
+    suggestedName: firstNameAndInitial(row.customer_name),
+    status: row.status,
+    started: row.pickup_on <= todayNairobi(),
+    rating: row.rating,
+    comment: row.status === "pending" || row.status === "approved" || row.status === "hidden" ? row.comment : "",
+    displayName: row.display_name,
+  };
+}
+
+export async function submitReview(
+  reference: string,
+  token: string,
+  raw: { action?: unknown; rating?: unknown; comment?: unknown; displayName?: unknown },
+) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const row = await reviewRow(reference, token);
+  if (!row || row.booking_status === "cancelled") throw staffError("This review link is not valid. Please check it, or contact us.", 404);
+  if (row.status === "approved" || row.status === "hidden") throw staffError("Thank you, your review has already been received.", 409);
+  if (raw.action === "skip") {
+    if (row.status === "requested") {
+      await db.query(`UPDATE reviews SET status = 'skipped' WHERE booking_id = $1 AND status = 'requested'`, [row.booking_id]);
+    }
+    return { ok: true, status: row.status === "requested" ? "skipped" : row.status };
+  }
+  if (row.pickup_on > todayNairobi()) throw staffError("You can leave a review once your hire has started.", 400);
+  const rating = Number(raw.rating);
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw staffError("Choose a star rating from 1 to 5.", 400);
+  const comment = String(raw.comment ?? "").replace(/\r/g, "").trim().slice(0, 1000);
+  const displayName = String(raw.displayName ?? "").replace(/\s+/g, " ").trim().slice(0, 60) || firstNameAndInitial(row.customer_name);
+  await db.query(
+    `UPDATE reviews SET status = 'pending', rating = $2, comment = $3, display_name = $4, submitted_at = now()
+     WHERE booking_id = $1`,
+    [row.booking_id, rating, comment, displayName],
+  );
+  return { ok: true, status: "pending" };
+}
+
+export type StaffReview = {
+  bookingId: string;
+  reference: string;
+  customerName: string;
+  phone: string;
+  model: string;
+  pickup: string;
+  returnOn: string;
+  status: ReviewInfo["status"];
+  rating: number | null;
+  comment: string;
+  displayName: string;
+  submittedAt: string;
+  decidedBy: string;
+};
+
+// Staff only: every review that has been written (pending, approved or hidden), newest first, and counts.
+export async function listReviews() {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const result = await db.query<{
+    booking_id: string; reference: string; customer_name: string; phone: string; model_name: string; pickup_on: string; return_on: string;
+    status: ReviewInfo["status"]; rating: number | null; comment: string; display_name: string; submitted_at: Date | null; decided_by: string;
+  }>(
+    `SELECT r.booking_id, b.reference, b.customer_name, b.phone, b.model_name, b.pickup_on::text, b.return_on::text,
+            r.status, r.rating, r.comment, r.display_name, r.submitted_at, r.decided_by
+     FROM reviews r JOIN bookings b ON b.id = r.booking_id
+     WHERE r.status IN ('pending', 'approved', 'hidden')
+     ORDER BY r.submitted_at DESC NULLS LAST
+     LIMIT 500`,
+  );
+  const counts = await db.query<{ status: string; n: number }>(`SELECT status, COUNT(*)::int AS n FROM reviews GROUP BY status`);
+  const byStatus: Record<string, number> = {};
+  for (const row of counts.rows) byStatus[row.status] = row.n;
+  return {
+    reviews: result.rows.map(
+      (row): StaffReview => ({
+        bookingId: row.booking_id,
+        reference: row.reference,
+        customerName: row.customer_name,
+        phone: row.phone,
+        model: row.model_name,
+        pickup: row.pickup_on,
+        returnOn: row.return_on,
+        status: row.status,
+        rating: row.rating,
+        comment: row.comment,
+        displayName: row.display_name,
+        submittedAt: row.submitted_at ? new Date(row.submitted_at).toISOString() : "",
+        decidedBy: row.decided_by,
+      }),
+    ),
+    counts: byStatus,
+  };
+}
+
+// Staff approve (shown on the website) or hide a review.
+export async function decideReview(bookingId: string, action: string, decidedBy: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const status = action === "approve" ? "approved" : action === "hide" ? "hidden" : "";
+  if (!status) throw staffError("That action is not available.", 400);
+  const result = await db.query(
+    `UPDATE reviews SET status = $2, decided_at = now(), decided_by = $3
+     WHERE booking_id = $1 AND status IN ('pending', 'approved', 'hidden')`,
+    [bookingId, status, decidedBy.slice(0, 60)],
+  );
+  if (result.rowCount !== 1) throw staffError("That review was not found.", 404);
+  return { ok: true, status };
+}
+
+// Staff get a booking's review link (made now for older bookings that have none).
+export async function reviewLinkFor(bookingId: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  if (!/^[0-9a-f-]{36}$/i.test(bookingId)) throw staffError("That booking was not found.", 404);
+  await db.query(`INSERT INTO reviews (booking_id, token) VALUES ($1, $2) ON CONFLICT (booking_id) DO NOTHING`, [bookingId, newReviewToken()]);
+  const result = await db.query<{ token: string; reference: string; status: string }>(
+    `SELECT r.token, b.reference, r.status FROM reviews r JOIN bookings b ON b.id = r.booking_id WHERE r.booking_id = $1`,
+    [bookingId],
+  );
+  const row = result.rows[0];
+  if (!row) throw staffError("That booking was not found.", 404);
+  return { path: "/review?ref=" + encodeURIComponent(row.reference) + "&t=" + encodeURIComponent(row.token), status: row.status };
+}
+
+// Public: approved reviews for the hire page (display name only, no booking details).
+export async function publishedReviews() {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const result = await db.query<{ rating: number; comment: string; display_name: string; model_name: string; submitted_at: Date }>(
+    `SELECT r.rating, r.comment, r.display_name, b.model_name, r.submitted_at
+     FROM reviews r JOIN bookings b ON b.id = r.booking_id
+     WHERE r.status = 'approved'
+     ORDER BY r.submitted_at DESC
+     LIMIT 12`,
+  );
+  const stats = await db.query<{ n: number; avg: string | null }>(
+    `SELECT COUNT(*)::int AS n, AVG(rating)::numeric(3,2)::text AS avg FROM reviews WHERE status = 'approved'`,
+  );
+  return {
+    count: stats.rows[0].n,
+    average: stats.rows[0].avg ? Number(stats.rows[0].avg) : null,
+    reviews: result.rows.map((row) => ({
+      rating: row.rating,
+      comment: row.comment,
+      name: row.display_name,
+      vehicle: row.model_name,
+      month: new Date(row.submitted_at).toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "Africa/Nairobi" }),
+    })),
+  };
 }
 
 // Mobile numbers are compared on their last 9 digits, so +254 7… and 07… match.

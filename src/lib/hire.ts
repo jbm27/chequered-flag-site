@@ -620,6 +620,7 @@ export type PublicBookingResult = {
   email: string;
   phone: string;
   message: string;
+  reviewToken?: string; // private link key for the customer's review page (/review?ref=…&t=…)
 };
 
 export type StaffBooking = {

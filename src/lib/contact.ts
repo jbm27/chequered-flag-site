@@ -23,3 +23,8 @@ export const COMPANY = {
   vat: "0021870Z",
   pin: "P000608228X",
 };
+
+// The Chequered Flag's Google review link (Google Business Profile → "Ask for reviews" → copy link).
+// When set, everyone who leaves a review on the website is offered "Also post it on Google". Empty = hidden.
+// Google does not allow businesses to post reviews for customers, or to send only happy customers to Google.
+export const GOOGLE_REVIEW_URL = "";

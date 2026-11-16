@@ -1,5 +1,6 @@
 import HireBooking from "../../components/HireBooking";
 import ScrollReveal from "../../components/ScrollReveal";
+import CustomerReviews from "../../components/CustomerReviews";
 import { CONTACT } from "../../lib/contact";
 import { YARD } from "../../lib/hire";
 import { fleetModels } from "../../lib/fleet";
@@ -272,6 +273,7 @@ export default function VehicleHirePage() {
           </div>
         </div>
       </section>
+      <CustomerReviews wrap={sectionWrap} eyebrow={eyebrow} h2={h2} />
       <section id="faq" className={sectionWrap}>
         <div data-reveal className={eyebrow}>Good to know</div>
         <h2 data-reveal className={h2 + " mb-3"}>Frequently asked questions</h2>

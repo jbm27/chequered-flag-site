@@ -5,6 +5,7 @@ import { COMPANY, CONTACT } from "../lib/contact";
 import { type LatLng } from "./PinMap";
 import PinPicker from "./PinPicker";
 import PaymentDetails from "./PaymentDetails";
+import ReviewPrompt, { rememberForReview, reviewUrl, skipReview } from "./ReviewPrompt";
 import { mpesaCodeHint } from "../lib/payments";
 import { LicencePicker, SignatureBox } from "./CheckoutDocuments";
 import { buildBookingPdf, downloadPdf, loadPdfLogo, type BookingPdfData } from "../lib/bookingPdf";
@@ -150,6 +151,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const [pdfData, setPdfData] = useState<BookingPdfData | null>(null);
   // Returning customers: a licence kept on file (email and mobile number both match) can be reused.
   const [onFileSince, setOnFileSince] = useState("");
+  const [reviewDismissed, setReviewDismissed] = useState(false);
   const [useOnFile, setUseOnFile] = useState(true);
   const [keepOnFile, setKeepOnFile] = useState(false);
   const usingOnFile = Boolean(onFileSince) && useOnFile;
@@ -327,6 +329,9 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
 
   function remember(booking: PublicBookingResult) {
     setResult(booking);
+    if (booking.reviewToken) {
+      rememberForReview({ ref: booking.reference, t: booking.reviewToken, returnOn: booking.returnOn, model: booking.model });
+    }
     try {
       sessionStorage.setItem(STORED, JSON.stringify(booking));
     } catch {
@@ -541,6 +546,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   return (
     <>
       <div className={sectionWrap}>
+        <ReviewPrompt />
         {/* Find your vehicle */}
         <div
           id="book"
@@ -1000,6 +1006,30 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                   </form>
                 )}
                 {codeMessage && <p className="mb-4 text-sm text-[#3f3f3f]">{codeMessage}</p>}
+                {result.reviewToken && !reviewDismissed && (
+                  <div className="mx-auto mb-[18px] max-w-[520px] rounded-lg border border-[#e5e5e5] bg-[#fafaf8] p-4 text-left">
+                    <strong className="block">Tell us how it went</strong>
+                    <p className="mt-1 text-[13px] text-[#595959]">
+                      After your hire we&apos;d love a short review. Keep this link, or come back to this page after your return
+                      date and we&apos;ll remind you.
+                    </p>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-3">
+                      <a href={reviewUrl(result.reference, result.reviewToken)} className="text-sm font-bold underline">
+                        Your review link
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          skipReview(result.reference, result.reviewToken!);
+                          setReviewDismissed(true);
+                        }}
+                        className="text-[13px] font-semibold text-[#595959] underline"
+                      >
+                        No thanks
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <button type="button" onClick={bookAnother} className={btnDark}>
                   Book another vehicle
                 </button>

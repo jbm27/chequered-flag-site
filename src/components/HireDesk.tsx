@@ -5,7 +5,7 @@ import { addDays, balanceOf, dayNumber, exclusiveEnd, formatDay, ksh, todayNairo
 import DeskAddBooking from "./DeskAddBooking";
 import DeskEditBooking from "./DeskEditBooking";
 import DeskVehicleEdit from "./DeskVehicleEdit";
-import DeskCustomers from "./DeskCustomers";
+import DeskCustomers, { type LicenceOnFileRow } from "./DeskCustomers";
 import DeskDocuments from "./DeskDocuments";
 
 // Staff desk laid out like Homer's fleet dashboard design (V1.5).
@@ -184,6 +184,7 @@ export default function HireDesk() {
   const [authError, setAuthError] = useState("");
   const [bookings, setBookings] = useState<StaffBooking[]>([]);
   const [fleet, setFleet] = useState<DeskVehicle[]>([]);
+  const [licences, setLicences] = useState<LicenceOnFileRow[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [fees, setFees] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
@@ -258,6 +259,7 @@ export default function HireDesk() {
     }
     setBookings(body.bookings || []);
     setFleet(body.fleet || []);
+    setLicences(body.licences || []);
     return body.bookings || [];
   }
 
@@ -1292,6 +1294,13 @@ export default function HireDesk() {
                     )}
                   </Row>
                   <Row label="Booked">{formatDay(selected.createdAt.slice(0, 10))}</Row>
+                  {selected.licenceOnFile && (
+                    <Row label="Licence">
+                      <span className="inline-block rounded-[10px] border border-[#f9d46b] bg-[#feefc3] px-2 py-0.5 text-xs font-bold text-[#5f4400]">
+                        On file from an earlier booking: check it at handover
+                      </span>
+                    </Row>
+                  )}
                 </DetailBox>
 
                 <DetailBox title="Hire">
@@ -1311,17 +1320,24 @@ export default function HireDesk() {
                     {selected.deliverySummary}
                     {selected.deliveryDetail && <span className="block whitespace-pre-line text-[#595959]">{selected.deliveryDetail}</span>}
                     {(() => {
-                      const pin = /Pin: (-?\d+\.\d+), (-?\d+\.\d+)/.exec(selected.deliveryDetail);
-                      return pin ? (
+                      const pin = /(?:^|\n)Pin: (-?\d+\.\d+), (-?\d+\.\d+)/.exec(selected.deliveryDetail);
+                      const back = /Collection pin: (-?\d+\.\d+), (-?\d+\.\d+)/.exec(selected.deliveryDetail);
+                      const link = (m: RegExpExecArray, text: string) => (
                         <a
-                          href={"https://www.google.com/maps/search/?api=1&query=" + pin[1] + "%2C" + pin[2]}
+                          href={"https://www.google.com/maps/search/?api=1&query=" + m[1] + "%2C" + m[2]}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="mt-1 inline-block font-semibold underline"
+                          className="mt-1 block font-semibold underline"
                         >
-                          Open pin in Google Maps
+                          {text}
                         </a>
-                      ) : null;
+                      );
+                      return (
+                        <>
+                          {pin && link(pin, back ? "Open delivery pin in Google Maps" : "Open pin in Google Maps")}
+                          {back && link(back, "Open collection pin in Google Maps")}
+                        </>
+                      );
                     })()}
                   </Row>
                   {selected.ooh && <Row label="Out of hours">{selected.oohNote || "No note"}</Row>}
@@ -1710,7 +1726,16 @@ export default function HireDesk() {
             Who hires from us, how often and how much. Customers are matched by mobile number. Open a customer to see
             their hire history.
           </p>
-          {open.customers && <DeskCustomers bookings={bookings} today={today} onOpenBooking={pick} />}
+          {open.customers && <DeskCustomers
+              bookings={bookings}
+              today={today}
+              licences={licences}
+              onOpenBooking={pick}
+              onLicenceRemoved={async (who) => {
+                setNotice("Licence on file removed for " + who + ".");
+                await loadBookings();
+              }}
+            />}
         </section>
 
         {/* Vehicle records */}

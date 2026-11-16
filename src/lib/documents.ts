@@ -91,7 +91,13 @@ export function agreementLine(line: string): { level: number; text: string } {
 
 export type DocImage = { data: string; w: number; h: number }; // JPEG data URL and its size in pixels
 
-export type DriverDoc = { name: string; phone: string; licence: DocImage };
+// fromFile: the main driver's licence was reused from one kept on file (staff check it at handover).
+export type DriverDoc = { name: string; phone: string; licence: DocImage; fromFile?: boolean; onFileSince?: string };
+
+// A returning customer can reuse their licence for this long after it was uploaded.
+export const LICENCE_ON_FILE_MONTHS = 12;
+
+export type LicenceOnFile = { licence: DocImage; savedAt: string; reference: string };
 
 export type SignatureDoc =
   | { kind: "drawn"; name: string; image: DocImage }
@@ -101,6 +107,7 @@ export type BookingDocuments = {
   drivers: DriverDoc[]; // drivers[0] is the main driver (the person booking)
   signature: SignatureDoc;
   agreementVersion: string;
+  keepOnFile?: boolean; // the customer agreed to keep their licence for future bookings
 };
 
 export type StoredDocuments = BookingDocuments & { signedAt: string };
@@ -125,11 +132,18 @@ function cleanImage(value: unknown, what: string): DocImage | string {
 }
 
 // Checks what the booking page sent. The main driver's name and phone come from the booking itself.
+// mainOnFile is the licence kept on file for this email and phone, looked up by the server beforehand.
 export function validateDocuments(
   raw: unknown,
   main: { name: string; phone: string },
+  mainOnFile?: LicenceOnFile | null,
 ): { ok: true; docs: BookingDocuments } | { ok: false; error: string } {
-  const input = (raw || {}) as { drivers?: unknown[]; signature?: Record<string, unknown>; agreementVersion?: unknown };
+  const input = (raw || {}) as {
+    drivers?: unknown[];
+    signature?: Record<string, unknown>;
+    agreementVersion?: unknown;
+    keepOnFile?: unknown;
+  };
   const list = Array.isArray(input.drivers) ? input.drivers : [];
   if (!list.length) return { ok: false, error: "Add a photo of the front of your driving licence." };
   if (list.length > MAX_DRIVERS) return { ok: false, error: "A booking can have up to " + MAX_DRIVERS + " drivers." };
@@ -145,6 +159,13 @@ export function validateDocuments(
     const digits = phone.replace(/\D/g, "");
     if (!isMain && (digits.length < 9 || digits.length > 15)) {
       return { ok: false, error: "Enter a mobile number for driver " + (index + 1) + "." };
+    }
+    if (isMain && item.useOnFile === true) {
+      if (!mainOnFile) {
+        return { ok: false, error: "We couldn't find your licence on file. Please add a photo of the front of your driving licence." };
+      }
+      drivers.push({ name, phone, licence: mainOnFile.licence, fromFile: true, onFileSince: mainOnFile.savedAt });
+      continue;
     }
     const licence = cleanImage(item.licence, label);
     if (typeof licence === "string") return { ok: false, error: licence };
@@ -168,5 +189,8 @@ export function validateDocuments(
   if (String(input.agreementVersion || "") !== AGREEMENT_VERSION) {
     return { ok: false, error: "The hire agreement has been updated. Please reload the page and sign again." };
   }
-  return { ok: true, docs: { drivers, signature, agreementVersion: AGREEMENT_VERSION } };
+  return {
+    ok: true,
+    docs: { drivers, signature, agreementVersion: AGREEMENT_VERSION, keepOnFile: input.keepOnFile === true && !drivers[0].fromFile },
+  };
 }

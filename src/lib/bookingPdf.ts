@@ -2,6 +2,7 @@
 // Text uses the PDF's built-in Helvetica fonts; licence photos and drawn signatures are embedded as JPEGs.
 // Used on the booking page (the customer's copy) and on the staff desk (from the saved documents).
 
+import { COMPANY, CONTACT, PAYMENT } from "./contact";
 import { agreementLine, type DocImage } from "./documents";
 
 export type BookingPdfData = {
@@ -13,18 +14,41 @@ export type BookingPdfData = {
   returnText: string;
   daysText: string;
   location: string[];
-  costs: { label: string; amount: string }[];
+  // Cost lines, laid out like the invoice table. qty and unit are optional; sub is a small grey line underneath.
+  costs: { label: string; amount: string; qty?: string; unit?: string; sub?: string }[];
   totalLabel: string;
   total: string;
   customer: { name: string; phone: string; email: string };
-  drivers: { name: string; phone: string; licence: DocImage }[];
+  // licenceNote replaces the photo when the licence is on file and the photo is not available (customer's copy).
+  drivers: { name: string; phone: string; licence?: DocImage; licenceNote?: string }[];
   signature: { kind: "drawn" | "typed"; name: string; image?: DocImage };
   signedAt: string;
   agreementTitle: string;
   agreementVersion: string;
   agreementText: string[];
   footer: string;
+  paid?: string; // amount paid so far, when known
+  balance?: string; // amount still due, when known
+  logo?: DocImage | null; // The Chequered Flag logo (see loadPdfLogo)
 };
+
+// The logo used on invoices, as a JPEG the PDF can embed. Returns null if it cannot be loaded.
+export async function loadPdfLogo(): Promise<DocImage | null> {
+  try {
+    const response = await fetch("/images/brand/chequered-flag-ltd.jpg");
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    const data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+    return { data: data.replace(/^data:[^;]*;/, "data:image/jpeg;"), w: 463, h: 211 };
+  } catch {
+    return null;
+  }
+}
 
 // Helvetica widths (per 1000 units) for printable ASCII 32–126, from the standard font metrics.
 const HELV = [
@@ -137,9 +161,9 @@ export function buildBookingPdf(data: BookingPdfData): Uint8Array {
     y -= 4;
   }
   function heading(str: string) {
-    gap(8);
+    gap(10);
     need(40);
-    para(str, 13, true);
+    para(str.toUpperCase() + ":", 9, true);
     rule();
   }
   function row(label: string, value: string, bold = false) {
@@ -171,43 +195,178 @@ export function buildBookingPdf(data: BookingPdfData): Uint8Array {
     y -= 6;
   }
 
-  // Page 1: summary
-  para("Chequered Flag", 20, true);
-  para("Vehicle hire booking confirmation", 12, false, true);
-  gap(6);
-  row("Reference", data.reference, true);
-  row("Status", data.status);
-  row("Booked", data.created);
+  function textAt(str: string, x: number, yPos: number, size: number, bold = false, grey = false) {
+    ops += (grey ? "0.35 g " : "0 g ") + "BT /" + (bold ? "F2" : "F1") + " " + size + " Tf " + x.toFixed(2) + " " + yPos.toFixed(2) + " Td (" + escape(str) + ") Tj ET\n";
+  }
+  function rightAt(str: string, xRight: number, yPos: number, size: number, bold = false, grey = false) {
+    textAt(str, xRight - widthOf(str, size, bold), yPos, size, bold, grey);
+  }
+  // Wrapped text in a column; returns the y below it.
+  function column(lines: { s: string; size?: number; bold?: boolean; grey?: boolean; gapAfter?: number }[], x: number, yStart: number, width: number) {
+    let yy = yStart;
+    for (const line of lines) {
+      const size = line.size || 9;
+      for (const part of wrap(line.s, size, width, Boolean(line.bold))) {
+        yy -= size * 1.4;
+        textAt(part, x, yy, size, line.bold, line.grey);
+      }
+      yy -= line.gapAfter || 0;
+    }
+    return yy;
+  }
+  function lineAt(x1: number, yy: number, x2: number, grey = 0.8, w = 0.6) {
+    ops += grey + " G " + w + " w " + x1.toFixed(2) + " " + yy.toFixed(2) + " m " + x2.toFixed(2) + " " + yy.toFixed(2) + " l S\n";
+  }
+  function box(x: number, yTop: number, w: number, h: number) {
+    ops += "0 G 0.8 w " + x.toFixed(2) + " " + (yTop - h).toFixed(2) + " " + w.toFixed(2) + " " + h.toFixed(2) + " re S\n";
+  }
 
-  heading("Vehicle and dates");
-  row("Vehicle", data.vehicle, true);
-  row("Collection", data.pickupText);
-  row("Return", data.returnText);
-  row("Length of hire", data.daysText);
-
-  heading("Location");
-  for (const line of data.location) para(line, 10);
-
-  heading("Cost overview");
-  for (const cost of data.costs) money(cost.label, cost.amount);
-  rule();
-  money(data.totalLabel, data.total, true);
-  gap(4);
-  para(
-    /^paid/i.test(data.totalLabel)
-      ? "Paid in full. Thank you."
-      : "Nothing is charged on the website. Pay the full amount by M-Pesa or bank transfer quoting the reference above. We confirm the booking once we have checked the payment.",
-    9,
-    false,
-    true,
+  // Page 1: laid out like The Chequered Flag invoice
+  const right = PAGE_W - MARGIN;
+  const colX = 330;
+  if (data.logo) {
+    images.push(data.logo);
+    const lw = 190;
+    const lh = (data.logo.h / data.logo.w) * lw;
+    ops += "q " + lw + " 0 0 " + lh.toFixed(2) + " " + (MARGIN - 6) + " " + (PAGE_H - MARGIN - 18 - lh).toFixed(2) + " cm /Im" + images.length + " Do Q\n";
+  } else {
+    textAt("THE CHEQUERED FLAG LTD", MARGIN, PAGE_H - MARGIN - 50, 18, true);
+  }
+  let yr = column(
+    [
+      { s: COMPANY.name, size: 9 },
+      { s: COMPANY.postal, size: 9 },
+      { s: "VAT Registration No.: " + COMPANY.vat, size: 9 },
+      { s: "PIN: " + COMPANY.pin, size: 9 },
+      { s: "Tel: " + CONTACT.phoneDisplay, size: 9 },
+      { s: "Email: " + CONTACT.email, size: 9 },
+    ],
+    colX,
+    PAGE_H - MARGIN + 4,
+    right - colX,
   );
+  yr -= 10;
+  box(colX, yr, right - colX, 66);
+  textAt("BOOKING #" + data.reference, colX + 10, yr - 22, 15, true);
+  textAt("Booking date: " + data.created, colX + 10, yr - 38, 9);
+  textAt(data.status, colX + 10, yr - 52, 8.5, false, true);
+  y = yr - 66 - 24;
 
-  heading("Hirer and drivers");
-  row("Hirer", data.customer.name, true);
-  row("Mobile", data.customer.phone);
-  row("Email", data.customer.email || "Not given");
+  // Three columns, as on the invoice
+  const third = (WIDTH - 24) / 3;
+  const top = y;
+  const yA = column(
+    [
+      { s: "HIRED BY:", size: 9, bold: true, gapAfter: 3 },
+      { s: data.customer.name, size: 11, bold: true, gapAfter: 3 },
+      { s: "Tel: " + data.customer.phone, size: 8.5 },
+      { s: "Email: " + (data.customer.email || "Not given"), size: 8.5 },
+    ],
+    MARGIN,
+    top,
+    third,
+  );
+  const yB = column(
+    [
+      { s: "VEHICLE:", size: 9, bold: true, gapAfter: 3 },
+      { s: data.vehicle, size: 9, bold: true },
+      { s: "Collection: " + data.pickupText, size: 8.5 },
+      { s: "Return: " + data.returnText, size: 8.5 },
+      { s: "Length of hire: " + data.daysText, size: 8.5 },
+    ],
+    MARGIN + third + 12,
+    top,
+    third,
+  );
+  const yC = column(
+    [{ s: "LOCATION:", size: 9, bold: true, gapAfter: 3 }, ...data.location.map((s) => ({ s, size: 8.5 }))],
+    MARGIN + (third + 12) * 2,
+    top,
+    third,
+  );
+  y = Math.min(yA, yB, yC) - 22;
+
+  // Cost table
+  const qtyR = 330;
+  const unitR = 440;
+  textAt("Description", MARGIN, y, 9, true);
+  rightAt("Qty.", qtyR, y, 9, true);
+  rightAt("Unit Price", unitR, y, 9, true);
+  rightAt("Amount", right, y, 9, true);
+  y -= 7;
+  lineAt(MARGIN, y, right, 0, 0.9);
+  for (const cost of data.costs) {
+    const descLines = wrap(cost.label, 9, qtyR - MARGIN - 50, false);
+    need(descLines.length * 13 + (cost.sub ? 11 : 0) + 14);
+    y -= 15;
+    descLines.forEach((line, index) => textAt(line, MARGIN, y - index * 12, 9));
+    if (cost.qty) rightAt(cost.qty, qtyR, y, 9);
+    if (cost.unit) rightAt(cost.unit, unitR, y, 9);
+    rightAt(cost.amount, right, y, 9);
+    y -= (descLines.length - 1) * 12;
+    if (cost.sub) {
+      for (const part of wrap(cost.sub, 7, unitR - MARGIN, false)) {
+        y -= 10;
+        textAt(part, MARGIN, y, 7, false, true);
+      }
+    }
+    y -= 8;
+    lineAt(MARGIN, y, right, 0.82, 0.5);
+  }
+  y -= 22;
+
+  // Payment details, terms and totals box
+  need(130);
+  const blockTop = y;
+  const paidInFull = /^paid/i.test(data.totalLabel);
+  const yPay = column(
+    [
+      { s: "Payment Details:", size: 8.5, bold: true, gapAfter: 3 },
+      { s: "Mpesa Till Number: " + PAYMENT.mpesaTill, size: 8, gapAfter: 4 },
+      { s: PAYMENT.bankName.toUpperCase(), size: 8.5, bold: true },
+      { s: "Name: " + PAYMENT.accountName.toUpperCase(), size: 8 },
+      { s: "Branch: " + PAYMENT.branch.toUpperCase(), size: 8 },
+      { s: "Acc. No: " + PAYMENT.accountNumber, size: 8 },
+      { s: "Swift Code: " + PAYMENT.swift, size: 8 },
+    ],
+    MARGIN,
+    blockTop,
+    150,
+  );
+  const yTerms = column(
+    [
+      { s: "Payment Terms:", size: 8.5, bold: true, gapAfter: 3 },
+      {
+        s: paidInFull
+          ? "Paid in full. Thank you."
+          : "The full amount is due when you book. Quote the booking reference " + data.reference + " when you pay.",
+        size: 8,
+        gapAfter: 3,
+      },
+      { s: "We confirm the booking once we have checked the payment. Nothing is charged on the website.", size: 8 },
+    ],
+    MARGIN + 160,
+    blockTop,
+    colX - 14 - (MARGIN + 160),
+  );
+  const tx = colX + 10;
+  const totals: [string, string, boolean][] = [[paidInFull ? "Total paid" : "Total", data.total, true]];
+  if (data.paid !== undefined) totals.push(["Paid to date", data.paid, false]);
+  if (data.balance !== undefined) totals.push(["Balance due", data.balance, true]);
+  const boxH = 16 + totals.length * 15;
+  box(colX, blockTop + 4, right - colX, boxH);
+  let ty = blockTop + 4 - 6;
+  for (const [label, amount, bold] of totals) {
+    ty -= 15;
+    textAt(label, tx, ty, bold ? 10 : 9, bold);
+    rightAt(amount, right - 10, ty, bold ? 10 : 9, bold);
+  }
+  y = Math.min(yPay, yTerms, blockTop - boxH) - 18;
+
+  heading("Drivers");
   data.drivers.forEach((driver, index) => {
     row(index === 0 ? "Main driver" : "Driver " + (index + 1), driver.name + " · " + driver.phone, index === 0);
+    if (driver.licenceNote) row("", driver.licenceNote);
   });
 
   heading("Signed hire agreement");
@@ -232,12 +391,14 @@ export function buildBookingPdf(data: BookingPdfData): Uint8Array {
 
   // Licences
   data.drivers.forEach((driver, index) => {
+    if (!driver.licence) return; // a licence on file without its photo is noted on page 1 instead
     newPage();
     para((index === 0 ? "Main driver" : "Driver " + (index + 1)) + ": driving licence (front)", 14, true);
     para(driver.name + " · " + driver.phone, 10, false, true);
+    if (driver.licenceNote) para(driver.licenceNote, 10);
     rule();
     gap(6);
-    image(driver.licence, WIDTH, PAGE_H - MARGIN * 2 - 90);
+    if (driver.licence) image(driver.licence, WIDTH, PAGE_H - MARGIN * 2 - 90);
   });
   newPage();
 
@@ -246,8 +407,9 @@ export function buildBookingPdf(data: BookingPdfData): Uint8Array {
   const withFooter = pages.map(
     (content, index) =>
       content +
-      "0.45 g BT /F1 8 Tf " + MARGIN + " 26 Td (" + escape(data.footer) + ") Tj ET\n" +
-      "0.45 g BT /F1 8 Tf " + (PAGE_W - MARGIN - 60) + " 26 Td (" + escape("Page " + (index + 1) + " of " + total) + ") Tj ET\n",
+      "0.8 G 0.5 w " + MARGIN + " 40 m " + (PAGE_W - MARGIN) + " 40 l S\n" +
+      "0.45 g BT /F1 7.5 Tf " + MARGIN + " 28 Td (" + escape(data.footer) + ") Tj ET\n" +
+      "0.45 g BT /F1 7.5 Tf " + (PAGE_W - MARGIN - 50) + " 28 Td (" + escape("Page " + (index + 1) + " of " + total) + ") Tj ET\n",
   );
 
   // Assemble the file

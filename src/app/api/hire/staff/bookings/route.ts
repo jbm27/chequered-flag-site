@@ -5,6 +5,7 @@ import {
   databaseConfigured,
   httpStatus,
   listBookings,
+  listLicencesOnFile,
   listVehicleRecords,
   publicError,
   staffFromToken,
@@ -34,6 +35,7 @@ export async function GET() {
     await requireStaff();
     const bookings = await listBookings();
     const records = await listVehicleRecords();
+    const licences = await listLicencesOnFile();
     const fleet = FLEET.map((vehicle) => ({
       id: vehicle.id,
       model: vehicle.model,
@@ -50,7 +52,7 @@ export async function GET() {
       updatedAt: records[vehicle.id]?.updatedAt ?? "",
       updatedBy: records[vehicle.id]?.updatedBy ?? "",
     }));
-    return NextResponse.json({ bookings, fleet }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ bookings, fleet, licences }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return NextResponse.json({ error: publicError(error) }, { status: httpStatus(error) });
   }

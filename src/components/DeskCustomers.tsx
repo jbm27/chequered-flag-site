@@ -7,6 +7,9 @@ import { exclusiveEnd, ksh, type StaffBooking } from "../lib/hire";
 // Customers are matched by mobile number (last 9 digits, so +254 7… and 07… match), or by email if there is no number.
 // Only held and paid bookings count as hires; quotes and cancelled bookings are listed in the history but not counted.
 
+// A licence kept on file for a returning customer (from the staff API; no image).
+export type LicenceOnFileRow = { email: string; phoneKey: string; name: string; savedAt: string; reference: string; current: boolean };
+
 export const REGULAR_HIRES = 3; // "Regular hirers": this many hires or more
 export const TOP_SPEND = 100_000; // "Top spenders": this much paid to date (KSh) or more
 
@@ -145,14 +148,90 @@ function Fact({ label, value, note }: { label: string; value: string; note?: str
   );
 }
 
+function LicenceOnFileBox({ licence, onRemoved }: { licence: LicenceOnFileRow; onRemoved: (who: string) => void }) {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const saved = new Date(licence.savedAt);
+  const until = new Date(saved);
+  until.setMonth(until.getMonth() + 12);
+  const day = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Africa/Nairobi" });
+
+  async function remove() {
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/hire/staff/licences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: licence.email }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "The licence could not be removed.");
+      onRemoved(licence.name);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The licence could not be removed.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2.5 text-sm">
+      <div className="min-w-0">
+        <strong>Licence on file</strong>
+        <span className="text-[#595959]">
+          {" · saved " + day(saved) + (licence.reference ? " (" + licence.reference + ")" : "") + " · "}
+          {licence.current ? "reusable until " + day(until) : "expired, the customer will be asked for a new photo"}
+        </span>
+        <span className="block text-xs text-[#595959]">
+          Reused when they book with {licence.email} and this mobile number. Staff check the licence at handover.
+        </span>
+        {error && <span className="block text-xs font-bold text-[#a50e0e]">{error}</span>}
+      </div>
+      {asking ? (
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="text-[13px]">Remove it?</span>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={remove}
+            className="inline-flex min-h-[34px] items-center rounded-lg bg-[#a50e0e] px-3 text-[13px] font-bold text-white disabled:opacity-50"
+          >
+            {busy ? "Removing…" : "Yes, remove"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setAsking(false)}
+            className="inline-flex min-h-[34px] items-center rounded-lg border border-[#dadce0] bg-white px-3 text-[13px] font-bold"
+          >
+            Keep
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAsking(true)}
+          className="inline-flex min-h-[34px] items-center rounded-lg border border-[#dadce0] bg-white px-3 text-[13px] font-bold"
+        >
+          Remove licence
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function DeskCustomers({
   bookings,
   today,
+  licences = [],
   onOpenBooking,
+  onLicenceRemoved,
 }: {
   bookings: StaffBooking[];
   today: string;
+  licences?: LicenceOnFileRow[];
   onOpenBooking: (id: string) => void;
+  onLicenceRemoved?: (who: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>("all");
   const [sort, setSort] = useState<Sort>("recent");
@@ -240,6 +319,11 @@ export default function DeskCustomers({
           {shown.map((c) => {
             const isOpen = !!openKeys[c.key];
             const avgDays = Math.round((c.totalDays / c.hires.length) * 10) / 10;
+            const emails = new Set(c.bookings.map((b) => b.email.toLowerCase()).filter(Boolean));
+            const licence =
+              licences.find((l) => emails.has(l.email)) ||
+              licences.find((l) => c.key === "p" + l.phoneKey) ||
+              null;
             return (
               <li key={c.key} className="min-w-0 rounded-[10px] border border-[#e5e5e5] bg-[#fafaf8]">
                 <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
@@ -249,6 +333,11 @@ export default function DeskCustomers({
                       {c.regular && <Badge kind="regular" />}
                       {c.top && <Badge kind="top" />}
                       {c.onHire && <Badge kind="now" />}
+                      {licence?.current && (
+                        <span className="inline-block whitespace-nowrap rounded-[10px] border border-[#dadce0] bg-white px-2 py-0.5 text-xs font-bold text-[#3c4043]">
+                          Licence on file
+                        </span>
+                      )}
                     </div>
                     <div className="mt-0.5 text-[13px] text-[#595959]">
                       <a href={"tel:" + c.phone.replace(/\s/g, "")} className="underline">
@@ -286,6 +375,8 @@ export default function DeskCustomers({
                       <Fact label="Favourite vehicle" value={c.favourite} />
                       <Fact label="Paid to date" value={ksh(c.paid)} note={c.value > c.paid ? ksh(c.value - c.paid) + " still due" : "Nothing owed"} />
                     </div>
+
+                    {licence && <LicenceOnFileBox licence={licence} onRemoved={(who) => onLicenceRemoved?.(who)} />}
 
                     <div className="mt-3 text-[13px] font-bold uppercase tracking-[1.5px] text-[#595959]">Hire history</div>
                     <div className="relative mt-1.5 overflow-x-auto">

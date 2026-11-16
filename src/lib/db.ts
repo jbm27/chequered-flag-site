@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { Pool, type PoolClient } from "pg";
 import { FLEET, fleetModels, modelById, vehicleById } from "./fleet";
-import type { BookingDocuments, StoredDocuments } from "./documents";
+import { LICENCE_ON_FILE_MONTHS, type BookingDocuments, type LicenceOnFile, type StoredDocuments } from "./documents";
 import { VEHICLE_RECORDS } from "./vehicleRecords";
 import {
   addDays,
@@ -140,6 +140,17 @@ async function setup() {
       signature jsonb NOT NULL,
       agreement_version text NOT NULL,
       signed_at timestamptz NOT NULL DEFAULT now()
+    );
+    -- Licences kept on file for returning customers, only when the customer ticked the consent box.
+    -- One per email. Reused at checkout when the email and mobile number both match, for LICENCE_ON_FILE_MONTHS.
+    CREATE TABLE IF NOT EXISTS customer_licences (
+      email text PRIMARY KEY,
+      phone_key text NOT NULL,
+      customer_name text NOT NULL,
+      licence jsonb NOT NULL,
+      booking_id uuid REFERENCES bookings(id) ON DELETE SET NULL,
+      reference text NOT NULL DEFAULT '',
+      saved_at timestamptz NOT NULL DEFAULT now()
     );
     -- Vehicle records that staff keep up to date on the desk (odometer, year, condition notes).
     -- updated_at is also how the desk knows a vehicle has been checked since it last came back from a hire.
@@ -327,7 +338,7 @@ function referenceFor(manual: boolean) {
 }
 
 function deliveryDetail(booking: {
-  delivery: { kmText: string; breakdown: string; lat?: number; lng?: number };
+  delivery: { kmText: string; breakdown: string; lat?: number; lng?: number; collectLat?: number; collectLng?: number };
   directions: string;
   note: string;
 }) {
@@ -335,7 +346,11 @@ function deliveryDetail(booking: {
     typeof booking.delivery.lat === "number" && typeof booking.delivery.lng === "number"
       ? "Pin: " + booking.delivery.lat.toFixed(5) + ", " + booking.delivery.lng.toFixed(5)
       : "";
-  return [pin, booking.delivery.kmText, booking.delivery.breakdown, booking.directions ? "Directions: " + booking.directions : "", booking.note ? "Note: " + booking.note : ""]
+  const collectPin =
+    typeof booking.delivery.collectLat === "number" && typeof booking.delivery.collectLng === "number"
+      ? "Collection pin: " + booking.delivery.collectLat.toFixed(5) + ", " + booking.delivery.collectLng.toFixed(5)
+      : "";
+  return [pin, collectPin, booking.delivery.kmText, booking.delivery.breakdown, booking.directions ? "Directions: " + booking.directions : "", booking.note ? "Note: " + booking.note : ""]
     .filter(Boolean)
     .join("\n");
 }
@@ -468,6 +483,23 @@ export async function createBooking(
          VALUES ($1, $2::jsonb, $3::jsonb, $4)`,
         [bookingId, JSON.stringify(opts.documents.drivers), JSON.stringify(opts.documents.signature), opts.documents.agreementVersion],
       );
+      if (opts.documents.keepOnFile && booking.customer.email) {
+        await client.query(
+          `INSERT INTO customer_licences (email, phone_key, customer_name, licence, booking_id, reference, saved_at)
+           VALUES ($1, $2, $3, $4::jsonb, $5, $6, now())
+           ON CONFLICT (email) DO UPDATE SET
+             phone_key = EXCLUDED.phone_key, customer_name = EXCLUDED.customer_name, licence = EXCLUDED.licence,
+             booking_id = EXCLUDED.booking_id, reference = EXCLUDED.reference, saved_at = now()`,
+          [
+            booking.customer.email.toLowerCase(),
+            phoneKey(booking.customer.phone),
+            booking.customer.name,
+            JSON.stringify(opts.documents.drivers[0].licence),
+            bookingId,
+            reference,
+          ],
+        );
+      }
     }
     await client.query("COMMIT");
     return {
@@ -549,6 +581,7 @@ function mapStaff(row: Record<string, unknown>): StaffBooking {
     deliverySummary: String(row.delivery_summary),
     deliveryDetail: String(row.delivery_detail || ""),
     hasDocuments: Boolean(row.has_documents),
+    licenceOnFile: Boolean(row.licence_on_file),
     deliveryManual: Boolean(row.delivery_manual),
     hireTotal: Number(row.hire_total),
     insuranceTotal: Number(row.insurance_total),
@@ -574,7 +607,9 @@ export async function listBookings() {
             delivery_mode, delivery_summary, delivery_detail, delivery_manual,
             days, daily_rate, hire_total, insurance_total, delivery_fee, total_due,
             ooh, ooh_note, mpesa_code, status, staff_note, created_at, amount_paid,
-            EXISTS (SELECT 1 FROM booking_documents d WHERE d.booking_id = bookings.id) AS has_documents
+            EXISTS (SELECT 1 FROM booking_documents d WHERE d.booking_id = bookings.id) AS has_documents,
+            COALESCE((SELECT d.drivers->0->>'fromFile' = 'true' FROM booking_documents d WHERE d.booking_id = bookings.id), false)
+              AS licence_on_file
      FROM bookings
      ORDER BY created_at DESC
      LIMIT 300`,
@@ -873,6 +908,62 @@ export async function updateBooking(id: string, action: string, note: string, de
     (error as Error & { status?: number }).status = 409;
     throw error;
   }
+  return { ok: true };
+}
+
+// Mobile numbers are compared on their last 9 digits, so +254 7… and 07… match.
+export function phoneKey(phone: string) {
+  return phone.replace(/\D/g, "").slice(-9);
+}
+
+// The licence kept on file for a returning customer, if the email and mobile number both match and it is
+// less than LICENCE_ON_FILE_MONTHS old. Server only: the image is never sent back to the public site.
+export async function findLicenceOnFile(email: string, phone: string): Promise<LicenceOnFile | null> {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const cleanEmail = email.trim().toLowerCase();
+  const key = phoneKey(phone);
+  if (!cleanEmail || key.length < 9) return null;
+  const result = await db.query<{ licence: LicenceOnFile["licence"]; saved_at: Date; reference: string }>(
+    `SELECT licence, saved_at, reference FROM customer_licences
+     WHERE email = $1 AND phone_key = $2 AND saved_at > now() - ($3::int * interval '1 month')`,
+    [cleanEmail, key, LICENCE_ON_FILE_MONTHS],
+  );
+  const row = result.rows[0];
+  return row ? { licence: row.licence, savedAt: new Date(row.saved_at).toISOString(), reference: row.reference } : null;
+}
+
+export type LicenceOnFileSummary = { email: string; phoneKey: string; name: string; savedAt: string; reference: string; current: boolean };
+
+// Staff only: who has a licence on file (no images).
+export async function listLicencesOnFile(): Promise<LicenceOnFileSummary[]> {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const result = await db.query<{ email: string; phone_key: string; customer_name: string; saved_at: Date; reference: string; current: boolean }>(
+    `SELECT email, phone_key, customer_name, saved_at, reference,
+            saved_at > now() - ($1::int * interval '1 month') AS current
+     FROM customer_licences ORDER BY saved_at DESC`,
+    [LICENCE_ON_FILE_MONTHS],
+  );
+  return result.rows.map((row) => ({
+    email: row.email,
+    phoneKey: row.phone_key,
+    name: row.customer_name,
+    savedAt: new Date(row.saved_at).toISOString(),
+    reference: row.reference,
+    current: Boolean(row.current),
+  }));
+}
+
+// Staff remove a licence kept on file, for example when the customer asks. Bookings keep their own copy.
+export async function removeLicenceOnFile(email: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const result = await db.query(`DELETE FROM customer_licences WHERE email = $1`, [email.trim().toLowerCase()]);
+  if (result.rowCount !== 1) throw staffError("No licence on file for that email.", 404);
   return { ok: true };
 }
 

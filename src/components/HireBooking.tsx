@@ -1,16 +1,24 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CONTACT } from "../lib/contact";
-import PinMap, { type LatLng } from "./PinMap";
+import { COMPANY, CONTACT } from "../lib/contact";
+import { type LatLng } from "./PinMap";
+import PinPicker from "./PinPicker";
+import PaymentDetails from "./PaymentDetails";
+import ReviewPrompt, { rememberForReview, reviewUrl, skipReview } from "./ReviewPrompt";
+import { mpesaCodeHint } from "../lib/payments";
 import { LicencePicker, SignatureBox } from "./CheckoutDocuments";
-import { buildBookingPdf, downloadPdf, type BookingPdfData } from "../lib/bookingPdf";
+import { buildBookingPdf, downloadPdf, loadPdfLogo, type BookingPdfData } from "../lib/bookingPdf";
 import {
   AGREEMENT_TEXT,
   AGREEMENT_TITLE,
   AGREEMENT_VERSION,
   MAX_DRIVERS,
+  CANCELLATION_SUMMARY,
   agreementLine,
+  bookingSchedule,
+  damageLimitFor,
+  mileageFor,
   type DocImage,
 } from "../lib/documents";
 import {
@@ -119,10 +127,10 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const [delivery, setDelivery] = useState<DeliveryMode>("none");
   const [address, setAddress] = useState("");
   const [pin, setPin] = useState<LatLng | null>(null);
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<{ label: string; lat: number; lng: number }[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searchNote, setSearchNote] = useState("");
+  // Collection from a different place (only for "Deliver and collect", when the toggle is on).
+  const [collectElsewhere, setCollectElsewhere] = useState(false);
+  const [collectPin, setCollectPin] = useState<LatLng | null>(null);
+  const [collectAddress, setCollectAddress] = useState("");
   const directions = "";
   const [note, setNote] = useState("");
   const [oohNote, setOohNote] = useState("");
@@ -141,6 +149,40 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const [sigImage, setSigImage] = useState<DocImage | null>(null);
   const [sigName, setSigName] = useState("");
   const [pdfData, setPdfData] = useState<BookingPdfData | null>(null);
+  // Returning customers: a licence kept on file (email and mobile number both match) can be reused.
+  const [onFileSince, setOnFileSince] = useState("");
+  const [reviewDismissed, setReviewDismissed] = useState(false);
+  const [useOnFile, setUseOnFile] = useState(true);
+  const [keepOnFile, setKeepOnFile] = useState(false);
+  const usingOnFile = Boolean(onFileSince) && useOnFile;
+
+  useEffect(() => {
+    const cleanEmail = email.trim();
+    const digits = phone.replace(/\D/g, "");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail) || digits.length < 9) {
+      setOnFileSince("");
+      return;
+    }
+    let live = true;
+    const timer = window.setTimeout(() => {
+      fetch("/api/hire/licence-on-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: cleanEmail, phone }),
+      })
+        .then((response) => response.json())
+        .then((body: { onFile?: boolean; since?: string }) => {
+          if (!live) return;
+          setOnFileSince(body.onFile && body.since ? body.since : "");
+          if (body.onFile) setUseOnFile(true);
+        })
+        .catch(() => live && setOnFileSince(""));
+    }, 600);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [email, phone]);
   const [availability, setAvailability] = useState<AvailabilityResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -194,9 +236,15 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const selected = (availability?.models || []).find((model) => model.id === selectedId) || null;
   const pinPlace =
     delivery !== "none" && pin ? { id: "pin", name: address || "Pinned location", area: "", lat: pin.lat, lng: pin.lng } : null;
+  const collecting = delivery === "both" && collectElsewhere;
+  const collectPlace =
+    collecting && collectPin
+      ? { id: "collect-pin", name: collectAddress || "Collection pin", area: "", lat: collectPin.lat, lng: collectPin.lng }
+      : null;
   const deliveryQuote = quoteDelivery({
     delivery,
     place: pinPlace,
+    collectPlace,
     address,
     location,
     ooh: hours,
@@ -210,56 +258,6 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const pricedDelivery = deliveryQuote.manual ? 0 : deliveryQuote.fee || 0;
   const total = hireTotal + insuranceTotal + pricedDelivery;
 
-  // Address search and pin names use OpenStreetMap's Nominatim service. Its rules allow a search when the
-  // visitor asks (button or Enter) but not search-as-you-type.
-  async function searchAddress() {
-    const q = query.trim();
-    if (q.length < 3) {
-      setSearchNote("Type at least 3 letters of your address, area or a nearby landmark.");
-      return;
-    }
-    setSearching(true);
-    setSearchNote("");
-    setResults([]);
-    try {
-      const response = await fetch(
-        "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=ke&q=" + encodeURIComponent(q),
-        { headers: { "Accept-Language": "en" } },
-      );
-      const body = (await response.json()) as { display_name: string; lat: string; lon: string }[];
-      const found = body.map((item) => ({ label: item.display_name, lat: Number(item.lat), lng: Number(item.lon) }));
-      setResults(found);
-      if (!found.length) setSearchNote("No match found. Try a nearby landmark, or tap the map to drop your pin.");
-    } catch {
-      setSearchNote("The address search is not available right now. Tap the map to drop your pin instead.");
-    } finally {
-      setSearching(false);
-    }
-  }
-
-  function choosePlace(item: { label: string; lat: number; lng: number }) {
-    setPin({ lat: item.lat, lng: item.lng });
-    setAddress(item.label.split(",").slice(0, 4).join(",").trim());
-    setResults([]);
-    setSearchNote("");
-  }
-
-  async function dropPin(point: LatLng) {
-    setPin(point);
-    setResults([]);
-    setAddress("Pinned location");
-    try {
-      const response = await fetch(
-        "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&lat=" + point.lat + "&lon=" + point.lng,
-        { headers: { "Accept-Language": "en" } },
-      );
-      const body = (await response.json()) as { display_name?: string };
-      if (body.display_name) setAddress("Pin near " + body.display_name.split(",").slice(0, 3).join(",").trim());
-    } catch {
-      /* the pin is enough; the name is a convenience */
-    }
-  }
-
   function bookingInput(acceptTerms: boolean): Partial<BookingInput> {
     return {
       modelId: selectedId,
@@ -272,6 +270,9 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       placeId: "",
       pinLat: delivery !== "none" && pin ? pin.lat : "",
       pinLng: delivery !== "none" && pin ? pin.lng : "",
+      collectLat: collectPlace ? collectPlace.lat : "",
+      collectLng: collectPlace ? collectPlace.lng : "",
+      collectAddress: collectPlace ? collectAddress : "",
       address: delivery === "none" ? "" : address,
       directions: delivery === "none" ? "" : directions,
       note: delivery === "none" ? "" : note,
@@ -285,9 +286,40 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
     };
   }
 
+  const selectedLimit = selected ? damageLimitFor(selected.name, selected.category) : null;
+
+  // The Booking Schedule shown at the top of the agreement, filled in from what the customer has entered.
+  function scheduleValues() {
+    const when = (day: string, time: string) => (day ? formatDay(day) + ", " + time + " EAT" : "");
+    const collectWhere = delivery === "none" ? location : "Delivered to " + (address || "your pin");
+    const returnWhere =
+      delivery === "none" ? location : delivery === "both" ? "Collected from " + (collectPlace ? collectAddress : address || "your pin") : location;
+    return {
+      reference: "",
+      hirer: { name: name.trim(), email: email.trim(), phone: phone.trim() },
+      verification: usingOnFile
+        ? "Licence photo on file from an earlier booking; checked at handover"
+        : "Licence photo uploaded for each driver; checked at handover",
+      drivers: [name.trim(), ...extraDrivers.map((driver) => driver.name.trim())],
+      vehicle: selected ? selected.name : "",
+      collect: collectWhere + ", " + when(pickup, pickTime),
+      ret: returnWhere + ", " + when(returnOn, retTime),
+      price:
+        "Hire " + ksh(hireTotal) +
+        (insuranceTotal ? " + damage cover " + ksh(insuranceTotal) : "") +
+        (deliveryQuote.manual ? " + delivery (to be quoted)" : pricedDelivery ? " + delivery " + ksh(pricedDelivery) : "") +
+        " = " + ksh(total) + " (VAT included)",
+      damageLimit: selectedLimit,
+      mileage: mileageFor(selected?.category),
+    };
+  }
+
   function check(acceptTerms: boolean) {
     if (!selected) return "Choose a vehicle.";
     if (delivery !== "none" && !pin) return "For delivery, search for your address or tap the map to drop a pin.";
+    if (collecting && !collectPin) {
+      return "Drop a pin for where we collect the vehicle, or untick 'Collect the vehicle from a different place'.";
+    }
     const checked = assessBooking(
       { id: selected.id, name: selected.name, rate: selected.rate, addon: selected.addon, category: selected.category },
       bookingInput(acceptTerms),
@@ -297,6 +329,9 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
 
   function remember(booking: PublicBookingResult) {
     setResult(booking);
+    if (booking.reviewToken) {
+      rememberForReview({ ref: booking.reference, t: booking.reviewToken, returnOn: booking.returnOn, model: booking.model });
+    }
     try {
       sessionStorage.setItem(STORED, JSON.stringify(booking));
     } catch {
@@ -312,7 +347,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   }
 
   function driversProblem() {
-    if (!mainLicence) return "Add a photo of the front of your driving licence.";
+    if (!usingOnFile && !mainLicence) return "Add a photo of the front of your driving licence.";
     for (let index = 0; index < extraDrivers.length; index += 1) {
       const driver = extraDrivers[index];
       const n = index + 2;
@@ -333,12 +368,13 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   function documentsPayload() {
     return {
       drivers: [
-        { name, phone, licence: mainLicence },
+        usingOnFile ? { name, phone, useOnFile: true } : { name, phone, licence: mainLicence },
         ...extraDrivers.map((driver) => ({ name: driver.name, phone: driver.phone, licence: driver.licence })),
       ],
       signature:
         sigMode === "drawn" ? { kind: "drawn", name, image: sigImage } : { kind: "typed", name: sigName.trim() },
       agreementVersion: AGREEMENT_VERSION,
+      keepOnFile: !usingOnFile && keepOnFile,
     };
   }
 
@@ -402,12 +438,19 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
             pin ? "Pin: " + pin.lat.toFixed(5) + ", " + pin.lng.toFixed(5) + " · about " + straightKm(pin.lat, pin.lng) + " km in a straight line from our workshop" : "",
             note.trim() ? "Delivery instructions: " + note.trim() : "",
           ].filter(Boolean);
-    const costs = [{ label: "Hire, " + plural(booking.days) + " × " + ksh(booking.days ? booking.hireTotal / booking.days : 0), amount: ksh(booking.hireTotal) }];
-    if (booking.insuranceTotal) costs.push({ label: "Damage cover, " + plural(booking.days), amount: ksh(booking.insuranceTotal) });
+    const perDay = (amount: number) => ksh(booking.days ? amount / booking.days : 0);
+    const costs: BookingPdfData["costs"] = [
+      { label: "Vehicle hire: " + booking.model, qty: plural(booking.days), unit: perDay(booking.hireTotal), amount: ksh(booking.hireTotal) },
+    ];
+    if (booking.insuranceTotal) {
+      costs.push({ label: "Damage cover", qty: plural(booking.days), unit: perDay(booking.insuranceTotal), amount: ksh(booking.insuranceTotal) });
+    }
     if (delivery !== "none") {
       costs.push({
-        label: "Delivery" + (deliveryQuote.breakdown && !booking.manual ? ", " + deliveryQuote.breakdown : ""),
-        amount: booking.manual ? "Quoted by us before you pay" : booking.deliveryFee ? ksh(booking.deliveryFee) : "Free",
+        label: delivery === "both" ? "Delivery and collection" : "Delivery",
+        qty: "1",
+        sub: !booking.manual ? deliveryQuote.breakdown : "",
+        amount: booking.manual ? "Quoted before you pay" : booking.deliveryFee ? ksh(booking.deliveryFee) : "Free",
       });
     }
     return {
@@ -421,10 +464,18 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       location: locationLines,
       costs,
       totalLabel: booking.manual ? "Hire so far" : "Due in full",
+      paid: booking.manual ? undefined : ksh(0),
+      balance: booking.manual ? undefined : ksh(booking.total),
       total: ksh(booking.total),
       customer: { name: name.trim(), phone: phone.trim(), email: email.trim() },
       drivers: [
-        { name: name.trim(), phone: phone.trim(), licence: mainLicence! },
+        usingOnFile
+          ? {
+              name: name.trim(),
+              phone: phone.trim(),
+              licenceNote: "Licence on file from " + onFileSince + ". Bring it to collection, where we check it.",
+            }
+          : { name: name.trim(), phone: phone.trim(), licence: mainLicence! },
         ...extraDrivers.map((driver) => ({ name: driver.name.trim(), phone: driver.phone.trim(), licence: driver.licence! })),
       ],
       signature: sigMode === "drawn" ? { kind: "drawn", name: name.trim(), image: sigImage! } : { kind: "typed", name: sigName.trim() },
@@ -432,7 +483,8 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       agreementTitle: AGREEMENT_TITLE,
       agreementVersion: AGREEMENT_VERSION,
       agreementText: AGREEMENT_TEXT,
-      footer: "Chequered Flag · " + CONTACT.locationShort + " · " + CONTACT.phoneDisplay,
+      schedule: bookingSchedule({ ...scheduleValues(), reference: booking.reference }),
+      footer: COMPANY.name + " Ltd · " + COMPANY.postal + " · Tel " + CONTACT.phoneDisplay + " · " + CONTACT.email,
     };
   }
 
@@ -494,6 +546,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   return (
     <>
       <div className={sectionWrap}>
+        <ReviewPrompt />
         {/* Find your vehicle */}
         <div
           id="book"
@@ -593,67 +646,80 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
               <p className="mb-3 mt-0.5 text-[13px] text-[#595959]">
                 {deliveryHelp} Search for your address, or tap the map to drop a pin where you want the vehicle.
               </p>
-              <form
-                className="flex gap-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  searchAddress();
+              <PinPicker
+                idPrefix="d"
+                searchLabel="Search for the delivery address"
+                placeholder="Address, area or landmark, e.g. Village Market, Gigiri"
+                pin={pin}
+                onChange={(point, name) => {
+                  setPin(point);
+                  setAddress(name);
                 }}
-              >
-                <label htmlFor="daddr" className="sr-only">
-                  Search for your address
-                </label>
-                <input
-                  id="daddr"
-                  type="search"
-                  autoComplete="off"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Address, area or landmark, e.g. Village Market, Gigiri"
-                  className={roundField}
-                />
-                <button type="submit" disabled={searching} className={btnDark + " h-[46px] flex-none px-5"}>
-                  {searching ? "Searching…" : "Search"}
-                </button>
-              </form>
-              {results.length > 0 && (
-                <div role="listbox" aria-label="Matching places" className="mt-2 overflow-hidden rounded-lg border border-[#c8c8c8] bg-white">
-                  {results.map((item) => (
-                    <button
-                      key={item.lat + "," + item.lng}
-                      type="button"
-                      role="option"
-                      aria-selected={false}
-                      onClick={() => choosePlace(item)}
-                      className="block w-full cursor-pointer border-0 border-b border-[#f0f0f0] bg-white px-3.5 py-2.5 text-left text-sm text-[#171717] last:border-b-0 hover:bg-[#f7f7f5]"
-                    >
-                      {item.label}
-                    </button>
-                  ))}
+              />
+
+              {delivery === "both" && (
+                <div className="mt-3.5">
+                  <label className="flex items-start gap-2.5 text-sm">
+                    <input
+                      id="collectElsewhere"
+                      type="checkbox"
+                      checked={collectElsewhere}
+                      onChange={(event) => setCollectElsewhere(event.target.checked)}
+                      className="mt-0.5 h-5 w-5 flex-none"
+                    />
+                    <span>
+                      <strong>Collect the vehicle from a different place</strong>
+                      <span className="block text-[13px] text-[#595959]">
+                        For example, delivered in Watamu and collected in Nanyuki. Leave this off if we collect it from the
+                        delivery address.
+                      </span>
+                    </span>
+                  </label>
+                  {collectElsewhere && (
+                    <div className="mt-3 rounded-[10px] border border-[#e5e5e5] p-3.5">
+                      <div className="text-base font-bold">Where should we collect it from?</div>
+                      <p className="mb-3 mt-0.5 text-[13px] text-[#595959]">
+                        Search for the collection address, or tap the map to drop a second pin.
+                      </p>
+                      <PinPicker
+                        idPrefix="c"
+                        searchLabel="Search for the collection address"
+                        placeholder="Collection address, area or landmark"
+                        pin={collectPin}
+                        onChange={(point, name) => {
+                          setCollectPin(point);
+                          setCollectAddress(name);
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
-              {searchNote && <p className="mt-2 text-[13px] text-[#5f4b00]">{searchNote}</p>}
-
-              <div className="mt-3">
-                <PinMap pin={pin} home={{ ...YARD, label: "Our workshop" }} onPick={dropPin} />
-                <p className="mt-1.5 text-xs text-[#595959]">
-                  Can&apos;t find your address? Drag the map to your area, zoom in, and tap the exact spot.
-                </p>
-              </div>
 
               {pin && (
                 <div className="mt-3 rounded-[10px] border border-[#e5e5e5] bg-[#f5f5f3] px-4 py-3.5">
                   <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5">
                     <div className="min-w-0">
-                      <strong className="break-words">{address}</strong>
+                      <strong className="break-words">{collecting ? "Delivery: " : ""}{address}</strong>
                       <div className="text-[13px] text-[#595959]">
                         About {straightKm(pin.lat, pin.lng)} km in a straight line from our workshop in Karen
                       </div>
+                      {collecting && collectPin && (
+                        <>
+                          <strong className="mt-2 block break-words">Collection: {collectAddress}</strong>
+                          <div className="text-[13px] text-[#595959]">
+                            About {straightKm(collectPin.lat, collectPin.lng)} km in a straight line from our workshop in Karen
+                          </div>
+                        </>
+                      )}
+                      {collecting && !collectPin && (
+                        <div className="mt-2 text-[13px] font-bold text-[#5f4b00]">Drop the collection pin to see the full price.</div>
+                      )}
                     </div>
                     {selected && (
                       <div className="text-right">
                         <div className="text-xl font-bold">{deliveryQuote.fee ? ksh(deliveryQuote.fee) : "Free"}</div>
-                        <div className="text-[13px] text-[#595959]">{deliveryQuote.breakdown}</div>
+                        <div className="max-w-[320px] text-[13px] text-[#595959]">{deliveryQuote.breakdown}</div>
                       </div>
                     )}
                   </div>
@@ -661,11 +727,16 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                     <p className="mt-2 text-sm text-[#3f3f3f]">
                       {(() => {
                         const km = straightKm(pin.lat, pin.lng);
+                        const backKm = collecting && collectPin ? straightKm(collectPin.lat, collectPin.lng) : km;
                         const trips = delivery === "both" ? 2 : 1;
-                        if (km <= DELIVERY.freeKm) return "Delivery is free for every vehicle.";
-                        const price = (cat: "saloon" | "suv" | "4x4") => ksh(deliveryCharge(km, cat, trips).fee);
+                        const price = (cat: "saloon" | "suv" | "4x4") =>
+                          trips === 2
+                            ? deliveryCharge(km, cat, 1).fee + deliveryCharge(backKm, cat, 1).fee
+                            : deliveryCharge(km, cat, 1).fee;
+                        if (price("4x4") === 0) return "Delivery is free for every vehicle.";
                         return (
-                          "Delivery charge: saloon " + price("saloon") + " · SUV " + price("suv") + " · Prado or 4x4 " + price("4x4") +
+                          "Delivery charge: saloon " + ksh(price("saloon")) + " · SUV " + ksh(price("suv")) + " · Prado or 4x4 " +
+                          ksh(price("4x4")) +
                           (trips === 2 ? " (delivery and collection)" : "") +
                           ". It is added to the full amount when you book."
                         );
@@ -878,6 +949,14 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                     </>
                   )}
                 </div>
+                {!result.manual && (
+                  <div className="mx-auto mb-[18px] max-w-[620px] text-left">
+                    <div className="mb-2 text-center text-sm font-bold">
+                      How to pay {ksh(result.total)}
+                    </div>
+                    <PaymentDetails reference={result.reference} />
+                  </div>
+                )}
                 {pdfData && pdfData.reference === result.reference ? (
                   <div className="mx-auto mb-[18px] max-w-[520px] rounded-lg border-2 border-[#171717] bg-white p-4 text-left">
                     <strong className="block">Your booking PDF</strong>
@@ -887,7 +966,12 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                     </p>
                     <button
                       type="button"
-                      onClick={() => downloadPdf(buildBookingPdf(pdfData), "Chequered-Flag-" + pdfData.reference + ".pdf")}
+                      onClick={async () =>
+                        downloadPdf(
+                          buildBookingPdf({ ...pdfData, logo: await loadPdfLogo() }),
+                          "Chequered-Flag-" + pdfData.reference + ".pdf",
+                        )
+                      }
                       className={btnDark + " mt-3"}
                     >
                       Download booking PDF
@@ -911,8 +995,10 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                         id="laterCode"
                         value={laterCode}
                         onChange={(event) => setLaterCode(event.target.value)}
+                        placeholder="e.g. QJK3X7AB12"
                         className={roundField}
                       />
+                      {mpesaCodeHint(laterCode) && <p className="mt-1 text-[13px] font-bold text-[#7a3e00]">{mpesaCodeHint(laterCode)}</p>}
                     </div>
                     <button type="submit" className={btnLight}>
                       Send code
@@ -920,6 +1006,30 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                   </form>
                 )}
                 {codeMessage && <p className="mb-4 text-sm text-[#3f3f3f]">{codeMessage}</p>}
+                {result.reviewToken && !reviewDismissed && (
+                  <div className="mx-auto mb-[18px] max-w-[520px] rounded-lg border border-[#e5e5e5] bg-[#fafaf8] p-4 text-left">
+                    <strong className="block">Tell us how it went</strong>
+                    <p className="mt-1 text-[13px] text-[#595959]">
+                      After your hire we&apos;d love a short review. Keep this link, or come back to this page after your return
+                      date and we&apos;ll remind you.
+                    </p>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-3">
+                      <a href={reviewUrl(result.reference, result.reviewToken)} className="text-sm font-bold underline">
+                        Your review link
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          skipReview(result.reference, result.reviewToken!);
+                          setReviewDismissed(true);
+                        }}
+                        className="text-[13px] font-semibold text-[#595959] underline"
+                      >
+                        No thanks
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <button type="button" onClick={bookAnother} className={btnDark}>
                   Book another vehicle
                 </button>
@@ -978,15 +1088,56 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                         </div>
                       </div>
                       <div className="mt-4">
-                        <LicencePicker
-                          id="licMain"
-                          label="Your driving licence (front)"
-                          value={mainLicence}
-                          onChange={(image) => {
-                            setMainLicence(image);
-                            if (image && /licence/i.test(formError)) setFormError("");
-                          }}
-                        />
+                        {usingOnFile ? (
+                          <div className="rounded-lg border border-[#81c995] bg-[#eef8f1] p-3.5 text-sm">
+                            <strong className="block text-[#0d5a2a]">Welcome back. We have your driving licence on file.</strong>
+                            <span className="mt-0.5 block text-[#3f3f3f]">
+                              Saved in {onFileSince}, so you don&apos;t need to upload it again. Please bring it to collection,
+                              where we check it.
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setUseOnFile(false)}
+                              className="mt-2 text-[13px] font-semibold underline"
+                            >
+                              Upload a new photo instead
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <LicencePicker
+                              id="licMain"
+                              label="Your driving licence (front)"
+                              value={mainLicence}
+                              onChange={(image) => {
+                                setMainLicence(image);
+                                if (image && /licence/i.test(formError)) setFormError("");
+                              }}
+                            />
+                            {onFileSince && (
+                              <button
+                                type="button"
+                                onClick={() => setUseOnFile(true)}
+                                className="mt-1.5 text-[13px] font-semibold underline"
+                              >
+                                Use the licence we have on file instead
+                              </button>
+                            )}
+                            <label className="mt-2.5 flex items-start gap-2.5 text-[13px] text-[#3f3f3f]">
+                              <input
+                                id="keepOnFile"
+                                type="checkbox"
+                                checked={keepOnFile}
+                                onChange={(event) => setKeepOnFile(event.target.checked)}
+                                className="mt-0.5 h-[18px] w-[18px] flex-none"
+                              />
+                              <span>
+                                Keep my licence on file for 12 months, so I don&apos;t need to upload it next time I book with
+                                this email and mobile number. You can ask us to remove it at any time.
+                              </span>
+                            </label>
+                          </>
+                        )}
                       </div>
 
                       <div className="mt-5">
@@ -1137,6 +1288,25 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                             <li>Pay the full amount by M-Pesa or bank transfer, and quote the booking reference.</li>
                             <li>We check the payment and confirm your booking.</li>
                           </ol>
+                          <div className="mb-3">
+                            <PaymentDetails />
+                          </div>
+                          <dl className="mb-3 grid gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3.5 py-3 text-[13px]">
+                            <div>
+                              <dt className="inline font-bold">Damage liability limit: </dt>
+                              <dd className="inline">
+                                {selectedLimit ? ksh(selectedLimit) + " per hire, the most you pay for damage to the vehicle (clause 7)." : "Not set"}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="inline font-bold">Cancellation: </dt>
+                              <dd className="inline">{CANCELLATION_SUMMARY}</dd>
+                            </div>
+                            <div>
+                              <dt className="inline font-bold">Mileage: </dt>
+                              <dd className="inline">{selected ? mileageFor(selected.category) : ""}</dd>
+                            </div>
+                          </dl>
                           <p className="text-[13px] text-[#595959]">Nothing is taken on this page.</p>
                           <label htmlFor="mpesa" className={label + " mt-3"}>
                             M-Pesa code (optional, if you have already paid)
@@ -1145,8 +1315,12 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                             id="mpesa"
                             value={mpesaCode}
                             onChange={(event) => setMpesaCode(event.target.value)}
+                            placeholder="e.g. QJK3X7AB12"
                             className={roundField}
                           />
+                          {mpesaCodeHint(mpesaCode) && (
+                            <p className="mt-1 text-[13px] font-bold text-[#7a3e00]">{mpesaCodeHint(mpesaCode)}</p>
+                          )}
                         </div>
                       )}
 
@@ -1159,11 +1333,31 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                           aria-label={AGREEMENT_TITLE}
                           className="mt-2 h-[300px] overflow-y-auto overscroll-contain rounded-lg border border-[#c8c8c8] bg-white px-4 py-3 text-sm leading-relaxed text-[#3f3f3f] focus:outline focus:outline-2 focus:outline-[#171717]"
                         >
+                          <p className="mb-2 text-base font-bold text-[#171717]">{AGREEMENT_TITLE}</p>
                           {AGREEMENT_TEXT.map((paragraph, index) => {
-                            const { level, text } = agreementLine(paragraph);
+                            const line = agreementLine(paragraph);
+                            if (line.kind === "heading") {
+                              return (
+                                <p key={index} className="mb-1.5 mt-4 font-bold text-[#171717]">
+                                  {line.text}
+                                </p>
+                              );
+                            }
+                            if (line.kind === "schedule") {
+                              return (
+                                <dl key={index} className="mb-3 grid gap-px overflow-hidden rounded-md border border-[#e5e5e5] bg-[#e5e5e5] text-[13px]">
+                                  {bookingSchedule(scheduleValues()).map(([label, value]) => (
+                                    <div key={label} className="grid gap-x-3 bg-white px-3 py-1.5 sm:grid-cols-[190px_minmax(0,1fr)]">
+                                      <dt className="text-[#595959]">{label}</dt>
+                                      <dd className="text-[#171717]">{value}</dd>
+                                    </div>
+                                  ))}
+                                </dl>
+                              );
+                            }
                             return (
-                              <p key={index} className={level === 2 ? "mb-1 pl-8" : level === 1 ? "mb-2 pl-4" : "mb-2"}>
-                                {text}
+                              <p key={index} className={line.level === 2 ? "mb-1 pl-8" : line.level === 1 ? "mb-2 pl-4" : "mb-2"}>
+                                {line.text}
                               </p>
                             );
                           })}
@@ -1194,8 +1388,8 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                           className="mt-px h-[22px] w-[22px] flex-none"
                         />
                         <label htmlFor="termsBox" className="text-sm leading-normal">
-                          I have read and signed the hire agreement, and every driver named on this booking is at least 25
-                          with a valid driving licence.
+                          I agree to the Rental Terms. I have read and signed the hire agreement, and every driver named on
+                          this booking is at least 25 with a valid driving licence.
                         </label>
                       </div>
                       {formError && (
@@ -1252,6 +1446,11 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                       <div>
                         <strong>Delivery:</strong> {DELIVERY_LABELS[delivery]}
                         {address ? " · " + address : ""}
+                        {collectPlace && (
+                          <span className="block">
+                            <strong>Collection:</strong> {collectAddress}
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1348,7 +1547,15 @@ function VehicleCard({
           </div>
         )}
 
-        {model.available ? (
+        {damageLimitFor(model.name, model.category) === null ? (
+          // No damage liability limit in the hire agreement yet, so this vehicle is booked by phone.
+          <div className="mt-auto flex flex-col gap-2">
+            <div className="text-[13px] font-bold text-[#3f3f3f]">Book by phone</div>
+            <a href={"tel:" + CONTACT.phoneE164.replace(/\s/g, "")} className={btnLight + " min-h-[44px] w-full"}>
+              Call {CONTACT.phoneDisplay}
+            </a>
+          </div>
+        ) : model.available ? (
           <div className="mt-auto flex flex-col gap-2">
             <div className="text-[13px] font-bold text-[#1d6b3a]">
               Available for your dates

@@ -7,7 +7,8 @@ export const PRICING = { base: 1000, perKm: 50, freeKm: 5, maxKm: 150, roadFacto
 
 // Delivery pricing set by Homer (Nov 2026): measured in a straight line from the workshop in Karen
 // to the customer's pin. The first 50 km are free; each km beyond that is charged per vehicle type.
-// "Deliver and collect" is charged for both trips.
+// "Deliver and collect" is charged for both trips. If the customer is collected from somewhere else (a second
+// pin, for example delivered in Watamu and collected in Nanyuki), each trip is priced from its own pin.
 export const DELIVERY = {
   freeKm: 50,
   perKm: { saloon: 45, suv: 55, "4x4": 70 } as Record<"saloon" | "suv" | "4x4", number>,
@@ -86,6 +87,10 @@ export type BookingInput = {
   placeId: string;
   pinLat?: number | string;
   pinLng?: number | string;
+  // Optional second pin: where the vehicle is collected from, when it is not the delivery pin.
+  collectLat?: number | string;
+  collectLng?: number | string;
+  collectAddress?: string;
   address: string;
   directions: string;
   note: string;
@@ -112,6 +117,10 @@ export type DeliveryAssessment = {
   placeLabel: string;
   lat?: number;
   lng?: number;
+  collectLabel?: string;
+  collectKm?: number;
+  collectLat?: number;
+  collectLng?: number;
 };
 
 export type OutOfHours = {
@@ -294,6 +303,7 @@ export function quoteDelivery(input: {
   directions: string;
   note: string;
   category?: VehicleCategory;
+  collectPlace?: Place | null; // only for "both", when collected from a different place
 }): DeliveryAssessment {
   const label = DELIVERY_LABELS[input.delivery];
   if (input.delivery === "none") {
@@ -331,9 +341,49 @@ export function quoteDelivery(input: {
 
   const place = input.place;
   const km = straightKm(place.lat, place.lng);
+  const category = input.category || "saloon";
+
+  // Delivered to one place, collected from another: each trip priced from its own pin.
+  const other = input.delivery === "both" && input.collectPlace ? input.collectPlace : null;
+  if (other) {
+    const collectKm = straightKm(other.lat, other.lng);
+    const out = deliveryCharge(km, category, 1);
+    const back = deliveryCharge(collectKm, category, 1);
+    const fee = out.fee + back.fee;
+    const placeLabel = place.area ? place.name + ", " + place.area : place.name;
+    const collectLabel = other.area ? other.name + ", " + other.area : other.name;
+    const part = (label: string, c: ReturnType<typeof deliveryCharge>) =>
+      label + ": " + (c.fee ? c.chargedKm + " km over " + DELIVERY.freeKm + " km × " + ksh(c.rate) + " = " + ksh(c.fee) : "free");
+    return {
+      mode: input.delivery,
+      label,
+      summary:
+        "Delivered to " +
+        placeLabel +
+        ", and collected from " +
+        collectLabel +
+        (input.directions.trim() ? ". Directions: " + input.directions.trim() : ""),
+      fee,
+      manual: false,
+      tooFar: false,
+      km,
+      kmText: "Delivery about " + km + " km and collection about " + collectKm + " km in a straight line from our workshop in Karen",
+      breakdown: part("Delivery", out) + ". " + part("Collection", back),
+      message: fee
+        ? "The delivery and collection charges are included in the full amount due now."
+        : "Free: both places are within " + DELIVERY.freeKm + " km of our workshop.",
+      placeLabel,
+      lat: place.lat,
+      lng: place.lng,
+      collectLabel,
+      collectKm,
+      collectLat: other.lat,
+      collectLng: other.lng,
+    };
+  }
+
   const kmText = "About " + km + " km in a straight line from our workshop in Karen";
   const trips = input.delivery === "both" ? 2 : 1;
-  const category = input.category || "saloon";
   const charge = deliveryCharge(km, category, trips);
   const placeLabel = place.area ? place.name + ", " + place.area : place.name;
   const returned = input.delivery === "both" ? ", and collected from there" : ". You return it to " + input.location;
@@ -411,6 +461,17 @@ export function assessBooking(
   const hasPin =
     raw.pinLat !== undefined && raw.pinLat !== "" && raw.pinLng !== undefined && raw.pinLng !== "" &&
     Number.isFinite(pinLat) && Number.isFinite(pinLng) && Math.abs(pinLat) <= 90 && Math.abs(pinLng) <= 180;
+  const collectLat = Number(raw.collectLat);
+  const collectLng = Number(raw.collectLng);
+  const hasCollectPin =
+    delivery === "both" &&
+    raw.collectLat !== undefined && raw.collectLat !== "" && raw.collectLng !== undefined && raw.collectLng !== "" &&
+    Number.isFinite(collectLat) && Number.isFinite(collectLng) && Math.abs(collectLat) <= 90 && Math.abs(collectLng) <= 180;
+  if (hasCollectPin && !hasPin) return { ok: false, error: "Drop a pin for the delivery address as well as the collection." };
+  const collectAddress = cleanText(raw.collectAddress, 180);
+  const collectPlace: Place | null = hasCollectPin
+    ? { id: "collect-pin", name: collectAddress || "Collection pin", area: "", lat: collectLat, lng: collectLng }
+    : null;
   let place: Place | null = hasPin
     ? { id: "pin", name: address || "Pinned location", area: "", lat: pinLat, lng: pinLng }
     : null;
@@ -438,6 +499,7 @@ export function assessBooking(
     directions,
     note,
     category: model.category,
+    collectPlace,
   });
   if (delivery !== "none" && address.length < 3 && !hasPin) {
     return { ok: false, error: "Enter the delivery address or drop a pin on the map." };
@@ -558,6 +620,7 @@ export type PublicBookingResult = {
   email: string;
   phone: string;
   message: string;
+  reviewToken?: string; // private link key for the customer's review page (/review?ref=…&t=…)
 };
 
 export type StaffBooking = {
@@ -589,8 +652,12 @@ export type StaffBooking = {
   mpesaCode: string;
   staffNote: string;
   hasDocuments?: boolean;
+  licenceOnFile?: boolean; // the main driver's licence was reused from one on file: check it at handover
+  paymentLog?: PaymentEntry[]; // payments recorded on the desk with "Match a payment"
   amountPaid: number; // KSh received so far, entered by staff (part payments). Full when confirmed.
 };
+
+export type PaymentEntry = { code: string; amount: number; by: string; at: string };
 
 // What is still owed on a booking. A delivery that has not been priced yet only counts the hire so far.
 export function balanceOf(booking: Pick<StaffBooking, "total" | "amountPaid">) {

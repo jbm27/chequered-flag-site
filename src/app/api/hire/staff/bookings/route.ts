@@ -1,8 +1,16 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { FLEET, modelById, modelSlug } from "../../../../../lib/fleet";
-import { VEHICLE_RECORDS } from "../../../../../lib/vehicleRecords";
-import { databaseConfigured, httpStatus, listBookings, publicError, staffFromToken, updateBooking } from "../../../../../lib/db";
+import {
+  databaseConfigured,
+  httpStatus,
+  listBookings,
+  listLicencesOnFile,
+  listVehicleRecords,
+  publicError,
+  staffFromToken,
+  updateBooking,
+} from "../../../../../lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,6 +34,8 @@ export async function GET() {
   try {
     await requireStaff();
     const bookings = await listBookings();
+    const records = await listVehicleRecords();
+    const licences = await listLicencesOnFile();
     const fleet = FLEET.map((vehicle) => ({
       id: vehicle.id,
       model: vehicle.model,
@@ -36,10 +46,13 @@ export async function GET() {
       seats: vehicle.seats,
       rate: vehicle.rate,
       addon: vehicle.addon,
-      year: VEHICLE_RECORDS[vehicle.id]?.year ?? null,
-      km: VEHICLE_RECORDS[vehicle.id]?.km ?? null,
+      year: records[vehicle.id]?.year ?? null,
+      km: records[vehicle.id]?.km ?? null,
+      notes: records[vehicle.id]?.notes ?? "",
+      updatedAt: records[vehicle.id]?.updatedAt ?? "",
+      updatedBy: records[vehicle.id]?.updatedBy ?? "",
     }));
-    return NextResponse.json({ bookings, fleet }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ bookings, fleet, licences }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return NextResponse.json({ error: publicError(error) }, { status: httpStatus(error) });
   }

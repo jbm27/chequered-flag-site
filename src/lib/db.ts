@@ -1,7 +1,16 @@
 import crypto from "crypto";
 import { Pool, type PoolClient } from "pg";
 import { FLEET, fleetModels, modelById, vehicleById } from "./fleet";
-import type { BookingDocuments, StoredDocuments } from "./documents";
+import {
+  LICENCE_ON_FILE_MONTHS,
+  bookingSchedule,
+  damageLimitFor,
+  mileageFor,
+  type BookingDocuments,
+  type LicenceOnFile,
+  type StoredDocuments,
+} from "./documents";
+import { VEHICLE_RECORDS } from "./vehicleRecords";
 import {
   addDays,
   assessBooking,
@@ -129,6 +138,8 @@ async function setup() {
     );
     -- Part payments, entered by staff on the desk. Added after launch, so existing bookings start at 0.
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS amount_paid integer NOT NULL DEFAULT 0;
+    -- Payments recorded on the desk (code, amount, who, when), used to spot a code used twice.
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_log jsonb NOT NULL DEFAULT '[]'::jsonb;
     CREATE INDEX IF NOT EXISTS bookings_vehicle_status_idx ON bookings (vehicle_id, status);
     CREATE INDEX IF NOT EXISTS bookings_created_idx ON bookings (created_at DESC);
     -- Licence photos, extra drivers and the signed hire agreement for a website booking (one row per booking).
@@ -139,6 +150,45 @@ async function setup() {
       signature jsonb NOT NULL,
       agreement_version text NOT NULL,
       signed_at timestamptz NOT NULL DEFAULT now()
+    );
+    -- Licences kept on file for returning customers, only when the customer ticked the consent box.
+    -- One per email. Reused at checkout when the email and mobile number both match, for LICENCE_ON_FILE_MONTHS.
+    -- The Booking Schedule the customer agreed to (revised hire agreement, clause 14.1). Older bookings have none.
+    ALTER TABLE booking_documents ADD COLUMN IF NOT EXISTS schedule jsonb;
+    CREATE TABLE IF NOT EXISTS customer_licences (
+      email text PRIMARY KEY,
+      phone_key text NOT NULL,
+      customer_name text NOT NULL,
+      licence jsonb NOT NULL,
+      booking_id uuid REFERENCES bookings(id) ON DELETE SET NULL,
+      reference text NOT NULL DEFAULT '',
+      saved_at timestamptz NOT NULL DEFAULT now()
+    );
+    -- Customer reviews. One per booking; the token is the private key in the customer's review link.
+    -- status: requested (link made), skipped, pending (waiting for staff), approved (shown on the website), hidden.
+    CREATE TABLE IF NOT EXISTS reviews (
+      booking_id uuid PRIMARY KEY REFERENCES bookings(id) ON DELETE CASCADE,
+      token text NOT NULL UNIQUE,
+      status text NOT NULL DEFAULT 'requested',
+      rating integer,
+      comment text NOT NULL DEFAULT '',
+      display_name text NOT NULL DEFAULT '',
+      created_at timestamptz NOT NULL DEFAULT now(),
+      submitted_at timestamptz,
+      decided_at timestamptz,
+      decided_by text NOT NULL DEFAULT '',
+      CONSTRAINT reviews_status_check CHECK (status IN ('requested', 'skipped', 'pending', 'approved', 'hidden')),
+      CONSTRAINT reviews_rating_check CHECK (rating IS NULL OR rating BETWEEN 1 AND 5)
+    );
+    -- Vehicle records that staff keep up to date on the desk (odometer, year, condition notes).
+    -- updated_at is also how the desk knows a vehicle has been checked since it last came back from a hire.
+    CREATE TABLE IF NOT EXISTS vehicle_records (
+      vehicle_id text PRIMARY KEY REFERENCES vehicles(id),
+      year integer,
+      odometer_km integer,
+      notes text NOT NULL DEFAULT '',
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      updated_by text NOT NULL DEFAULT ''
     );
   `);
 
@@ -158,6 +208,17 @@ async function setup() {
     );
   }
   await db.query(`UPDATE vehicles SET active = false WHERE NOT (id = ANY($1::text[]))`, [FLEET.map((vehicle) => vehicle.id)]);
+
+  // First run only: start each vehicle record from the fleet list. Existing records are never overwritten.
+  for (const vehicle of FLEET) {
+    const start = VEHICLE_RECORDS[vehicle.id];
+    await db.query(
+      `INSERT INTO vehicle_records (vehicle_id, year, odometer_km, updated_by)
+       VALUES ($1, $2, $3, 'fleet list')
+       ON CONFLICT (vehicle_id) DO NOTHING`,
+      [vehicle.id, start?.year ?? null, start?.km ?? null],
+    );
+  }
 
   const count = await db.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM staff_users");
   if (count.rows[0].n === 0) {
@@ -304,8 +365,20 @@ function referenceFor(manual: boolean) {
   return (manual ? "CFQ-" : "CF-") + number;
 }
 
+// Where the vehicle is collected or returned, for the Booking Schedule.
+function scheduleWhere(
+  booking: { location: string; delivery: { mode: string; placeLabel: string; collectLabel?: string } },
+  which: "collect" | "return",
+) {
+  const d = booking.delivery;
+  if (d.mode === "none") return booking.location;
+  if (which === "collect") return "Delivered to " + (d.placeLabel || "the delivery address");
+  if (d.mode === "both") return "Collected from " + (d.collectLabel || d.placeLabel || "the delivery address");
+  return booking.location;
+}
+
 function deliveryDetail(booking: {
-  delivery: { kmText: string; breakdown: string; lat?: number; lng?: number };
+  delivery: { kmText: string; breakdown: string; lat?: number; lng?: number; collectLat?: number; collectLng?: number };
   directions: string;
   note: string;
 }) {
@@ -313,7 +386,11 @@ function deliveryDetail(booking: {
     typeof booking.delivery.lat === "number" && typeof booking.delivery.lng === "number"
       ? "Pin: " + booking.delivery.lat.toFixed(5) + ", " + booking.delivery.lng.toFixed(5)
       : "";
-  return [pin, booking.delivery.kmText, booking.delivery.breakdown, booking.directions ? "Directions: " + booking.directions : "", booking.note ? "Note: " + booking.note : ""]
+  const collectPin =
+    typeof booking.delivery.collectLat === "number" && typeof booking.delivery.collectLng === "number"
+      ? "Collection pin: " + booking.delivery.collectLat.toFixed(5) + ", " + booking.delivery.collectLng.toFixed(5)
+      : "";
+  return [pin, collectPin, booking.delivery.kmText, booking.delivery.breakdown, booking.directions ? "Directions: " + booking.directions : "", booking.note ? "Note: " + booking.note : ""]
     .filter(Boolean)
     .join("\n");
 }
@@ -442,13 +519,58 @@ export async function createBooking(
     if (!inserted) throw new Error("Could not save the booking. Please try again.");
     if (opts?.documents) {
       await client.query(
-        `INSERT INTO booking_documents (booking_id, drivers, signature, agreement_version)
-         VALUES ($1, $2::jsonb, $3::jsonb, $4)`,
-        [bookingId, JSON.stringify(opts.documents.drivers), JSON.stringify(opts.documents.signature), opts.documents.agreementVersion],
+        `INSERT INTO booking_documents (booking_id, drivers, signature, agreement_version, schedule)
+         VALUES ($1, $2::jsonb, $3::jsonb, $4, $5::jsonb)`,
+        [
+          bookingId,
+          JSON.stringify(opts.documents.drivers),
+          JSON.stringify(opts.documents.signature),
+          opts.documents.agreementVersion,
+          JSON.stringify(
+            bookingSchedule({
+              reference,
+              hirer: { name: booking.customer.name, email: booking.customer.email, phone: booking.customer.phone },
+              verification: opts.documents.drivers[0].fromFile
+                ? "Licence photo on file from an earlier booking; checked at handover"
+                : "Licence photo uploaded for each driver; checked at handover",
+              drivers: opts.documents.drivers.map((driver) => driver.name),
+              vehicle: booking.model.name,
+              collect: scheduleWhere(booking, "collect") + ", " + formatDay(booking.pickup) + ", " + booking.pickTime + " EAT",
+              ret: scheduleWhere(booking, "return") + ", " + formatDay(booking.returnOn) + ", " + booking.retTime + " EAT",
+              price:
+                "Hire " + ksh(booking.hireTotal) +
+                (booking.insuranceTotal ? " + damage cover " + ksh(booking.insuranceTotal) : "") +
+                (booking.manual ? " + delivery (to be quoted)" : booking.delivery.fee ? " + delivery " + ksh(booking.delivery.fee) : "") +
+                " = " + ksh(booking.total) + " (VAT included)",
+              damageLimit: damageLimitFor(booking.model.name, booking.model.category),
+              mileage: mileageFor(booking.model.category),
+            }),
+          ),
+        ],
       );
+      if (opts.documents.keepOnFile && booking.customer.email) {
+        await client.query(
+          `INSERT INTO customer_licences (email, phone_key, customer_name, licence, booking_id, reference, saved_at)
+           VALUES ($1, $2, $3, $4::jsonb, $5, $6, now())
+           ON CONFLICT (email) DO UPDATE SET
+             phone_key = EXCLUDED.phone_key, customer_name = EXCLUDED.customer_name, licence = EXCLUDED.licence,
+             booking_id = EXCLUDED.booking_id, reference = EXCLUDED.reference, saved_at = now()`,
+          [
+            booking.customer.email.toLowerCase(),
+            phoneKey(booking.customer.phone),
+            booking.customer.name,
+            JSON.stringify(opts.documents.drivers[0].licence),
+            bookingId,
+            reference,
+          ],
+        );
+      }
     }
+    const reviewToken = newReviewToken();
+    await client.query(`INSERT INTO reviews (booking_id, token) VALUES ($1, $2)`, [bookingId, reviewToken]);
     await client.query("COMMIT");
     return {
+      reviewToken,
       reference,
       status: booking.manual ? "quote" : opts?.confirmed ? "confirmed" : "pending",
       manual: booking.manual,
@@ -527,6 +649,8 @@ function mapStaff(row: Record<string, unknown>): StaffBooking {
     deliverySummary: String(row.delivery_summary),
     deliveryDetail: String(row.delivery_detail || ""),
     hasDocuments: Boolean(row.has_documents),
+    paymentLog: Array.isArray(row.payment_log) ? (row.payment_log as StaffBooking["paymentLog"]) : [],
+    licenceOnFile: Boolean(row.licence_on_file),
     deliveryManual: Boolean(row.delivery_manual),
     hireTotal: Number(row.hire_total),
     insuranceTotal: Number(row.insurance_total),
@@ -551,8 +675,10 @@ export async function listBookings() {
             pickup_on::text, return_on::text, pickup_time, return_time, pickup_location,
             delivery_mode, delivery_summary, delivery_detail, delivery_manual,
             days, daily_rate, hire_total, insurance_total, delivery_fee, total_due,
-            ooh, ooh_note, mpesa_code, status, staff_note, created_at, amount_paid,
-            EXISTS (SELECT 1 FROM booking_documents d WHERE d.booking_id = bookings.id) AS has_documents
+            ooh, ooh_note, mpesa_code, status, staff_note, created_at, amount_paid, payment_log,
+            EXISTS (SELECT 1 FROM booking_documents d WHERE d.booking_id = bookings.id) AS has_documents,
+            COALESCE((SELECT d.drivers->0->>'fromFile' = 'true' FROM booking_documents d WHERE d.booking_id = bookings.id), false)
+              AS licence_on_file
      FROM bookings
      ORDER BY created_at DESC
      LIMIT 300`,
@@ -822,6 +948,69 @@ export async function editBooking(id: string, raw: Partial<BookingEdit>, editedB
   }
 }
 
+// Staff record a payment found on the M-Pesa or bank statement ("Match a payment" on the desk).
+// Adds it to the amount paid, keeps it in the payment log, and confirms the booking once it is paid in full.
+// A code already recorded on any booking is refused, so the same payment can't be counted twice.
+export async function recordPayment(id: string, raw: { amount?: unknown; code?: unknown }, recordedBy: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const amount = wholeShillings(raw.amount);
+  if (amount === null || amount <= 0) throw staffError("Enter the amount received in whole shillings.", 400);
+  const code = String(raw.code ?? "").replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 30);
+  if (code && code.length < 4) throw staffError("Enter the M-Pesa code or bank reference, or leave it blank.", 400);
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query<{ status: string; total_due: number; amount_paid: number; mpesa_code: string; payment_log: unknown[]; reference: string }>(
+      `SELECT status, total_due, amount_paid, mpesa_code, payment_log, reference FROM bookings WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    const row = current.rows[0];
+    if (!row) throw staffError("That booking was not found.", 404);
+    if (row.status !== "pending" && row.status !== "confirmed") {
+      throw staffError("Payments can only be recorded on a held or paid booking.", 409);
+    }
+    if (code) {
+      const clash = await client.query<{ reference: string }>(
+        `SELECT reference FROM bookings
+         WHERE id <> $1 AND (upper(mpesa_code) = $2 OR payment_log @> jsonb_build_array(jsonb_build_object('code', $2::text)))
+         LIMIT 1`,
+        [id, code],
+      );
+      if (clash.rows[0]) throw staffError("Code " + code + " is already recorded on " + clash.rows[0].reference + ".", 409);
+      const log = Array.isArray(row.payment_log) ? (row.payment_log as { code?: string }[]) : [];
+      if (log.some((entry) => entry.code === code)) throw staffError("Code " + code + " is already recorded on this booking.", 409);
+    }
+    const total = Number(row.total_due);
+    const paidBefore = row.status === "confirmed" && !Number(row.amount_paid) ? total : Number(row.amount_paid);
+    const balance = Math.max(0, total - paidBefore);
+    if (balance === 0) throw staffError(row.reference + " is already paid in full.", 409);
+    if (amount > balance) throw staffError("That is more than the balance of " + ksh(balance) + " on " + row.reference + ".", 400);
+    const paid = paidBefore + amount;
+    const entry = { code, amount, by: recordedBy.slice(0, 60), at: new Date().toISOString() };
+    const updated = await client.query<{ status: string }>(
+      `UPDATE bookings
+       SET amount_paid = $2,
+           payment_log = payment_log || jsonb_build_array($3::jsonb),
+           mpesa_code = CASE WHEN mpesa_code = '' AND $4 ~ '^[A-Z0-9]{10}$' AND $4 ~ '[A-Z]' AND $4 ~ '[0-9]' THEN $4 ELSE mpesa_code END,
+           status = CASE WHEN $2 >= total_due AND status = 'pending' THEN 'confirmed' ELSE status END,
+           confirmed_at = CASE WHEN $2 >= total_due AND status = 'pending' THEN now() ELSE confirmed_at END
+       WHERE id = $1
+       RETURNING status`,
+      [id, paid, JSON.stringify(entry), code],
+    );
+    await client.query("COMMIT");
+    return { ok: true, status: updated.rows[0].status, balance: total - paid, reference: row.reference };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function updateBooking(id: string, action: string, note: string, deliveryFee?: unknown) {
   await ensureReady();
   const db = pool();
@@ -854,19 +1043,420 @@ export async function updateBooking(id: string, action: string, note: string, de
   return { ok: true };
 }
 
+// ---------- Customer reviews ----------
+
+function newReviewToken() {
+  return crypto.randomBytes(18).toString("base64url");
+}
+
+function firstNameAndInitial(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "";
+  return parts.length > 1 ? parts[0] + " " + parts[parts.length - 1][0].toUpperCase() + "." : parts[0];
+}
+
+export type ReviewInfo = {
+  reference: string;
+  model: string;
+  pickup: string;
+  returnOn: string;
+  suggestedName: string;
+  status: "requested" | "skipped" | "pending" | "approved" | "hidden";
+  started: boolean; // a review can be left once the hire has started
+  rating: number | null;
+  comment: string;
+  displayName: string;
+};
+
+async function reviewRow(reference: string, token: string) {
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  if (!/^[A-Za-z0-9_-]{16,40}$/.test(token)) return null;
+  const result = await db.query<{
+    booking_id: string; reference: string; model_name: string; customer_name: string; pickup_on: string; return_on: string;
+    status: ReviewInfo["status"]; rating: number | null; comment: string; display_name: string; booking_status: string;
+  }>(
+    `SELECT r.booking_id, b.reference, b.model_name, b.customer_name, b.pickup_on::text, b.return_on::text,
+            r.status, r.rating, r.comment, r.display_name, b.status AS booking_status
+     FROM reviews r JOIN bookings b ON b.id = r.booking_id
+     WHERE r.token = $1 AND upper(b.reference) = upper($2)`,
+    [token, reference.trim()],
+  );
+  return result.rows[0] || null;
+}
+
+// The customer's review page: only with the booking reference and its private token.
+export async function reviewInfo(reference: string, token: string): Promise<ReviewInfo | null> {
+  await ensureReady();
+  const row = await reviewRow(reference, token);
+  if (!row || row.booking_status === "cancelled") return null;
+  return {
+    reference: row.reference,
+    model: row.model_name,
+    pickup: row.pickup_on,
+    returnOn: row.return_on,
+    suggestedName: firstNameAndInitial(row.customer_name),
+    status: row.status,
+    started: row.pickup_on <= todayNairobi(),
+    rating: row.rating,
+    comment: row.status === "pending" || row.status === "approved" || row.status === "hidden" ? row.comment : "",
+    displayName: row.display_name,
+  };
+}
+
+export async function submitReview(
+  reference: string,
+  token: string,
+  raw: { action?: unknown; rating?: unknown; comment?: unknown; displayName?: unknown },
+) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const row = await reviewRow(reference, token);
+  if (!row || row.booking_status === "cancelled") throw staffError("This review link is not valid. Please check it, or contact us.", 404);
+  if (row.status === "approved" || row.status === "hidden") throw staffError("Thank you, your review has already been received.", 409);
+  if (raw.action === "skip") {
+    if (row.status === "requested") {
+      await db.query(`UPDATE reviews SET status = 'skipped' WHERE booking_id = $1 AND status = 'requested'`, [row.booking_id]);
+    }
+    return { ok: true, status: row.status === "requested" ? "skipped" : row.status };
+  }
+  if (row.pickup_on > todayNairobi()) throw staffError("You can leave a review once your hire has started.", 400);
+  const rating = Number(raw.rating);
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw staffError("Choose a star rating from 1 to 5.", 400);
+  const comment = String(raw.comment ?? "").replace(/\r/g, "").trim().slice(0, 1000);
+  const displayName = String(raw.displayName ?? "").replace(/\s+/g, " ").trim().slice(0, 60) || firstNameAndInitial(row.customer_name);
+  await db.query(
+    `UPDATE reviews SET status = 'pending', rating = $2, comment = $3, display_name = $4, submitted_at = now()
+     WHERE booking_id = $1`,
+    [row.booking_id, rating, comment, displayName],
+  );
+  return { ok: true, status: "pending" };
+}
+
+export type StaffReview = {
+  bookingId: string;
+  reference: string;
+  customerName: string;
+  phone: string;
+  model: string;
+  pickup: string;
+  returnOn: string;
+  status: ReviewInfo["status"];
+  rating: number | null;
+  comment: string;
+  displayName: string;
+  submittedAt: string;
+  decidedBy: string;
+};
+
+// Staff only: every review that has been written (pending, approved or hidden), newest first, and counts.
+export async function listReviews() {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const result = await db.query<{
+    booking_id: string; reference: string; customer_name: string; phone: string; model_name: string; pickup_on: string; return_on: string;
+    status: ReviewInfo["status"]; rating: number | null; comment: string; display_name: string; submitted_at: Date | null; decided_by: string;
+  }>(
+    `SELECT r.booking_id, b.reference, b.customer_name, b.phone, b.model_name, b.pickup_on::text, b.return_on::text,
+            r.status, r.rating, r.comment, r.display_name, r.submitted_at, r.decided_by
+     FROM reviews r JOIN bookings b ON b.id = r.booking_id
+     WHERE r.status IN ('pending', 'approved', 'hidden')
+     ORDER BY r.submitted_at DESC NULLS LAST
+     LIMIT 500`,
+  );
+  const counts = await db.query<{ status: string; n: number }>(`SELECT status, COUNT(*)::int AS n FROM reviews GROUP BY status`);
+  const byStatus: Record<string, number> = {};
+  for (const row of counts.rows) byStatus[row.status] = row.n;
+  return {
+    reviews: result.rows.map(
+      (row): StaffReview => ({
+        bookingId: row.booking_id,
+        reference: row.reference,
+        customerName: row.customer_name,
+        phone: row.phone,
+        model: row.model_name,
+        pickup: row.pickup_on,
+        returnOn: row.return_on,
+        status: row.status,
+        rating: row.rating,
+        comment: row.comment,
+        displayName: row.display_name,
+        submittedAt: row.submitted_at ? new Date(row.submitted_at).toISOString() : "",
+        decidedBy: row.decided_by,
+      }),
+    ),
+    counts: byStatus,
+  };
+}
+
+// Staff approve (shown on the website) or hide a review.
+export async function decideReview(bookingId: string, action: string, decidedBy: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const status = action === "approve" ? "approved" : action === "hide" ? "hidden" : "";
+  if (!status) throw staffError("That action is not available.", 400);
+  const result = await db.query(
+    `UPDATE reviews SET status = $2, decided_at = now(), decided_by = $3
+     WHERE booking_id = $1 AND status IN ('pending', 'approved', 'hidden')`,
+    [bookingId, status, decidedBy.slice(0, 60)],
+  );
+  if (result.rowCount !== 1) throw staffError("That review was not found.", 404);
+  return { ok: true, status };
+}
+
+// Staff get a booking's review link (made now for older bookings that have none).
+export async function reviewLinkFor(bookingId: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  if (!/^[0-9a-f-]{36}$/i.test(bookingId)) throw staffError("That booking was not found.", 404);
+  await db.query(`INSERT INTO reviews (booking_id, token) VALUES ($1, $2) ON CONFLICT (booking_id) DO NOTHING`, [bookingId, newReviewToken()]);
+  const result = await db.query<{ token: string; reference: string; status: string }>(
+    `SELECT r.token, b.reference, r.status FROM reviews r JOIN bookings b ON b.id = r.booking_id WHERE r.booking_id = $1`,
+    [bookingId],
+  );
+  const row = result.rows[0];
+  if (!row) throw staffError("That booking was not found.", 404);
+  return { path: "/review?ref=" + encodeURIComponent(row.reference) + "&t=" + encodeURIComponent(row.token), status: row.status };
+}
+
+// Public: approved reviews for the hire page (display name only, no booking details).
+export async function publishedReviews() {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const result = await db.query<{ rating: number; comment: string; display_name: string; model_name: string; submitted_at: Date }>(
+    `SELECT r.rating, r.comment, r.display_name, b.model_name, r.submitted_at
+     FROM reviews r JOIN bookings b ON b.id = r.booking_id
+     WHERE r.status = 'approved'
+     ORDER BY r.submitted_at DESC
+     LIMIT 12`,
+  );
+  const stats = await db.query<{ n: number; avg: string | null }>(
+    `SELECT COUNT(*)::int AS n, AVG(rating)::numeric(3,2)::text AS avg FROM reviews WHERE status = 'approved'`,
+  );
+  return {
+    count: stats.rows[0].n,
+    average: stats.rows[0].avg ? Number(stats.rows[0].avg) : null,
+    reviews: result.rows.map((row) => ({
+      rating: row.rating,
+      comment: row.comment,
+      name: row.display_name,
+      vehicle: row.model_name,
+      month: new Date(row.submitted_at).toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "Africa/Nairobi" }),
+    })),
+  };
+}
+
+// Mobile numbers are compared on their last 9 digits, so +254 7… and 07… match.
+export function phoneKey(phone: string) {
+  return phone.replace(/\D/g, "").slice(-9);
+}
+
+// The licence kept on file for a returning customer, if the email and mobile number both match and it is
+// less than LICENCE_ON_FILE_MONTHS old. Server only: the image is never sent back to the public site.
+export async function findLicenceOnFile(email: string, phone: string): Promise<LicenceOnFile | null> {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const cleanEmail = email.trim().toLowerCase();
+  const key = phoneKey(phone);
+  if (!cleanEmail || key.length < 9) return null;
+  const result = await db.query<{ licence: LicenceOnFile["licence"]; saved_at: Date; reference: string }>(
+    `SELECT licence, saved_at, reference FROM customer_licences
+     WHERE email = $1 AND phone_key = $2 AND saved_at > now() - ($3::int * interval '1 month')`,
+    [cleanEmail, key, LICENCE_ON_FILE_MONTHS],
+  );
+  const row = result.rows[0];
+  return row ? { licence: row.licence, savedAt: new Date(row.saved_at).toISOString(), reference: row.reference } : null;
+}
+
+export type LicenceOnFileSummary = { email: string; phoneKey: string; name: string; savedAt: string; reference: string; current: boolean };
+
+// Staff only: who has a licence on file (no images).
+export async function listLicencesOnFile(): Promise<LicenceOnFileSummary[]> {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const result = await db.query<{ email: string; phone_key: string; customer_name: string; saved_at: Date; reference: string; current: boolean }>(
+    `SELECT email, phone_key, customer_name, saved_at, reference,
+            saved_at > now() - ($1::int * interval '1 month') AS current
+     FROM customer_licences ORDER BY saved_at DESC`,
+    [LICENCE_ON_FILE_MONTHS],
+  );
+  return result.rows.map((row) => ({
+    email: row.email,
+    phoneKey: row.phone_key,
+    name: row.customer_name,
+    savedAt: new Date(row.saved_at).toISOString(),
+    reference: row.reference,
+    current: Boolean(row.current),
+  }));
+}
+
+// Staff remove a licence kept on file, for example when the customer asks. Bookings keep their own copy.
+export async function removeLicenceOnFile(email: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const result = await db.query(`DELETE FROM customer_licences WHERE email = $1`, [email.trim().toLowerCase()]);
+  if (result.rowCount !== 1) throw staffError("No licence on file for that email.", 404);
+  return { ok: true };
+}
+
+// Performance analysis (owners only): hire days and income per vehicle per day for one year, built from held and
+// paid bookings. Income is the hire and damage cover charge spread evenly over the hire days, net of 16% VAT
+// (the hire rates include VAT); delivery charges are left out. Days after today are not counted.
+export type PerformanceYear = {
+  year: number;
+  today: string;
+  vehicles: { id: string; plate: string; model: string; category: string; km: number | null }[];
+  // days[vehicleId][dayOfYear-1] = income net of VAT that day, or null when the vehicle was not out
+  days: Record<string, (number | null)[]>;
+};
+
+export async function performanceYear(year: number): Promise<PerformanceYear> {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const first = year + "-01-01";
+  const last = year + "-12-31";
+  const today = todayNairobi();
+  const result = await db.query<{ vehicle_id: string; pickup_on: string; return_on: string; days: number; hire_total: number; insurance_total: number }>(
+    `SELECT vehicle_id, pickup_on::text, return_on::text, days, hire_total, insurance_total
+     FROM bookings
+     WHERE status IN ('pending', 'confirmed') AND vehicle_id IS NOT NULL
+       AND pickup_on <= $2::date AND return_on >= $1::date`,
+    [first, last],
+  );
+  const records = await listVehicleRecords();
+  const length = (Date.UTC(year + 1, 0, 1) - Date.UTC(year, 0, 1)) / 864e5;
+  const days: PerformanceYear["days"] = {};
+  for (const vehicle of FLEET) days[vehicle.id] = Array.from({ length }, () => null);
+  const start = Date.UTC(year, 0, 1);
+  for (const row of result.rows) {
+    const list = days[row.vehicle_id];
+    if (!list) continue;
+    const n = Math.max(1, Number(row.days));
+    const perDay = (Number(row.hire_total) + Number(row.insurance_total)) / n / 1.16;
+    const end = exclusiveEnd(row.pickup_on, row.return_on);
+    for (let d = row.pickup_on; d < end; d = addDays(d, 1)) {
+      if (d > today || d < first || d > last) continue;
+      const index = Math.round((Date.parse(d + "T00:00:00Z") - start) / 864e5);
+      list[index] = Math.round(((list[index] || 0) + perDay) * 100) / 100;
+    }
+  }
+  return {
+    year,
+    today,
+    vehicles: FLEET.map((vehicle) => ({
+      id: vehicle.id,
+      plate: vehicle.plate,
+      model: vehicle.model,
+      category: vehicle.category,
+      km: records[vehicle.id]?.km ?? null,
+    })),
+    days,
+  };
+}
+
+export type VehicleRecord = {
+  year: number | null;
+  km: number | null;
+  notes: string;
+  updatedAt: string;
+  updatedBy: string;
+};
+
+// Staff only: the saved record for every vehicle, by vehicle id.
+export async function listVehicleRecords(): Promise<Record<string, VehicleRecord>> {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const result = await db.query<{
+    vehicle_id: string;
+    year: number | null;
+    odometer_km: number | null;
+    notes: string;
+    updated_at: Date;
+    updated_by: string;
+  }>(`SELECT vehicle_id, year, odometer_km, notes, updated_at, updated_by FROM vehicle_records`);
+  const out: Record<string, VehicleRecord> = {};
+  for (const row of result.rows) {
+    out[row.vehicle_id] = {
+      year: row.year === null ? null : Number(row.year),
+      km: row.odometer_km === null ? null : Number(row.odometer_km),
+      notes: row.notes || "",
+      updatedAt: new Date(row.updated_at).toISOString(),
+      updatedBy: row.updated_by || "",
+    };
+  }
+  return out;
+}
+
+// Staff update a vehicle record on the desk. Saving also marks the vehicle as checked after its last return.
+export async function updateVehicleRecord(id: string, raw: { year?: unknown; km?: unknown; notes?: unknown }, updatedBy: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  if (!FLEET.some((vehicle) => vehicle.id === id)) throw staffError("That vehicle was not found.", 404);
+  const whole = (value: unknown) => {
+    const text = String(value ?? "").trim().replace(/[,\s]/g, "");
+    if (!text) return null;
+    return /^\d+$/.test(text) ? Number(text) : NaN;
+  };
+  const year = whole(raw.year);
+  const thisYear = Number(todayNairobi().slice(0, 4));
+  if (year !== null && (Number.isNaN(year) || year < 1950 || year > thisYear + 1)) {
+    throw staffError("Enter the year as four digits, for example 2012, or leave it blank.", 400);
+  }
+  const km = whole(raw.km);
+  if (km !== null && (Number.isNaN(km) || km > 3_000_000)) {
+    throw staffError("Enter the odometer reading in whole kilometres, or leave it blank.", 400);
+  }
+  const notes = String(raw.notes ?? "").replace(/\r/g, "").trim().slice(0, 1000);
+  await db.query(
+    `INSERT INTO vehicle_records (vehicle_id, year, odometer_km, notes, updated_at, updated_by)
+     VALUES ($1, $2, $3, $4, now(), $5)
+     ON CONFLICT (vehicle_id) DO UPDATE SET
+       year = EXCLUDED.year,
+       odometer_km = EXCLUDED.odometer_km,
+       notes = EXCLUDED.notes,
+       updated_at = now(),
+       updated_by = EXCLUDED.updated_by`,
+    [id, year, km, notes, updatedBy.slice(0, 60)],
+  );
+  return { ok: true };
+}
+
 // Staff only: the licence photos, drivers and signature saved with a booking.
 export async function loadDocuments(id: string): Promise<StoredDocuments | null> {
   await ensureReady();
   const db = pool();
   if (!db) throw new Error("DATABASE_URL is not set");
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
-  const result = await db.query<{ drivers: StoredDocuments["drivers"]; signature: StoredDocuments["signature"]; agreement_version: string; signed_at: Date }>(
-    `SELECT drivers, signature, agreement_version, signed_at FROM booking_documents WHERE booking_id = $1`,
+  const result = await db.query<{
+    drivers: StoredDocuments["drivers"];
+    signature: StoredDocuments["signature"];
+    agreement_version: string;
+    signed_at: Date;
+    schedule: StoredDocuments["schedule"];
+  }>(
+    `SELECT drivers, signature, agreement_version, signed_at, schedule FROM booking_documents WHERE booking_id = $1`,
     [id],
   );
   const row = result.rows[0];
   if (!row) return null;
-  return { drivers: row.drivers, signature: row.signature, agreementVersion: row.agreement_version, signedAt: new Date(row.signed_at).toISOString() };
+  return {
+    drivers: row.drivers,
+    signature: row.signature,
+    agreementVersion: row.agreement_version,
+    signedAt: new Date(row.signed_at).toISOString(),
+    schedule: row.schedule || null,
+  };
 }
 
 export async function staffReady() {

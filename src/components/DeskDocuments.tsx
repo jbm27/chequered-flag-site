@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { buildBookingPdf, downloadPdf, type BookingPdfData } from "../lib/bookingPdf";
-import { CONTACT } from "../lib/contact";
+import { buildBookingPdf, downloadPdf, loadPdfLogo, type BookingPdfData } from "../lib/bookingPdf";
+import { COMPANY, CONTACT } from "../lib/contact";
 import { AGREEMENT_TEXT, AGREEMENT_TITLE, AGREEMENT_VERSION, type StoredDocuments } from "../lib/documents";
 import { balanceOf, formatDay, ksh, type StaffBooking } from "../lib/hire";
 
@@ -15,6 +15,10 @@ const STATUS: Record<StaffBooking["status"], string> = {
   quote: "Delivery quote – vehicle not held yet",
   cancelled: "Cancelled",
 };
+
+function dayOnly(iso: string) {
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Africa/Nairobi" });
+}
 
 function stamp(iso: string) {
   return new Date(iso).toLocaleString("en-GB", {
@@ -29,22 +33,22 @@ function stamp(iso: string) {
 
 function pdfData(booking: StaffBooking, docs: StoredDocuments): BookingPdfData {
   const days = booking.days === 1 ? "1 day" : booking.days + " days";
-  const costs = [
-    { label: "Hire, " + days + " × " + ksh(booking.days ? booking.hireTotal / booking.days : 0), amount: ksh(booking.hireTotal) },
+  const perDay = (amount: number) => ksh(booking.days ? amount / booking.days : 0);
+  const costs: BookingPdfData["costs"] = [
+    { label: "Vehicle hire: " + booking.model, qty: days, unit: perDay(booking.hireTotal), amount: ksh(booking.hireTotal) },
   ];
-  if (booking.insuranceTotal) costs.push({ label: "Damage cover, " + days, amount: ksh(booking.insuranceTotal) });
+  if (booking.insuranceTotal) {
+    costs.push({ label: "Damage cover", qty: days, unit: perDay(booking.insuranceTotal), amount: ksh(booking.insuranceTotal) });
+  }
   if (booking.deliverySummary && !/^collect/i.test(booking.deliverySummary)) {
     costs.push({
-      label: "Delivery",
+      label: /collected from/i.test(booking.deliverySummary) ? "Delivery and collection" : "Delivery",
+      qty: "1",
       amount: booking.deliveryManual || booking.deliveryFee === null ? "To be set" : booking.deliveryFee ? ksh(booking.deliveryFee) : "Free",
     });
   }
   const sameText = docs.agreementVersion === AGREEMENT_VERSION;
-  const partPaid = booking.amountPaid > 0 && balanceOf(booking) > 0;
-  if (partPaid) {
-    costs.push({ label: "Total", amount: ksh(booking.total) + (booking.deliveryManual ? " plus delivery" : "") });
-    costs.push({ label: "Paid so far", amount: "- " + ksh(booking.amountPaid) });
-  }
+  const plusDelivery = booking.deliveryManual ? " plus delivery" : "";
   return {
     reference: booking.reference,
     status: STATUS[booking.status],
@@ -55,18 +59,31 @@ function pdfData(booking: StaffBooking, docs: StoredDocuments): BookingPdfData {
     daysText: days,
     location: [booking.deliverySummary || booking.location, ...booking.deliveryDetail.split("\n")].filter(Boolean),
     costs,
-    totalLabel: partPaid ? "Balance due" : booking.status === "confirmed" ? "Paid in full" : "Due in full",
-    total: (partPaid ? ksh(balanceOf(booking)) : ksh(booking.total)) + (booking.deliveryManual ? " plus delivery" : ""),
+    totalLabel: booking.status === "confirmed" && balanceOf(booking) === 0 ? "Paid in full" : "Due in full",
+    total: ksh(booking.total) + plusDelivery,
+    paid: ksh(booking.amountPaid),
+    balance: ksh(balanceOf(booking)) + plusDelivery,
     customer: { name: booking.customerName, phone: booking.phone, email: booking.email },
-    drivers: docs.drivers,
+    drivers: docs.drivers.map((driver) =>
+      driver.fromFile
+        ? {
+            ...driver,
+            licenceNote:
+              "Reused from the licence on file (saved " +
+              (driver.onFileSince ? dayOnly(driver.onFileSince) : "earlier") +
+              "). Check it at handover.",
+          }
+        : driver,
+    ),
     signature: docs.signature,
     signedAt: stamp(docs.signedAt),
     agreementTitle: AGREEMENT_TITLE,
     agreementVersion: docs.agreementVersion,
+    schedule: docs.schedule || null,
     agreementText: sameText
       ? AGREEMENT_TEXT
       : ["The customer signed version " + docs.agreementVersion + " of the hire agreement. That wording has since been replaced on the website."],
-    footer: "Chequered Flag · " + CONTACT.locationShort + " · " + CONTACT.phoneDisplay,
+    footer: COMPANY.name + " Ltd · " + COMPANY.postal + " · Tel " + CONTACT.phoneDisplay + " · " + CONTACT.email,
   };
 }
 
@@ -109,6 +126,12 @@ export default function DeskDocuments({ booking }: { booking: StaffBooking }) {
               <div className="min-w-0">
                 <strong className="block">{driver.name}</strong>
                 <span className="text-[#595959]">{index === 0 ? "Main driver" : "Driver " + (index + 1)} · {driver.phone}</span>
+                {driver.fromFile && (
+                  <span className="mt-1 block text-xs font-bold text-[#5f4400]">
+                    Licence on file{driver.onFileSince ? " (saved " + dayOnly(driver.onFileSince) + ")" : ""}: check it at
+                    handover
+                  </span>
+                )}
               </div>
             </div>
           ))}
@@ -124,7 +147,12 @@ export default function DeskDocuments({ booking }: { booking: StaffBooking }) {
           </div>
           <button
             type="button"
-            onClick={() => downloadPdf(buildBookingPdf(pdfData(booking, docs)), "Chequered-Flag-" + booking.reference + ".pdf")}
+            onClick={async () =>
+              downloadPdf(
+                buildBookingPdf({ ...pdfData(booking, docs), logo: await loadPdfLogo() }),
+                "Chequered-Flag-" + booking.reference + ".pdf",
+              )
+            }
             className="min-h-[40px] justify-self-start rounded-lg bg-[#171717] px-4 text-sm font-bold text-white"
           >
             Download booking PDF

@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { canSeePerformance } from "../../../../lib/access";
 import {
   databaseConfigured,
   httpStatus,
@@ -33,7 +34,7 @@ export async function GET() {
     const ready = await staffReady();
     const staff = await staffFromToken(cookies().get(COOKIE)?.value);
     return NextResponse.json(
-      { authenticated: Boolean(staff), ready, username: staff?.username || "" },
+      { authenticated: Boolean(staff), ready, username: staff?.username || "", performance: canSeePerformance(staff?.username) },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

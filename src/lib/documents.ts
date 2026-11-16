@@ -1,3 +1,5 @@
+import { COMPANY, CONTACT } from "./contact";
+
 // Driver licences, extra drivers and the signed hire agreement for a website booking.
 // Used by the booking page (browser), the booking API (server) and the desk.
 //
@@ -9,89 +11,169 @@ export const MAX_DRIVERS = 3; // the main driver plus up to two extra drivers
 export const MAX_IMAGE_BYTES = 650_000; // per image, after the browser has shrunk it
 export const MAX_IMAGE_SIDE = 4000;
 
-// The hire agreement wording shown in the scrolling window and printed in the PDF.
-// Supplied by Chequered Flag (Hire Agreement, 3 pages), copied as written. Change AGREEMENT_VERSION whenever
-// the text changes, so each booking records which version the customer signed.
-// Layout: a leading tab indents a line under its clause; two tabs indent a lettered item.
-export const AGREEMENT_VERSION = "hire-agreement-2026-11";
-export const AGREEMENT_TITLE = "Hire Agreement";
-export const AGREEMENT_TEXT = [
-  "The company named overleaf agrees to let on hire whose name and address appears overleaf, the motor vehicle " +
-    "described overleaf (with all tyres, spares and accessories carried with it herein after called \"the vehicle\") " +
-    "subject to all terms and provisions here contained in addition to those set overleaf.",
-  "1. The vehicle is and shall remain the property of the company and the hirer shall return the same in the same " +
-    "order and condition as when received, except only ordinary wear and tear to the place and date as set out " +
-    "overleaf or other place and such other place and such other time as the company may direct.",
-  "2. The vehicle shall not be driven by any other than:",
-  "\t\t(a) the hirer/driver who should be above 25 years",
-  "\t\t(b) any other person whom the company shall in writing been provided with such information regarding him/her " +
-    "and undertaking from him/her as company shall require.",
-  "\tThe hirer liability to company here under shall not be avoided by whomsoever the vehicle may from time to time be driven.",
-  "3. Under no circumstance shall the vehicle be used, operated or driven:",
-  "\t\t(a) by any person not in possession of a valid driving licence recognised in this country.",
-  "\t\t(b) for the transport of persons or goods for hirer or reward,",
-  "\t\t(c) by any person who has given the company false information whatsoever.",
-  "\t\t(c) in any race, rally, speed test or contest.",
-  "\t\t(d) to propel or tow any vehicle or trailer.",
-  "4. All expenses incurred while recovering the vehicle will be the responsibility of the hirer.",
-  "5. The hirer will pay to the company on demand all charges at company's standard rates and other monies payable " +
-    "in accordance with the agreement.",
-  "6. (a) The hirer shall reimburse the company with cost of all loss of damage to the vehicle or equipment not " +
-    "attributable to wear and tear subject however to a maximum sum of Kenya shillings \"90,000\" reading Ninety " +
-    "Thousand Only.",
-  "\t(b) Provided however that any such damage occurs while the vehicle is being used, operated or driven or in " +
-    "control of any person in breach of any terms of this agreement with all accidental costs and expenses.",
-  "\tThe hirer liability to the company, shall not be prejudiced or reduced by reason of any indemnity which himself " +
-    "may be entitled from any third party.",
-  "7. The company shall insure that vehicle so as to comply with the law relating to compulsory insurances of motor " +
-    "vehicle against such other risks, if any as the company thinks fit but the rights of the parties shall be " +
-    "affected by any rights of recovery which the company may enjoy under such insurance.",
-  "\tNB: Vehicle damage or accident caused by riots or natural calamities are not covered by insurance. Hence the " +
-    "hire will meet all the cost so caused on the vehicle.",
-  "8. The company shall not be liable to meet any claim in respect of death or a bodily injury to persons being " +
-    "carried in or upon entering or getting onto or alighting from the vehicle at the time of the occurrence of the " +
-    "event out of which such claims arise whether or not such occurrence was caused by or related to the negligence " +
-    "of the company or its servants or agents.",
-  "9. The distance over which the vehicle shall be operated under this agreement shall be conclusively determined by " +
-    "reading of a a standard distance recording device to the vehicles at the commencement of hiring.",
-  "10. Without prejudice to his other liabilities above, the hirer shall be solely liable and responsible to fines, " +
-    "penalties and forfeiture imposed by reason of breach by him or any other person in control of the vehicle any " +
-    "law bye law or other regulations if any competent authority and the hirer shall on completion of the hire hand " +
-    "over to the company all demand, sermons, process and notifications in connection to the use of vehicle and " +
-    "notifications of any penalties and charges incurred by the hirer during the period of hire.",
-  "11. The hirer shall not during the hiring or thereafter do or permit attempt to do any of the following action:-",
-  "\t\t(a) Sell, pledge, charge or otherwise part with the possession of the vehicle otherwise than to the company.",
-  "\t\t(b) Make or cause or permit to be made any repair adjustment or alteration of the vehicle or any part thereof " +
-    "without prior consent of the company.",
-  "\t\t(c) Any act which might prejudice or endanger the company's absolute title to the vehicle.",
-  "\t\t(d) The vehicle is fitted with a speed clock. If it is tampered with, a minimum of 500kms will be charged per day.",
-  "\t\t(e) Transmits drugs of any nature alcohol or any narcotic material prohibited by the laws of Kenya.",
-  "\t\t(f) Under all circumstances the hirer is supposed to make sure the hired vehicle is parked in safe and secure place.",
-  "12. No waiver or variation of the terms hereof shall be binding on the company unless authorised.",
-  "13. It is understood and agreed that any deputes and for claims arising under this contract shall be subject to " +
-    "the sole jurisdiction of the courts of Kenya.",
-  "14. Windscreen and tyre busting is the responsibly of the hirer.",
-  "\t(a) Cancellation. The company shall deduct 75% of the total cost as cancellation fee in case the hirer declines " +
-    "to use the vehicle as agreed based on the car contract.",
-  "15. The company shall not be responsible for the following:-",
-  "\t\t(a) Delay for refunds due to cancellation of the bookings.",
-  "\t\t(b) For delays due to breakdown of vehicles or cancellations due to shortening of ones holidays while in the country.",
-  "\tNeither shall the company be held responsible for flight delay, train departures or accommodation at hotels due to clause",
-  "\t\t(a) as stated above.",
-  "\t\t(b) The company must be notified 14 days in advance to make arrangement for refund without any penalties whatsoever.",
-  "16. Extra fuel is non-refundable whatsoever.",
+// The hire agreement shown in the scrolling window at checkout and printed in the booking PDF.
+// Source: "Chequered Flag Online Hire Agreement (Revised)" supplied by Homer, Nov 2026. Section A is the Booking
+// Schedule, filled in for each booking (see bookingSchedule below); clauses 1-14 and section B are copied as written.
+// Section C (platform implementation notes) and the legislation list are internal and are not shown to customers.
+// The four bracketed blanks in the draft are filled with the website contact details and the company P.O Box.
+// Change AGREEMENT_VERSION whenever the text changes, so each booking records which version the customer signed.
+// Layout: "# " starts a heading; "{{SCHEDULE}}" is where the Booking Schedule table goes.
+export const AGREEMENT_VERSION = "online-hire-agreement-2026-11-revised";
+export const AGREEMENT_TITLE = "Self-drive vehicle hire agreement";
+export const AGREEMENT_TEXT: string[] = [
+  "Contracting company: The Chequered Flag Ltd. (“Company”, “we”, “us”). Registered address: " + COMPANY.postal + ". Booking enquiries and incident contact: " + CONTACT.phoneDisplay + ", " + CONTACT.email + ".",
+  "This agreement consists of the Booking Schedule, these Rental Terms and the Vehicle Handover/Return Records.",
+  "# A. Booking Schedule",
+  "{{SCHEDULE}}",
+  "Vehicle-class mapping (not editable by the customer): saloon → KES 90,000; Nissan X-Trail → KES 150,000; Toyota Prado → KES 200,000. Any other class must be configured and disclosed before payment; no automatic default is permitted.",
+  "# 1. Agreement and booking",
+  "1.1 The Company hires the vehicle identified in the Booking Schedule (or an agreed equivalent or better replacement) to the Hirer for the stated period, subject to these Terms. A booking is confirmed only once full payment has been received and the Company has issued confirmation.",
+  "1.2 The Company shall show the full price, cancellation policy, applicable damage liability limit, fuel and mileage policy, and material restrictions before the Hirer pays. The Hirer must be able to download or receive a durable copy of the accepted agreement.",
+  "1.3 The vehicle remains the property of the Company or its lawful owner. No ownership rights pass to the Hirer. Any change to the booking after confirmation requires both parties’ agreement and a revised confirmation.",
+  "# 2. Eligibility and authorised drivers",
+  "2.1 Every driver must be at least 25 years old, hold a valid licence recognised in Kenya for the vehicle class and satisfy the Company’s reasonable identity and licence checks. The Company may refuse handover if the checks fail and shall apply any cancellation/no-show charges only as permitted by applicable law.",
+  "2.2 Only drivers specifically listed in the Booking Schedule or subsequently authorised by the Company in writing may drive. The Hirer remains responsible for ensuring that authorised drivers comply with this agreement.",
+  "2.3 The Hirer confirms that information supplied is accurate and shall promptly disclose relevant restrictions, disqualifications or circumstances that legally prevent any proposed driver from operating the vehicle. The Company will not routinely request sensitive medical details unless necessary and lawfully justified.",
+  "# 3. Payments, rental periods and deposits",
+  "3.1 The Total Booking Price is due in full when the booking is placed. The booking platform shall show whether stated prices include VAT and any other mandatory charges; no mandatory booking charges may be added after payment without express agreement.",
+  "3.2 Rental periods are measured in consecutive 24-hour blocks beginning at the agreed collection time. A late-return grace period of 59 minutes applies; thereafter an additional rental day may be charged at the rate disclosed in the Booking Schedule, unless otherwise agreed. A late return must be reported promptly and does not extend insurance or permission to drive automatically.",
+  "3.3 A security deposit, where expressly specified, is separate from the rental payment and from the damage liability limit. The Company may deduct only documented sums properly owed under this agreement, with an itemised explanation. The undisputed balance shall be released or refunded within 7 business days after vehicle return, except where a documented pending claim reasonably requires a longer hold, which must be explained to the Hirer. Bank or card processing times may vary.",
+  "3.4 Parking charges, traffic fines, tolls, fuel shortfalls, excess mileage and agreed optional extras may be payable separately where applicable and supported by records; they do not increase the cap for vehicle damage in clause 7.",
+  "# 4. Cancellations and refunds",
+  "4.1 The Hirer may cancel using the booking platform or the Company’s published contact channel. The effective cancellation time is when the cancellation request is received and recorded (East Africa Time, UTC+3).",
+  "4.2 If cancellation is received at least 14 × 24 hours before the scheduled collection time, the Company shall refund 100% of the Total Booking Price.",
+  "4.3 If cancellation is received less than 14 × 24 hours before scheduled collection, but before collection, the Company shall retain a cancellation fee of 20% of the Total Booking Price and refund the remaining 80%. This also applies to a no-show unless mandatory law requires a different result.",
+  "4.4 Once the rental has commenced, early return or unused days do not automatically entitle the Hirer to a refund, except where expressly agreed, required by law or due under clause 8 for Company-attributable unavailability.",
+  "4.5 Approved refunds shall be initiated to the original payment method within 7 business days after the cancellation or refund decision, subject to payment-provider settlement times. If the Company cancels or cannot supply the booked or an acceptable equivalent vehicle, the Hirer may reject a substitute and receive a full refund of amounts paid for the affected booking. Statutory cancellation and consumer rights prevail over this clause.",
+  "# 5. Collection, inspection and pre-existing damage",
+  "5.1 At collection, the Company shall make the vehicle available for a reasonable visual inspection and provide the Hirer with an opportunity to view or record its condition, fuel level, odometer reading and supplied accessories.",
+  "5.2 The Hirer has primary responsibility to inspect and report any pre-existing visible damage, missing accessories or discrepancies BEFORE driving the vehicle away. The Hirer should submit the report through the digital handover form, with timestamped photographs showing the relevant damage and registration number. If the system is unavailable, the Hirer must immediately notify the Company by its published contact channel and preserve photographic evidence.",
+  "5.3 Damage recorded by the Company before collection, or reported by the Hirer at handover before driving, shall not be charged to the Hirer. A failure to report visible damage at handover may be treated as relevant evidence of its absence at collection, but is not conclusive proof that the Hirer caused it. Neither party may charge the other for pre-existing damage demonstrably supported by reliable evidence.",
+  "5.4 The Company may take its own timestamped inspection photographs and shall provide the Hirer access to the agreed condition record. The Hirer must not drive away if the vehicle appears unsafe; the Company shall address the safety issue or apply clause 8.",
+  "# 6. Permitted and prohibited use",
+  "6.1 The vehicle may be used only within Kenya, on roads or tracks reasonably suitable for that vehicle and consistent with applicable insurance terms. No travel outside Kenya without advance written Company consent and confirmed insurance cover.",
+  "6.2 The vehicle shall not be used by an unauthorised or unlicensed driver; for racing, rallies or speed trials; for hire/reward or towing without permission; while a driver is impaired by alcohol or drugs; while overloaded; or in a reckless, unlawful or deliberately damaging manner. The Hirer must secure the vehicle and keys reasonably when unattended.",
+  "6.3 The Hirer must not sell, pledge, sub-hire or materially modify the vehicle; tamper with the odometer or telematics; or authorise non-emergency repairs without the Company’s consent. The Hirer shall immediately notify the Company if the vehicle cannot safely continue.",
+  "# 7. Vehicle damage, theft, insurance and the liability cap",
+  "7.1 For accidental loss or damage to the hired vehicle during the rental, including collision, tyre blowout, wheel, suspension, windscreen or underbody damage, and customer-attributable breakdowns caused by misuse, impact, negligent driving or a road hazard, the Hirer is responsible for the Company’s reasonable, evidenced vehicle repair/replacement and related recovery costs, UP TO the single aggregate Damage Liability Limit stated in the Booking Schedule for that hire.",
+  "7.2 The Damage Liability Limit is KES 90,000 for a saloon, KES 150,000 for an X-Trail and KES 200,000 for a Prado. It applies in total across all customer-attributable vehicle-damage incidents during the same hire, not separately per incident or per component. Recovery/towing attributable to that vehicle damage counts within, not on top of, the cap. The cap is not an upfront fee, deductible automatically due, or authorisation to charge without evidence of loss.",
+  "7.3 The Hirer does not pay for genuine mechanical/electrical breakdown, latent defects or ordinary wear and tear not caused or materially contributed to by the Hirer or an authorised driver. In a mixed-cause case, charges shall reflect reasonably evidenced customer-attributable loss and remain subject to the cap.",
+  "7.4 The Company shall maintain motor insurance as required by Kenyan law and ensure that any represented self-drive and vehicle-damage protections are consistent with the actual policy. Nothing in this agreement purports to limit third-party legal rights or compulsory insurance protections. The Company must disclose material insurance restrictions relevant to the intended hire before payment.",
+  "7.5 The vehicle-damage cap does not limit properly due rental charges, refuelling, tolls, fines or other independent debts. It does not limit liability for proven fraud, deliberate damage or other liability that cannot lawfully be limited, but no exclusion of the cap may be asserted merely because an accident occurred or on the basis of an undisclosed insurance term. Any proposed exceptions to the cap must be clearly disclosed before booking and checked against the insurer’s policy.",
+  "7.6 The Company shall provide a written, itemised statement and supporting evidence for any damage claim, account for salvage/insurance recoveries where relevant so there is no double recovery, and allow the Hirer a reasonable opportunity to dispute it.",
+  "# 8. Breakdowns, roadside assistance and unavailability",
+  "8.1 If the vehicle becomes unsafe, fails or breaks down, the Hirer must stop safely, contact the Company promptly, follow reasonable safety instructions and not arrange non-emergency repairs or recovery without approval. Emergency measures to protect people or prevent immediate further loss are permitted.",
+  "8.2 Where breakdown or loss of use results from customer-attributable accident, impact, tyre blowout, misuse or negligent driving, the Hirer bears reasonable evidenced repair and recovery costs subject to clause 7. The Company will assist with arranging recovery; a replacement vehicle is not guaranteed and any further hire will require agreement.",
+  "8.3 Where breakdown is mechanical or electrical and not attributable to the Hirer, the Company shall pay the reasonable recovery and repair costs and use reasonable efforts to provide a suitable replacement as promptly as practicable, at no extra rental charge.",
+  "8.4 If a Company-attributable fault makes the car unusable and no suitable replacement is supplied within a reasonable period, the Hirer is entitled to a pro-rata refund for the unusable rental period, including the remaining booking period if the hire must end. The Company is not liable for indirect or consequential losses such as missed flights, accommodation or lost earnings, except to the extent such liability cannot lawfully be excluded or the loss results from proven negligence or misconduct for which exclusion would be unlawful.",
+  "8.5 The parties shall preserve relevant evidence (photographs, incident details, diagnostic findings and repair records). The Company will not assume driver fault solely because the defect arose during the hire.",
+  "# 9. Accidents, theft and incident reporting",
+  "9.1 For any accident, theft, vandalism or serious damage, the Hirer must first attend to personal safety and seek emergency help. The Hirer must notify the Company as soon as reasonably practicable, report to police where required, take reasonable photographs and obtain third-party details where safe and lawful.",
+  "9.2 The Hirer shall cooperate reasonably with insurers, police and the Company, provide truthful information, and shall not admit legal liability or settle a claim on the Company’s behalf without authorisation. This does not prevent accurate factual statements or necessary emergency action.",
+  "9.3 The Hirer must take reasonable steps to safeguard the vehicle and keys and minimise further loss. Costs and liabilities remain subject to clause 7 where they concern damage to the hired vehicle.",
+  "# 10. Fuel, mileage, accessories and return",
+  "10.1 The fuel level and odometer reading at collection shall be recorded in the handover record. The Hirer shall return the vehicle with the fuel level specified in the Booking Schedule; evidenced shortfalls may be charged at the disclosed refuelling rate. No credit for extra fuel unless agreed in writing.",
+  "10.2 Mileage limits and excess rates, if any, must appear in the Booking Schedule. Unexplained odometer anomalies shall be investigated using reliable evidence; no arbitrary mileage penalty applies merely because a device fails.",
+  "10.3 The Hirer shall return supplied keys, tools and accessories listed in the handover report. Reasonable evidenced replacement costs for lost items may be charged, subject to any applicable legal restrictions; damage to accessories arising from an accident is included in the clause 7 cap.",
+  "10.4 Return condition, fuel, mileage and accessories shall be documented promptly using timestamped photographs. The Company shall notify the Hirer of any proposed damage charges with supporting evidence within a reasonable period, normally within 5 business days after return, without prejudice to later-discovered concealed damage evidenced as rental-related.",
+  "# 11. Fines, enforcement and lawful disclosure",
+  "11.1 The Hirer is responsible for traffic, parking, toll and other lawful charges arising from their use of the vehicle during the rental, except those caused by the Company. The Company may provide driver details to lawful authorities, subject to data-protection law.",
+  "11.2 Any separately disclosed, reasonable administration fee for processing such notices must appear in the Booking Schedule or price list accepted before payment.",
+  "# 12. Privacy, identification and vehicle tracking",
+  "12.1 The Company is a data controller in relation to personal information collected for the booking. It may process name, contact details, identity and driving-licence verification, authorised driver information, payment/transaction references, booking records, communications, vehicle handover photographs, incident reports and, if installed and disclosed, vehicle-location/telematics data.",
+  "12.2 Processing purposes include booking performance, identity and driver eligibility checks, payment and deposit administration, vehicle protection and recovery, safety, disputes, insurance claims, fraud prevention and compliance with law. The Company shall identify the applicable legal basis for each purpose in a separate accessible Privacy Notice; marketing requires a separate lawful basis and choice, not bundled compulsory consent.",
+  "12.3 Before collecting data, the Company shall provide a Privacy Notice explaining what is collected, why, whether it is compulsory, who receives it (such as payment processors, identity-verification providers, insurers, vehicle recovery operators, IT providers and lawful authorities), international transfers and safeguards where applicable, retention periods or criteria, security measures and data-subject rights.",
+  "12.4 The Company shall apply appropriate access controls, security and limited retention, and shall not store raw card numbers or CVVs in its booking system. Identity and licence photographs must be accessible only to authorised staff/providers and deleted or anonymised when no longer necessary for legal, insurance or legitimate retention needs.",
+  "12.5 Where GPS/telematics are fitted, the Company shall disclose that fact before booking, together with the purposes (for example theft recovery, fleet safety, location of a stranded vehicle or authorised geofencing), access controls, retention and any applicable monitoring limits. GPS monitoring shall not be used covertly for unrelated purposes.",
+  "12.6 Hirers and authorised drivers may request access, correction, objection or deletion where applicable, and may contact " + CONTACT.email + " or lodge a complaint with Kenya’s Office of the Data Protection Commissioner. The booking platform must provide the full Privacy Notice separately; these short terms do not replace it.",
+  "# 13. Liability, disputes and governing law",
+  "13.1 Neither party excludes or restricts liability that cannot lawfully be excluded, including statutory consumer rights and liability arising from its own negligence where exclusion would be unlawful. Any contractual limitation shall be read subject to applicable Kenyan law.",
+  "13.2 The Hirer should first send a complaint or disputed charge to " + CONTACT.email + " or " + CONTACT.phoneDisplay + ". The Company shall acknowledge and investigate it reasonably, provide relevant records and endeavour to resolve it within 14 business days. This does not restrict lawful recourse to regulators or the courts.",
+  "13.3 Kenyan law governs this agreement. The courts of Kenya have jurisdiction, without depriving a consumer of any mandatory statutory rights. If a provision is unenforceable, the remainder remains effective to the extent lawful.",
+  "13.4 Changes to these Terms after payment do not apply to an existing confirmed booking unless the Hirer expressly agrees or the change is legally required and properly notified.",
+  "# 14. Electronic acceptance and recordkeeping",
+  "14.1 By selecting the clearly labelled “I agree to the Rental Terms” control and confirming payment, the Hirer accepts the Booking Schedule and these Terms. Acceptance must not be pre-ticked; the booking platform shall record the contract version, exact values shown (including the vehicle-damage limit and cancellation terms), timestamp and relevant acceptance audit information.",
+  "14.2 A copy of the completed agreement and payment confirmation shall be emailed or made available for download. Any material later amendments must be separately accepted. The handover condition report is supplementary and is completed when the vehicle is collected.",
+  "14.3 If any conflicting information appears between the Booking Schedule and these standard terms, the more specific clearly disclosed and mutually agreed Booking Schedule entry prevails, except where inconsistent with mandatory law.",
+  "# B. Digital Handover / Return Record",
+  "Complete at physical handover. The customer submits or confirms the initial condition report before driving away.",
+  "Customer-facing confirmation: “I have inspected the vehicle before driving away, had a reasonable opportunity to report visible pre-existing damage, and submitted any exceptions through the handover process. I understand that this record may be considered when assessing later damage claims.”",
 ];
 
 // How far a line of the agreement is indented (0, 1 or 2) and its text without the layout tabs.
-export function agreementLine(line: string): { level: number; text: string } {
+export function agreementLine(line: string): { kind: "heading" | "schedule" | "text"; level: number; text: string } {
+  if (line === "{{SCHEDULE}}") return { kind: "schedule", level: 0, text: "" };
+  if (line.startsWith("# ")) return { kind: "heading", level: 0, text: line.slice(2) };
   const match = /^\t*/.exec(line);
   const level = Math.min(2, match ? match[0].length : 0);
-  return { level, text: line.slice(level) };
+  return { kind: "text", level, text: line.slice(level) };
+}
+
+// Damage Liability Limit per hire (clause 7.2): saloon KES 90,000, Nissan X-Trail KES 150,000, Toyota Prado
+// KES 200,000. The agreement says any other class must be set before payment, with no default, so a vehicle
+// without a limit (for now the Land Cruiser) cannot be booked online until one is added here.
+export function damageLimitFor(model: string, category?: string): number | null {
+  if (/prado/i.test(model)) return 200_000;
+  if (/x-?trail/i.test(model)) return 150_000;
+  if (category === "saloon") return 90_000;
+  return null;
+}
+
+// Mileage, as on the hire page.
+export function mileageFor(category?: string) {
+  return category === "saloon" ? "100 km a day included, then KSh 15 per extra km" : "Unlimited";
+}
+
+// Cancellation terms (clause 4), shown before payment.
+export const CANCELLATION_SUMMARY =
+  "Cancel at least 14 days (14 × 24 hours) before collection for a full refund. Cancellations after that, and no-shows, keep 20% of the total booking price as a cancellation fee and refund 80%.";
+
+export const FUEL_POLICY = "Return the vehicle with the fuel level it had at collection. No credit for extra fuel unless agreed in writing.";
+
+// The values a customer saw and agreed to, kept with the booking (clause 14.1).
+export type ScheduleValues = {
+  reference: string; // "" until the booking is submitted
+  hirer: { name: string; email: string; phone: string };
+  verification: string;
+  drivers: string[];
+  vehicle: string;
+  collect: string;
+  ret: string;
+  price: string;
+  damageLimit: number | null;
+  mileage: string;
+};
+
+// Section A, the Booking Schedule, as label and value rows.
+export function bookingSchedule(v: ScheduleValues): [string, string][] {
+  const kes = (n: number) => "KES " + n.toLocaleString("en-US");
+  return [
+    ["Booking reference / contract version", (v.reference || "Given when you submit the booking") + " | " + AGREEMENT_VERSION],
+    ["Hirer / contact", [v.hirer.name, v.hirer.email, v.hirer.phone].filter(Boolean).join(" | ")],
+    ["Identity / licence verification", v.verification],
+    ["Authorised drivers", v.drivers.filter(Boolean).join(", ")],
+    ["Vehicle", v.vehicle + " | registration given at handover"],
+    ["Collect / return", v.collect + " → " + v.ret],
+    ["Booking price", v.price],
+    ["Payment", "100% of Total Booking Price payable upon booking confirmation"],
+    ["Damage liability limit", v.damageLimit ? kes(v.damageLimit) + " — per hire, subject to clause 7" : "Not set: call us to book this vehicle"],
+    ["Mileage", v.mileage],
+    ["Security deposit, if applicable", "None"],
+    ["Fuel / special restrictions", FUEL_POLICY],
+    ["Cancellation", CANCELLATION_SUMMARY],
+    ["Condition report", "To be completed at collection before the vehicle is driven"],
+  ];
 }
 
 export type DocImage = { data: string; w: number; h: number }; // JPEG data URL and its size in pixels
 
-export type DriverDoc = { name: string; phone: string; licence: DocImage };
+// fromFile: the main driver's licence was reused from one kept on file (staff check it at handover).
+export type DriverDoc = { name: string; phone: string; licence: DocImage; fromFile?: boolean; onFileSince?: string };
+
+// A returning customer can reuse their licence for this long after it was uploaded.
+export const LICENCE_ON_FILE_MONTHS = 12;
+
+export type LicenceOnFile = { licence: DocImage; savedAt: string; reference: string };
 
 export type SignatureDoc =
   | { kind: "drawn"; name: string; image: DocImage }
@@ -101,9 +183,11 @@ export type BookingDocuments = {
   drivers: DriverDoc[]; // drivers[0] is the main driver (the person booking)
   signature: SignatureDoc;
   agreementVersion: string;
+  keepOnFile?: boolean; // the customer agreed to keep their licence for future bookings
 };
 
-export type StoredDocuments = BookingDocuments & { signedAt: string };
+// schedule: the Booking Schedule rows exactly as agreed, saved by the server with the booking (clause 14.1).
+export type StoredDocuments = BookingDocuments & { signedAt: string; schedule?: [string, string][] | null };
 
 function cleanText(value: unknown, max: number) {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -125,11 +209,18 @@ function cleanImage(value: unknown, what: string): DocImage | string {
 }
 
 // Checks what the booking page sent. The main driver's name and phone come from the booking itself.
+// mainOnFile is the licence kept on file for this email and phone, looked up by the server beforehand.
 export function validateDocuments(
   raw: unknown,
   main: { name: string; phone: string },
+  mainOnFile?: LicenceOnFile | null,
 ): { ok: true; docs: BookingDocuments } | { ok: false; error: string } {
-  const input = (raw || {}) as { drivers?: unknown[]; signature?: Record<string, unknown>; agreementVersion?: unknown };
+  const input = (raw || {}) as {
+    drivers?: unknown[];
+    signature?: Record<string, unknown>;
+    agreementVersion?: unknown;
+    keepOnFile?: unknown;
+  };
   const list = Array.isArray(input.drivers) ? input.drivers : [];
   if (!list.length) return { ok: false, error: "Add a photo of the front of your driving licence." };
   if (list.length > MAX_DRIVERS) return { ok: false, error: "A booking can have up to " + MAX_DRIVERS + " drivers." };
@@ -145,6 +236,13 @@ export function validateDocuments(
     const digits = phone.replace(/\D/g, "");
     if (!isMain && (digits.length < 9 || digits.length > 15)) {
       return { ok: false, error: "Enter a mobile number for driver " + (index + 1) + "." };
+    }
+    if (isMain && item.useOnFile === true) {
+      if (!mainOnFile) {
+        return { ok: false, error: "We couldn't find your licence on file. Please add a photo of the front of your driving licence." };
+      }
+      drivers.push({ name, phone, licence: mainOnFile.licence, fromFile: true, onFileSince: mainOnFile.savedAt });
+      continue;
     }
     const licence = cleanImage(item.licence, label);
     if (typeof licence === "string") return { ok: false, error: licence };
@@ -168,5 +266,8 @@ export function validateDocuments(
   if (String(input.agreementVersion || "") !== AGREEMENT_VERSION) {
     return { ok: false, error: "The hire agreement has been updated. Please reload the page and sign again." };
   }
-  return { ok: true, docs: { drivers, signature, agreementVersion: AGREEMENT_VERSION } };
+  return {
+    ok: true,
+    docs: { drivers, signature, agreementVersion: AGREEMENT_VERSION, keepOnFile: input.keepOnFile === true && !drivers[0].fromFile },
+  };
 }

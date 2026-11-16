@@ -5,6 +5,7 @@ import { COMPANY, CONTACT } from "../lib/contact";
 import { type LatLng } from "./PinMap";
 import PinPicker from "./PinPicker";
 import PaymentDetails from "./PaymentDetails";
+import { mpesaCodeHint } from "../lib/payments";
 import { LicencePicker, SignatureBox } from "./CheckoutDocuments";
 import { buildBookingPdf, downloadPdf, loadPdfLogo, type BookingPdfData } from "../lib/bookingPdf";
 import {
@@ -988,8 +989,10 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                         id="laterCode"
                         value={laterCode}
                         onChange={(event) => setLaterCode(event.target.value)}
+                        placeholder="e.g. QJK3X7AB12"
                         className={roundField}
                       />
+                      {mpesaCodeHint(laterCode) && <p className="mt-1 text-[13px] font-bold text-[#7a3e00]">{mpesaCodeHint(laterCode)}</p>}
                     </div>
                     <button type="submit" className={btnLight}>
                       Send code
@@ -1282,8 +1285,12 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                             id="mpesa"
                             value={mpesaCode}
                             onChange={(event) => setMpesaCode(event.target.value)}
+                            placeholder="e.g. QJK3X7AB12"
                             className={roundField}
                           />
+                          {mpesaCodeHint(mpesaCode) && (
+                            <p className="mt-1 text-[13px] font-bold text-[#7a3e00]">{mpesaCodeHint(mpesaCode)}</p>
+                          )}
                         </div>
                       )}
 

@@ -652,8 +652,11 @@ export type StaffBooking = {
   staffNote: string;
   hasDocuments?: boolean;
   licenceOnFile?: boolean; // the main driver's licence was reused from one on file: check it at handover
+  paymentLog?: PaymentEntry[]; // payments recorded on the desk with "Match a payment"
   amountPaid: number; // KSh received so far, entered by staff (part payments). Full when confirmed.
 };
+
+export type PaymentEntry = { code: string; amount: number; by: string; at: string };
 
 // What is still owed on a booking. A delivery that has not been priced yet only counts the hire so far.
 export function balanceOf(booking: Pick<StaffBooking, "total" | "amountPaid">) {

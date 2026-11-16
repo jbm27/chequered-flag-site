@@ -138,6 +138,8 @@ async function setup() {
     );
     -- Part payments, entered by staff on the desk. Added after launch, so existing bookings start at 0.
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS amount_paid integer NOT NULL DEFAULT 0;
+    -- Payments recorded on the desk (code, amount, who, when), used to spot a code used twice.
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_log jsonb NOT NULL DEFAULT '[]'::jsonb;
     CREATE INDEX IF NOT EXISTS bookings_vehicle_status_idx ON bookings (vehicle_id, status);
     CREATE INDEX IF NOT EXISTS bookings_created_idx ON bookings (created_at DESC);
     -- Licence photos, extra drivers and the signed hire agreement for a website booking (one row per booking).
@@ -628,6 +630,7 @@ function mapStaff(row: Record<string, unknown>): StaffBooking {
     deliverySummary: String(row.delivery_summary),
     deliveryDetail: String(row.delivery_detail || ""),
     hasDocuments: Boolean(row.has_documents),
+    paymentLog: Array.isArray(row.payment_log) ? (row.payment_log as StaffBooking["paymentLog"]) : [],
     licenceOnFile: Boolean(row.licence_on_file),
     deliveryManual: Boolean(row.delivery_manual),
     hireTotal: Number(row.hire_total),
@@ -653,7 +656,7 @@ export async function listBookings() {
             pickup_on::text, return_on::text, pickup_time, return_time, pickup_location,
             delivery_mode, delivery_summary, delivery_detail, delivery_manual,
             days, daily_rate, hire_total, insurance_total, delivery_fee, total_due,
-            ooh, ooh_note, mpesa_code, status, staff_note, created_at, amount_paid,
+            ooh, ooh_note, mpesa_code, status, staff_note, created_at, amount_paid, payment_log,
             EXISTS (SELECT 1 FROM booking_documents d WHERE d.booking_id = bookings.id) AS has_documents,
             COALESCE((SELECT d.drivers->0->>'fromFile' = 'true' FROM booking_documents d WHERE d.booking_id = bookings.id), false)
               AS licence_on_file
@@ -918,6 +921,69 @@ export async function editBooking(id: string, raw: Partial<BookingEdit>, editedB
     );
     await client.query("COMMIT");
     return { ok: true, total };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Staff record a payment found on the M-Pesa or bank statement ("Match a payment" on the desk).
+// Adds it to the amount paid, keeps it in the payment log, and confirms the booking once it is paid in full.
+// A code already recorded on any booking is refused, so the same payment can't be counted twice.
+export async function recordPayment(id: string, raw: { amount?: unknown; code?: unknown }, recordedBy: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const amount = wholeShillings(raw.amount);
+  if (amount === null || amount <= 0) throw staffError("Enter the amount received in whole shillings.", 400);
+  const code = String(raw.code ?? "").replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 30);
+  if (code && code.length < 4) throw staffError("Enter the M-Pesa code or bank reference, or leave it blank.", 400);
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query<{ status: string; total_due: number; amount_paid: number; mpesa_code: string; payment_log: unknown[]; reference: string }>(
+      `SELECT status, total_due, amount_paid, mpesa_code, payment_log, reference FROM bookings WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    const row = current.rows[0];
+    if (!row) throw staffError("That booking was not found.", 404);
+    if (row.status !== "pending" && row.status !== "confirmed") {
+      throw staffError("Payments can only be recorded on a held or paid booking.", 409);
+    }
+    if (code) {
+      const clash = await client.query<{ reference: string }>(
+        `SELECT reference FROM bookings
+         WHERE id <> $1 AND (upper(mpesa_code) = $2 OR payment_log @> jsonb_build_array(jsonb_build_object('code', $2::text)))
+         LIMIT 1`,
+        [id, code],
+      );
+      if (clash.rows[0]) throw staffError("Code " + code + " is already recorded on " + clash.rows[0].reference + ".", 409);
+      const log = Array.isArray(row.payment_log) ? (row.payment_log as { code?: string }[]) : [];
+      if (log.some((entry) => entry.code === code)) throw staffError("Code " + code + " is already recorded on this booking.", 409);
+    }
+    const total = Number(row.total_due);
+    const paidBefore = row.status === "confirmed" && !Number(row.amount_paid) ? total : Number(row.amount_paid);
+    const balance = Math.max(0, total - paidBefore);
+    if (balance === 0) throw staffError(row.reference + " is already paid in full.", 409);
+    if (amount > balance) throw staffError("That is more than the balance of " + ksh(balance) + " on " + row.reference + ".", 400);
+    const paid = paidBefore + amount;
+    const entry = { code, amount, by: recordedBy.slice(0, 60), at: new Date().toISOString() };
+    const updated = await client.query<{ status: string }>(
+      `UPDATE bookings
+       SET amount_paid = $2,
+           payment_log = payment_log || jsonb_build_array($3::jsonb),
+           mpesa_code = CASE WHEN mpesa_code = '' AND $4 ~ '^[A-Z0-9]{10}$' AND $4 ~ '[A-Z]' AND $4 ~ '[0-9]' THEN $4 ELSE mpesa_code END,
+           status = CASE WHEN $2 >= total_due AND status = 'pending' THEN 'confirmed' ELSE status END,
+           confirmed_at = CASE WHEN $2 >= total_due AND status = 'pending' THEN now() ELSE confirmed_at END
+       WHERE id = $1
+       RETURNING status`,
+      [id, paid, JSON.stringify(entry), code],
+    );
+    await client.query("COMMIT");
+    return { ok: true, status: updated.rows[0].status, balance: total - paid, reference: row.reference };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

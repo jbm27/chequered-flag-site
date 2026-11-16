@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { mpesaCodeHint } from "../lib/payments";
 import {
   addDays,
   dateProblem,
@@ -352,6 +353,7 @@ export default function DeskAddBooking({
               M-Pesa code (optional)
             </label>
             <input id="nbMpesa" value={mpesaCode} onChange={(e) => setMpesaCode(e.target.value)} className={input} />
+            {mpesaCodeHint(mpesaCode) && <p className="mt-1 text-xs font-bold text-[#7a3e00]">{mpesaCodeHint(mpesaCode)}</p>}
           </div>
         )}
       </div>

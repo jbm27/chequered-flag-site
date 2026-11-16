@@ -5,6 +5,8 @@ import { addDays, balanceOf, dayNumber, exclusiveEnd, formatDay, ksh, todayNairo
 import DeskAddBooking from "./DeskAddBooking";
 import DeskEditBooking from "./DeskEditBooking";
 import DeskVehicleEdit from "./DeskVehicleEdit";
+import DeskMatchPayment from "./DeskMatchPayment";
+import { bookingCodes, duplicateCodes, looksLikeMpesaCode, normaliseCode } from "../lib/payments";
 import DeskCustomers, { type LicenceOnFileRow } from "./DeskCustomers";
 import DeskPerformance from "./DeskPerformance";
 import { canSeePerformance } from "../lib/access";
@@ -467,6 +469,7 @@ export default function HireDesk() {
   const paidCurrent = current.filter((booking) => booking.status === "confirmed");
   const fullPaidTotal = paidCurrent.reduce((sum, booking) => sum + booking.total, 0);
   const paidTotal = current.reduce((sum, booking) => sum + Math.min(booking.amountPaid, booking.total), 0);
+  const dupCodes = duplicateCodes(bookings);
   const codesToCheck = bookings.filter((booking) => booking.status === "pending" && booking.mpesaCode);
   const quotes = bookings.filter((booking) => booking.status === "quote");
   const selected = bookings.find((booking) => booking.id === selectedId) || null;
@@ -484,7 +487,11 @@ export default function HireDesk() {
     overview: chaseText,
     calendar: "",
     table: chaseText,
-    payments: codesToCheck.length ? plural(codesToCheck.length, "payment code") + " to check" : "",
+    payments: dupCodes.size
+      ? plural(dupCodes.size, "M-Pesa code") + " used on more than one booking"
+      : codesToCheck.length
+        ? plural(codesToCheck.length, "payment code") + " to check"
+        : "",
     customers: "",
     performance: "",
     vehicles: backFromHire.size ? plural(backFromHire.size, "vehicle") + " back from hire to check" : "",
@@ -1372,7 +1379,35 @@ export default function HireDesk() {
                       {selected.deliveryManual ? " plus delivery" : ""}
                     </strong>
                   </Row>
-                  <Row label="M-Pesa code">{selected.mpesaCode || "None sent yet"}</Row>
+                  <Row label="M-Pesa code">
+                    {selected.mpesaCode || "None sent yet"}
+                    {selected.mpesaCode && !looksLikeMpesaCode(selected.mpesaCode) && (
+                      <span className="block text-xs font-bold text-[#7a3e00]">Unusual format: check it on the statement</span>
+                    )}
+                    {bookingCodes(selected).some((code) => dupCodes.has(code)) && (
+                      <span className="block text-xs font-bold text-[#a50e0e]">
+                        This code is also on{" "}
+                        {bookingCodes(selected)
+                          .flatMap((code) => dupCodes.get(code) || [])
+                          .filter((ref) => ref !== selected.reference)
+                          .join(", ")}
+                      </span>
+                    )}
+                  </Row>
+                  {(selected.paymentLog || []).length > 0 && (
+                    <Row label="Payments">
+                      {(selected.paymentLog || []).map((entry, index) => (
+                        <span key={index} className="block">
+                          {ksh(entry.amount)}
+                          {entry.code ? " · " + entry.code : ""}
+                          <span className="text-xs text-[#595959]">
+                            {" · "}
+                            {short(new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Nairobi" }).format(new Date(entry.at)))} by {entry.by}
+                          </span>
+                        </span>
+                      ))}
+                    </Row>
+                  )}
                   {selected.staffNote && <Row label="Note">{selected.staffNote}</Row>}
 
                   {(selected.status === "pending" || selected.status === "confirmed" || selected.status === "quote") && (
@@ -1637,6 +1672,14 @@ export default function HireDesk() {
                 <MiniTile label="Received so far, current and upcoming" value={ksh(paidTotal)} note="Including part payments" />
                 <MiniTile label="Still to collect" value={ksh(awaitingTotal)} note={plural(awaiting.length, "booking") + " held"} />
               </div>
+              <DeskMatchPayment
+                bookings={bookings}
+                onOpen={pick}
+                onRecorded={async (message) => {
+                  setNotice(message);
+                  await loadBookings();
+                }}
+              />
               <div className="mb-3.5">
                 <label htmlFor="paySearch" className="mb-1.5 block text-[13px] text-[#595959]">
                   Search by name, phone, M-Pesa code or booking
@@ -1657,7 +1700,7 @@ export default function HireDesk() {
                       <th className="px-2 py-2 font-semibold">Customer</th>
                       <th className="px-2 py-2 font-semibold">Booking</th>
                       <th className="px-2 py-2 font-semibold">M-Pesa code</th>
-                      <th className="px-2 py-2 font-semibold">Amount due</th>
+                      <th className="px-2 py-2 font-semibold">Still due</th>
                       <th className="px-2 py-2 font-semibold">Status</th>
                       <th className="px-2 py-2 font-semibold">Actions</th>
                     </tr>
@@ -1675,8 +1718,25 @@ export default function HireDesk() {
                             {booking.model} · {short(booking.pickup)}
                           </span>
                         </td>
-                        <td className="px-2 py-2.5 font-bold">{booking.mpesaCode}</td>
-                        <td className="px-2 py-2.5 font-bold">{ksh(booking.total)}</td>
+                        <td className="px-2 py-2.5">
+                          <strong>{booking.mpesaCode}</strong>
+                          {dupCodes.has(normaliseCode(booking.mpesaCode)) && (
+                            <span className="mt-1 block w-fit rounded-[10px] border border-[#f1a9a3] bg-[#fce8e6] px-2 py-0.5 text-xs font-bold text-[#a50e0e]">
+                              Also on {dupCodes.get(normaliseCode(booking.mpesaCode))!.filter((r) => r !== booking.reference).join(", ")}
+                            </span>
+                          )}
+                          {!looksLikeMpesaCode(booking.mpesaCode) && (
+                            <span className="mt-1 block w-fit rounded-[10px] border border-[#f9d46b] bg-[#feefc3] px-2 py-0.5 text-xs font-bold text-[#5f4400]">
+                              Unusual format: check it
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-2 py-2.5">
+                          <strong>{ksh(balanceOf(booking))}</strong>
+                          <span className="block text-xs text-[#595959]">
+                            {booking.amountPaid > 0 ? "of " + ksh(booking.total) + " · paid " + ksh(booking.amountPaid) : "full amount"}
+                          </span>
+                        </td>
                         <td className="px-2 py-2.5">
                           <ChipView
                             chip={

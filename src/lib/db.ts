@@ -554,10 +554,13 @@ export async function createBooking(
               ret: scheduleWhere(booking, "return") + ", " + formatDay(booking.returnOn) + ", " + booking.retTime + " EAT",
               price:
                 "Hire " + ksh(booking.hireTotal) +
-                (booking.insuranceTotal ? " + damage cover " + ksh(booking.insuranceTotal) : "") +
+                (booking.insuranceTotal ? " + collision damage waiver " + ksh(booking.insuranceTotal) : "") +
                 (booking.manual ? " + delivery (to be quoted)" : booking.delivery.fee ? " + delivery " + ksh(booking.delivery.fee) : "") +
                 " = " + ksh(booking.total) + " (VAT included)",
               damageLimit: damageLimitFor(booking.model.name, booking.model.category),
+              waiver: booking.insuranceTotal
+                ? ksh(booking.insuranceTotal) + " for " + booking.days + (booking.days === 1 ? " day" : " days")
+                : "",
               mileage: mileageFor(booking.model.category),
             }),
           ),
@@ -817,7 +820,7 @@ export type BookingEdit = {
   amountPaid?: unknown;
 };
 
-// Staff correct a booking on the desk. Dates, times, model, customer details, damage cover, the M-Pesa code,
+// Staff correct a booking on the desk. Dates, times, model, customer details, the collision damage waiver, the M-Pesa code,
 // the note and (for a priced delivery) the delivery charge can change. The status stays the same.
 // If the model or dates change on a held or paid booking, a free vehicle is found again, keeping the
 // current vehicle when it is still free. Totals are recalculated from the model's daily rate.
@@ -1330,7 +1333,7 @@ export async function removeLicenceOnFile(email: string) {
 }
 
 // Performance analysis (owners only): hire days and income per vehicle per day for one year, built from held and
-// paid bookings. Income is the hire and damage cover charge spread evenly over the hire days, net of 16% VAT
+// paid bookings. Income is the hire and collision damage waiver charges spread evenly over the hire days, net of 16% VAT
 // (the hire rates include VAT); delivery charges are left out. Days after today are not counted.
 export type PerformanceYear = {
   year: number;

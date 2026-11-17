@@ -21,7 +21,8 @@ export const MAX_IMAGE_SIDE = 4000;
 // Version history: online-hire-agreement-2026-11-revised (Homer's revised text); -b adds the Land Cruiser
 // at KES 200,000, the same as the Prado (Homer, 16 Nov 2026), in the class mapping and clause 7.2;
 // -c adds clause 1.4: every booking is subject to review and may be cancelled with a full refund (Homer).
-export const AGREEMENT_VERSION = "online-hire-agreement-2026-11-revised-c";
+// -d adds clause 7.7, the optional collision damage waiver, and shows the waiver and this vehicle's limit in the Booking Schedule (Homer).
+export const AGREEMENT_VERSION = "online-hire-agreement-2026-11-revised-d";
 export const AGREEMENT_TITLE = "Self-drive vehicle hire agreement";
 export const AGREEMENT_TEXT: string[] = [
   "Contracting company: The Chequered Flag Ltd. (“Company”, “we”, “us”). Registered address: " + COMPANY.postal + ". Booking enquiries and incident contact: " + CONTACT.phoneDisplay + ", " + CONTACT.email + ".",
@@ -65,6 +66,7 @@ export const AGREEMENT_TEXT: string[] = [
   "7.4 The Company shall maintain motor insurance as required by Kenyan law and ensure that any represented self-drive and vehicle-damage protections are consistent with the actual policy. Nothing in this agreement purports to limit third-party legal rights or compulsory insurance protections. The Company must disclose material insurance restrictions relevant to the intended hire before payment.",
   "7.5 The vehicle-damage cap does not limit properly due rental charges, refuelling, tolls, fines or other independent debts. It does not limit liability for proven fraud, deliberate damage or other liability that cannot lawfully be limited, but no exclusion of the cap may be asserted merely because an accident occurred or on the basis of an undisclosed insurance term. Any proposed exceptions to the cap must be clearly disclosed before booking and checked against the insurer’s policy.",
   "7.6 The Company shall provide a written, itemised statement and supporting evidence for any damage claim, account for salvage/insurance recoveries where relevant so there is no double recovery, and allow the Hirer a reasonable opportunity to dispute it.",
+  "7.7 Collision damage waiver. Where the Booking Schedule shows that the Hirer has taken the optional collision damage waiver and paid for it, the Hirer shall not pay for damage to the hired vehicle caused by an accident or collision during the rental, and the Damage Liability Limit in clause 7.2 does not apply to that damage. The waiver does not cover: (a) traffic, speeding and parking fines, tolls and other charges under clause 11; (b) damage to the suspension, tyres, wheels, transmission, clutch or underbody caused by negligent, reckless or abusive driving, or by use the vehicle is not suitable for under clause 6.1, such as off-road events, rallies or competitions; or (c) proven fraud or deliberate damage. Damage under (b) is charged as though the waiver had not been taken, up to the Damage Liability Limit, and clauses 7.3 and 7.6 still apply. If the waiver is not taken, clauses 7.1 and 7.2 apply in full.",
   "# 8. Breakdowns, roadside assistance and unavailability",
   "8.1 If the vehicle becomes unsafe, fails or breaks down, the Hirer must stop safely, contact the Company promptly, follow reasonable safety instructions and not arrange non-emergency repairs or recovery without approval. Emergency measures to protect people or prevent immediate further loss are permitted.",
   "8.2 Where breakdown or loss of use results from customer-attributable accident, impact, tyre blowout, misuse or negligent driving, the Hirer bears reasonable evidenced repair and recovery costs subject to clause 7. The Company will assist with arranging recovery; a replacement vehicle is not guaranteed and any further hire will require agreement.",
@@ -145,6 +147,7 @@ export type ScheduleValues = {
   ret: string;
   price: string;
   damageLimit: number | null;
+  waiver: string; // the waiver charge, e.g. "KSh 4,500 for 3 days", or "" when not taken
   mileage: string;
 };
 
@@ -160,7 +163,19 @@ export function bookingSchedule(v: ScheduleValues): [string, string][] {
     ["Collect / return", v.collect + " → " + v.ret],
     ["Booking price", v.price],
     ["Payment", "100% of Total Booking Price payable upon booking confirmation"],
-    ["Damage liability limit", v.damageLimit ? kes(v.damageLimit) + " — per hire, subject to clause 7" : "Not set: call us to book this vehicle"],
+    [
+      "Damage liability limit",
+      v.damageLimit
+        ? kes(v.damageLimit) + " for this vehicle, per hire, subject to clause 7" +
+          (v.waiver ? ". Does not apply to accident or collision damage, as the collision damage waiver is taken (clause 7.7)" : "")
+        : "Not set: call us to book this vehicle",
+    ],
+    [
+      "Collision damage waiver",
+      v.waiver
+        ? "Taken, " + v.waiver + ". Covers accident and collision damage to the vehicle. Fines, and damage to suspension, tyres, wheels, transmission or underbody from bad driving or unsuitable use, are not covered (clause 7.7)"
+        : "Not taken. Damage is charged up to the damage liability limit (clauses 7.1 and 7.2)",
+    ],
     ["Mileage", v.mileage],
     ["Security deposit, if applicable", "None"],
     ["Fuel / special restrictions", FUEL_POLICY],

@@ -306,10 +306,11 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       ret: returnWhere + ", " + when(returnOn, retTime),
       price:
         "Hire " + ksh(hireTotal) +
-        (insuranceTotal ? " + damage cover " + ksh(insuranceTotal) : "") +
+        (insuranceTotal ? " + collision damage waiver " + ksh(insuranceTotal) : "") +
         (deliveryQuote.manual ? " + delivery (to be quoted)" : pricedDelivery ? " + delivery " + ksh(pricedDelivery) : "") +
         " = " + ksh(total) + " (VAT included)",
       damageLimit: selectedLimit,
+      waiver: insuranceTotal ? ksh(insuranceTotal) + " for " + plural(days) : "",
       mileage: mileageFor(selected?.category),
     };
   }
@@ -443,7 +444,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       { label: "Vehicle hire: " + booking.model, qty: plural(booking.days), unit: perDay(booking.hireTotal), amount: ksh(booking.hireTotal) },
     ];
     if (booking.insuranceTotal) {
-      costs.push({ label: "Damage cover", qty: plural(booking.days), unit: perDay(booking.insuranceTotal), amount: ksh(booking.insuranceTotal) });
+      costs.push({ label: "Collision damage waiver", qty: plural(booking.days), unit: perDay(booking.insuranceTotal), amount: ksh(booking.insuranceTotal) });
     }
     if (delivery !== "none") {
       costs.push({
@@ -1255,11 +1256,15 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                             className="mt-px h-[22px] w-[22px] flex-none"
                           />
                           <label htmlFor="insBox" className="text-sm leading-normal">
-                            <strong>Add damage cover for {ksh(selected.addon)} a day</strong>
+                            <strong>Add the collision damage waiver for {ksh(selected.addon)} a day</strong>
                             <br />
                             <span className="text-[#595959]">
-                              Covers damage to the vehicle, repaired by our own workshop. Without it, you pay for any
-                              damage.
+                              {selectedLimit
+                                ? "Without it, you pay for damage to this vehicle up to " + ksh(selectedLimit) + " for the whole hire. "
+                                : ""}
+                              With it, you don&apos;t pay for accident or collision damage. Fines, and damage to the
+                              suspension, tyres, transmission or underbody from bad driving or off-road use, are not
+                              covered.
                             </span>
                           </label>
                         </div>
@@ -1486,7 +1491,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                     )}
                     {insuranceTotal > 0 && (
                       <div className="flex justify-between gap-2">
-                        <span>Damage cover, {plural(days)}</span>
+                        <span>Collision damage waiver, {plural(days)}</span>
                         <span>{ksh(insuranceTotal)}</span>
                       </div>
                     )}

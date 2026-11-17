@@ -42,7 +42,7 @@ const KNOW = [
   },
   {
     title: "Damage liability limit",
-    body: "If the vehicle is damaged during your hire, you pay the evidenced repair cost up to a limit for the whole hire: KSh 90,000 for a saloon, KSh 150,000 for the X-Trail, and KSh 200,000 for a Prado or Land Cruiser. You don't pay for genuine mechanical faults or normal wear and tear. Optional damage cover is also available: KSh 1,500 a day for saloons and KSh 2,000 for SUVs and 4x4s.",
+    body: "If the vehicle is damaged during your hire, you pay the evidenced repair cost up to a limit for the whole hire: KSh 90,000 for a saloon, KSh 150,000 for the X-Trail, and KSh 200,000 for a Prado or Land Cruiser. You don't pay for genuine mechanical faults or normal wear and tear. Add the optional collision damage waiver (KSh 1,500 a day for saloons, KSh 2,000 for SUVs and 4x4s) and you don't pay for accident or collision damage. Your agreement shows the limit for the vehicle you book.",
   },
   {
     title: "Fuel",
@@ -73,7 +73,7 @@ const FAQ = [
   },
   {
     q: "How much do I pay to book, and is there a deposit?",
-    a: "The full booking price is due when you book, including optional damage cover and any delivery charge. There is no security deposit. Your booking is confirmed once we have received the full payment and sent you confirmation. Nothing is added after you pay unless you agree to it.",
+    a: "The full booking price is due when you book, including the optional collision damage waiver and any delivery charge. There is no security deposit. Your booking is confirmed once we have received the full payment and sent you confirmation. Nothing is added after you pay unless you agree to it.",
   },
   {
     q: "How can I pay?",
@@ -81,7 +81,11 @@ const FAQ = [
   },
   {
     q: "What happens if the vehicle is damaged?",
-    a: "Every vehicle is insured as the law requires. If the vehicle is damaged during your hire, for example in a collision, by a tyre blowout or to the windscreen, wheels or underbody, you pay the evidenced repair and recovery cost up to the damage liability limit: KSh 90,000 for a saloon, KSh 150,000 for the X-Trail, and KSh 200,000 for a Prado or Land Cruiser. The limit applies once to the whole hire, not to each incident, and it is not a fee taken in advance. We give you an itemised statement with evidence for any claim. You don't pay for genuine mechanical or electrical faults or normal wear and tear. You can also add optional damage cover (KSh 1,500 a day for saloons, KSh 2,000 for SUVs and 4x4s), repaired by our own workshop.",
+    a: "Every vehicle is insured as the law requires. If the vehicle is damaged during your hire, for example in a collision, by a tyre blowout or to the windscreen, wheels or underbody, you pay the evidenced repair and recovery cost up to the damage liability limit: KSh 90,000 for a saloon, KSh 150,000 for the X-Trail, and KSh 200,000 for a Prado or Land Cruiser. The limit applies once to the whole hire, not to each incident, and it is not a fee taken in advance. We give you an itemised statement with evidence for any claim. You don't pay for genuine mechanical or electrical faults or normal wear and tear. Your booking agreement shows the limit for the vehicle you book.",
+  },
+  {
+    q: "What does the collision damage waiver cover?",
+    a: "It's optional: KSh 1,500 a day for saloons and KSh 2,000 a day for SUVs and 4x4s, added when you book. With it, you don't pay for damage to the vehicle caused by an accident or collision, and the damage liability limit doesn't apply to that damage. It doesn't cover traffic, speeding or parking fines and tolls, or damage to the suspension, tyres, wheels, transmission, clutch or underbody caused by bad driving or by using the vehicle somewhere it isn't suited to, such as off-road events or rallies. That damage is charged up to the damage liability limit, as it would be without the waiver. Deliberate damage and fraud are never covered.",
   },
   {
     q: "What should I check when I collect the vehicle?",

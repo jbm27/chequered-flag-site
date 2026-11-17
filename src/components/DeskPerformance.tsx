@@ -435,7 +435,7 @@ export default function DeskPerformance({ today }: { today: string }) {
         />
         <DayColumns
           title="Income per day, net of VAT"
-          subtitle="Hire and damage cover, spread over each hire's days"
+          subtitle="Hire and collision damage waiver, spread over each hire's days"
           values={stats.perDay.map((d) => Math.round(d.income))}
           format={(n) => ksh(n)}
           axisFormat={compact}
@@ -572,7 +572,7 @@ export default function DeskPerformance({ today }: { today: string }) {
         })}
       </div>
       <p className="text-xs text-[#595959]">
-        From held and paid bookings on this desk. Income is the hire and damage cover charge net of 16% VAT, spread over the
+        From held and paid bookings on this desk. Income is the hire and collision damage waiver charges net of 16% VAT, spread over the
         hire days; delivery charges are not included. Utilisation is days out divided by vehicles × days so far (days in the
         workshop are not recorded yet). Targets: {pct(UTILISATION_TARGET)} utilisation, {ksh(DAILY_REVENUE_TARGET.saloon)} a day per
         saloon and {ksh(DAILY_REVENUE_TARGET.suv)} per SUV or 4x4, as in the hire analysis spreadsheet.

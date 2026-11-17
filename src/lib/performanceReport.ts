@@ -181,7 +181,7 @@ export function reportFileName(report: Report, ext: string) {
 }
 
 const NOTE =
-  "From held and paid bookings on the hire desk. Income is the hire and damage cover charge net of 16% VAT, spread over the hire days; delivery charges are not included. Utilisation is days out divided by vehicles × days (workshop days are not recorded yet).";
+  "From held and paid bookings on the hire desk. Income is the hire and collision damage waiver charges net of 16% VAT, spread over the hire days; delivery charges are not included. Utilisation is days out divided by vehicles × days (workshop days are not recorded yet).";
 const SAMPLE = "SAMPLE FIGURES - NOT REAL. Made up to show the layout.";
 
 // ---------- Excel (.xlsx) ----------

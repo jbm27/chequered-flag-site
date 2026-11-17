@@ -1374,7 +1374,7 @@ export default function HireDesk() {
 
                 <DetailBox title="Payment">
                   <Row label="Hire">{ksh(selected.hireTotal)}</Row>
-                  {selected.insuranceTotal > 0 && <Row label="Damage cover">{ksh(selected.insuranceTotal)}</Row>}
+                  {selected.insuranceTotal > 0 && <Row label="Collision damage waiver">{ksh(selected.insuranceTotal)}</Row>}
                   <Row label="Delivery">
                     {selected.deliveryManual || selected.deliveryFee === null
                       ? "To be set"
@@ -1984,7 +1984,7 @@ export default function HireDesk() {
                           </Row>
                           <Row label="Odometer">{vehicle.km ? vehicle.km.toLocaleString("en-US") + " km" : "Not entered"}</Row>
                           <Row label="Daily rate">{vehicle.rate ? ksh(vehicle.rate) : "—"}</Row>
-                          <Row label="Damage cover">{vehicle.addon ? ksh(vehicle.addon) + " a day" : "—"}</Row>
+                          <Row label="Collision damage waiver">{vehicle.addon ? ksh(vehicle.addon) + " a day" : "—"}</Row>
                           <Row label="Now">
                             {now ? (
                               <button type="button" className="text-left underline" onClick={() => pick(now.id)}>

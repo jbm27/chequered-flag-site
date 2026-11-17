@@ -38,7 +38,7 @@ function pdfData(booking: StaffBooking, docs: StoredDocuments): BookingPdfData {
     { label: "Vehicle hire: " + booking.model, qty: days, unit: perDay(booking.hireTotal), amount: ksh(booking.hireTotal) },
   ];
   if (booking.insuranceTotal) {
-    costs.push({ label: "Damage cover", qty: days, unit: perDay(booking.insuranceTotal), amount: ksh(booking.insuranceTotal) });
+    costs.push({ label: "Collision damage waiver", qty: days, unit: perDay(booking.insuranceTotal), amount: ksh(booking.insuranceTotal) });
   }
   if (booking.deliverySummary && !/^collect/i.test(booking.deliverySummary)) {
     costs.push({

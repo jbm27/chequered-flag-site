@@ -317,7 +317,7 @@ export default function DeskAddBooking({
         {model && model.addon > 0 && (
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={insure} onChange={(e) => setInsure(e.target.checked)} className="h-5 w-5" />
-            Damage cover ({ksh(model.addon)}/day)
+            Collision damage waiver ({ksh(model.addon)}/day)
           </label>
         )}
         {!quote && (

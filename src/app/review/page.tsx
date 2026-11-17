@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import ReviewForm from "../../components/ReviewForm";
 
 export const metadata = {
-  title: "Review your hire | Chequered Flag",
+  title: "Review your hire",
   robots: { index: false, follow: false }, // each review link is private to one booking
 };
 

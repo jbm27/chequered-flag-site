@@ -72,6 +72,12 @@ const GALLERY_IMAGES = [
   },
 ];
 
+export const metadata = {
+  title: "Vehicle fabrication",
+  description:
+    "Vehicle fabrication from The Chequered Flag workshop in Karen, Nairobi.",
+};
+
 export default function FabricationPage() {
   const telHref = `tel:${CONTACT.phoneE164}`;
   const waHref = `https://wa.me/${CONTACT.whatsappE164.replace("+", "")}`;

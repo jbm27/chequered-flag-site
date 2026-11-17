@@ -53,7 +53,7 @@ import {
 
 const STORED = "cfHireRequest";
 
-// Photos from Homer's design, one per model. They are illustrative until real photos replace them.
+// One photo per model (from Homer's design; the Land Cruiser is Homer's own photo, with the plate blanked).
 const PHOTOS: Record<string, string> = {
   "toyota-axio": "/images/vehicle-hire/models/toyota-axio.webp",
   "toyota-fielder": "/images/vehicle-hire/models/toyota-fielder.webp",
@@ -227,7 +227,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   }, [pickup, returnOn, refreshToken, dateError]);
 
   const hours = outOfHours(pickup, returnOn, pickTime, retTime);
-  // Delivery is priced from the pin: free within 50 km in a straight line of the workshop, then per km over 50
+  // Delivery is priced from the pin: free within DELIVERY.freeKm (15 km) in a straight line of the workshop, then per km over that
   // by vehicle type. The server works the price out again from the same pin, so this is only a preview.
   const models = useMemo(() => {
     const list = availability?.models || [];
@@ -306,10 +306,11 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       ret: returnWhere + ", " + when(returnOn, retTime),
       price:
         "Hire " + ksh(hireTotal) +
-        (insuranceTotal ? " + damage cover " + ksh(insuranceTotal) : "") +
+        (insuranceTotal ? " + collision damage waiver " + ksh(insuranceTotal) : "") +
         (deliveryQuote.manual ? " + delivery (to be quoted)" : pricedDelivery ? " + delivery " + ksh(pricedDelivery) : "") +
         " = " + ksh(total) + " (VAT included)",
       damageLimit: selectedLimit,
+      waiver: insuranceTotal ? ksh(insuranceTotal) + " for " + plural(days) : "",
       mileage: mileageFor(selected?.category),
     };
   }
@@ -443,7 +444,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       { label: "Vehicle hire: " + booking.model, qty: plural(booking.days), unit: perDay(booking.hireTotal), amount: ksh(booking.hireTotal) },
     ];
     if (booking.insuranceTotal) {
-      costs.push({ label: "Damage cover", qty: plural(booking.days), unit: perDay(booking.insuranceTotal), amount: ksh(booking.insuranceTotal) });
+      costs.push({ label: "Collision damage waiver", qty: plural(booking.days), unit: perDay(booking.insuranceTotal), amount: ksh(booking.insuranceTotal) });
     }
     if (delivery !== "none") {
       costs.push({
@@ -1255,11 +1256,15 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                             className="mt-px h-[22px] w-[22px] flex-none"
                           />
                           <label htmlFor="insBox" className="text-sm leading-normal">
-                            <strong>Add damage cover for {ksh(selected.addon)} a day</strong>
+                            <strong>Add the collision damage waiver for {ksh(selected.addon)} a day</strong>
                             <br />
                             <span className="text-[#595959]">
-                              Covers damage to the vehicle, repaired by our own workshop. Without it, you pay for any
-                              damage.
+                              {selectedLimit
+                                ? "Without it, you pay for damage to this vehicle up to " + ksh(selectedLimit) + " for the whole hire. "
+                                : ""}
+                              With it, you don&apos;t pay for accident or collision damage. Fines, and damage to the
+                              suspension, tyres, transmission or underbody from bad driving or off-road use, are not
+                              covered.
                             </span>
                           </label>
                         </div>
@@ -1331,9 +1336,25 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                           tabIndex={0}
                           role="region"
                           aria-label={AGREEMENT_TITLE}
-                          className="mt-2 h-[300px] overflow-y-auto overscroll-contain rounded-lg border border-[#c8c8c8] bg-white px-4 py-3 text-sm leading-relaxed text-[#3f3f3f] focus:outline focus:outline-2 focus:outline-[#171717]"
+                          className="mt-2 h-[300px] overflow-y-auto overscroll-contain rounded-lg border border-[#c8c8c8] bg-white text-sm leading-relaxed text-[#3f3f3f] focus:outline focus:outline-2 focus:outline-[#171717]"
                         >
-                          <p className="mb-2 text-base font-bold text-[#171717]">{AGREEMENT_TITLE}</p>
+                          {/* Letterhead look: a faint chequered strip down the left and the logo top right, as in the PDF */}
+                          <div className="relative min-h-full py-3 pl-9 pr-4">
+                          <div
+                            aria-hidden="true"
+                            className="pointer-events-none absolute inset-y-0 left-0 w-[18px]"
+                            style={{ background: "repeating-conic-gradient(#ececea 0 25%, transparent 0 50%) 0 0 / 18px 18px" }}
+                          />
+                          <div className="mb-2 flex items-start justify-between gap-3">
+                            <p className="pt-1 text-base font-bold text-[#171717]">{AGREEMENT_TITLE}</p>
+                            <img
+                              src="/images/brand/chequered-flag-ltd.jpg"
+                              alt="The Chequered Flag Ltd"
+                              width={96}
+                              height={44}
+                              className="h-auto w-[96px] flex-none"
+                            />
+                          </div>
                           {AGREEMENT_TEXT.map((paragraph, index) => {
                             const line = agreementLine(paragraph);
                             if (line.kind === "heading") {
@@ -1362,6 +1383,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                             );
                           })}
                           <p className="mt-3 text-xs text-[#595959]">Version {AGREEMENT_VERSION}</p>
+                          </div>
                         </div>
                       </div>
 
@@ -1469,7 +1491,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                     )}
                     {insuranceTotal > 0 && (
                       <div className="flex justify-between gap-2">
-                        <span>Damage cover, {plural(days)}</span>
+                        <span>Collision damage waiver, {plural(days)}</span>
                         <span>{ksh(insuranceTotal)}</span>
                       </div>
                     )}
@@ -1507,14 +1529,11 @@ function VehicleCard({
         <div className="relative">
           <img
             src={photo}
-            alt={model.name + ", illustrative photo"}
+            alt={model.name}
             loading="lazy"
             decoding="async"
             className="block h-[118px] w-full object-cover object-[center_60%]"
           />
-          <span className="absolute bottom-2 left-2 rounded bg-[rgba(23,23,23,0.78)] px-[7px] py-0.5 text-[11px] font-semibold text-white">
-            Illustrative photo
-          </span>
         </div>
       ) : (
         <div className="grid h-[118px] place-items-center bg-[#ececea] p-2.5 text-center text-[13px] text-[#595959]">

@@ -35,6 +35,7 @@ import {
 } from "./hire";
 
 const SESSION_DAYS = 14;
+const LOGIN_LIMIT = 8; // wrong passwords per username in 15 minutes before sign-in is paused
 const SETUP_MESSAGE =
   "Staff sign-in is not ready. In the Vercel project, add HIRE_STAFF_USERNAME and HIRE_STAFF_PASSWORD (at least 8 characters) for Production, Preview, and Development, then redeploy.";
 
@@ -100,6 +101,12 @@ async function setup() {
       staff_id integer NOT NULL REFERENCES staff_users(id) ON DELETE CASCADE,
       expires_at timestamptz NOT NULL
     );
+    -- Failed desk sign-ins, to slow down password guessing (see loginStaff). Rows older than a day are removed.
+    CREATE TABLE IF NOT EXISTS staff_login_failures (
+      username text NOT NULL,
+      at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS staff_login_failures_idx ON staff_login_failures (username, at);
     CREATE TABLE IF NOT EXISTS bookings (
       id uuid PRIMARY KEY,
       reference text NOT NULL UNIQUE,
@@ -138,6 +145,12 @@ async function setup() {
     );
     -- Part payments, entered by staff on the desk. Added after launch, so existing bookings start at 0.
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS amount_paid integer NOT NULL DEFAULT 0;
+    -- Unpaid website holds are flagged on the desk after 24 hours (staff chase or release them by hand).
+    -- source: 'website' or 'desk' (desk bookings aren't flagged). held_at: when the vehicle was first held
+    -- (a quote is held later than it was made).
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'website';
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS held_at timestamptz;
+    UPDATE bookings SET source = 'desk' WHERE source = 'website' AND staff_note LIKE 'Added on the desk by%';
     -- Payments recorded on the desk (code, amount, who, when), used to spot a code used twice.
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_log jsonb NOT NULL DEFAULT '[]'::jsonb;
     CREATE INDEX IF NOT EXISTS bookings_vehicle_status_idx ON bookings (vehicle_id, status);
@@ -469,13 +482,13 @@ export async function createBooking(
              pickup_on, return_on, pickup_time, return_time, pickup_location,
              delivery_mode, delivery_summary, delivery_detail, delivery_manual,
              days, daily_rate, hire_total, insurance_total, delivery_fee, total_due,
-             ooh, ooh_note, mpesa_code, status, staff_note, confirmed_at, amount_paid
+             ooh, ooh_note, mpesa_code, status, staff_note, confirmed_at, amount_paid, source, held_at
            ) VALUES (
              $1, $2, $3, $4, $5, $6, $7,
              $8, $9, $10, $11, $12,
              $13, $14, $15, $16,
              $17, $18, $19, $20, $21, $22,
-             $23, $24, $25, $26, $27, $28, $29
+             $23, $24, $25, $26, $27, $28, $29, $30, $31
            )`,
           [
             id,
@@ -507,6 +520,8 @@ export async function createBooking(
             (opts?.staffNote || "").slice(0, 500),
             !booking.manual && opts?.confirmed ? new Date().toISOString() : null,
             amountPaid,
+            opts?.emailOptional ? "desk" : "website",
+            booking.manual ? null : new Date().toISOString(),
           ],
         );
         inserted = true;
@@ -539,10 +554,13 @@ export async function createBooking(
               ret: scheduleWhere(booking, "return") + ", " + formatDay(booking.returnOn) + ", " + booking.retTime + " EAT",
               price:
                 "Hire " + ksh(booking.hireTotal) +
-                (booking.insuranceTotal ? " + damage cover " + ksh(booking.insuranceTotal) : "") +
+                (booking.insuranceTotal ? " + collision damage waiver " + ksh(booking.insuranceTotal) : "") +
                 (booking.manual ? " + delivery (to be quoted)" : booking.delivery.fee ? " + delivery " + ksh(booking.delivery.fee) : "") +
                 " = " + ksh(booking.total) + " (VAT included)",
               damageLimit: damageLimitFor(booking.model.name, booking.model.category),
+              waiver: booking.insuranceTotal
+                ? ksh(booking.insuranceTotal) + " for " + booking.days + (booking.days === 1 ? " day" : " days")
+                : "",
               mileage: mileageFor(booking.model.category),
             }),
           ),
@@ -649,6 +667,8 @@ function mapStaff(row: Record<string, unknown>): StaffBooking {
     deliverySummary: String(row.delivery_summary),
     deliveryDetail: String(row.delivery_detail || ""),
     hasDocuments: Boolean(row.has_documents),
+    source: row.source === "desk" ? "desk" : "website",
+    heldAt: row.held_at ? new Date(String(row.held_at)).toISOString() : "",
     paymentLog: Array.isArray(row.payment_log) ? (row.payment_log as StaffBooking["paymentLog"]) : [],
     licenceOnFile: Boolean(row.licence_on_file),
     deliveryManual: Boolean(row.delivery_manual),
@@ -676,12 +696,16 @@ export async function listBookings() {
             delivery_mode, delivery_summary, delivery_detail, delivery_manual,
             days, daily_rate, hire_total, insurance_total, delivery_fee, total_due,
             ooh, ooh_note, mpesa_code, status, staff_note, created_at, amount_paid, payment_log,
+            source, COALESCE(held_at, created_at) AS held_at,
             EXISTS (SELECT 1 FROM booking_documents d WHERE d.booking_id = bookings.id) AS has_documents,
             COALESCE((SELECT d.drivers->0->>'fromFile' = 'true' FROM booking_documents d WHERE d.booking_id = bookings.id), false)
               AS licence_on_file
      FROM bookings
-     ORDER BY created_at DESC
-     LIMIT 300`,
+     -- Every booking still current or upcoming (so one made months ahead never drops off the desk),
+     -- plus the 300 most recently made for history.
+     WHERE return_on >= (now() AT TIME ZONE 'Africa/Nairobi')::date - 60
+        OR id IN (SELECT id FROM bookings ORDER BY created_at DESC LIMIT 300)
+     ORDER BY created_at DESC`,
   );
   return result.rows.map((row) => mapStaff(row));
 }
@@ -762,7 +786,8 @@ async function decideQuote(db: Pool, id: string, staffNote: string, nextStatus: 
            delivery_manual = false,
            amount_paid = CASE WHEN $2 = 'confirmed' THEN GREATEST(amount_paid, $5) ELSE amount_paid END,
            staff_note = CASE WHEN $6 = '' THEN staff_note ELSE $6 END,
-           confirmed_at = CASE WHEN $2 = 'confirmed' THEN now() ELSE confirmed_at END
+           confirmed_at = CASE WHEN $2 = 'confirmed' THEN now() ELSE confirmed_at END,
+           held_at = now()
        WHERE id = $1 AND status = 'quote'`,
       [id, nextStatus, vehicleId, fee, total, staffNote],
     );
@@ -795,7 +820,7 @@ export type BookingEdit = {
   amountPaid?: unknown;
 };
 
-// Staff correct a booking on the desk. Dates, times, model, customer details, damage cover, the M-Pesa code,
+// Staff correct a booking on the desk. Dates, times, model, customer details, the collision damage waiver, the M-Pesa code,
 // the note and (for a priced delivery) the delivery charge can change. The status stays the same.
 // If the model or dates change on a held or paid booking, a free vehicle is found again, keeping the
 // current vehicle when it is still free. Totals are recalculated from the model's daily rate.
@@ -1308,7 +1333,7 @@ export async function removeLicenceOnFile(email: string) {
 }
 
 // Performance analysis (owners only): hire days and income per vehicle per day for one year, built from held and
-// paid bookings. Income is the hire and damage cover charge spread evenly over the hire days, net of 16% VAT
+// paid bookings. Income is the hire and collision damage waiver charges spread evenly over the hire days, net of 16% VAT
 // (the hire rates include VAT); delivery charges are left out. Days after today are not counted.
 export type PerformanceYear = {
   year: number;
@@ -1519,7 +1544,17 @@ export async function loginStaff(username: string, password: string) {
     (error as Error & { status?: number }).status = 503;
     throw error;
   }
-  const name = username.trim().toLowerCase();
+  const name = username.trim().toLowerCase().slice(0, 60);
+  // After LOGIN_LIMIT wrong attempts on a username within 15 minutes, refuse further tries for a while.
+  const recent = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM staff_login_failures WHERE username = $1 AND at > now() - interval '15 minutes'`,
+    [name],
+  );
+  if (recent.rows[0].n >= LOGIN_LIMIT) {
+    const error = new Error("Too many attempts. Please wait 15 minutes and try again.");
+    (error as Error & { status?: number }).status = 429;
+    throw error;
+  }
   const found = await db.query<{ id: number; password_hash: string; salt: string }>(
     "SELECT id, password_hash, salt FROM staff_users WHERE username = $1",
     [name],
@@ -1527,10 +1562,14 @@ export async function loginStaff(username: string, password: string) {
   const row = found.rows[0];
   const matches = row ? passwordMatches(password, row.salt, row.password_hash) : passwordMatches(password, "00".repeat(16), crypto.pbkdf2Sync("dummy-password", "00".repeat(16), 100000, 64, "sha512").toString("hex"));
   if (!row || !matches) {
+    await db.query(`INSERT INTO staff_login_failures (username) VALUES ($1)`, [name]);
     const error = new Error("Those details were not recognised.");
     (error as Error & { status?: number }).status = 401;
     throw error;
   }
+  // Tidy up: this user's failed attempts, old failures, and expired sessions.
+  await db.query(`DELETE FROM staff_login_failures WHERE username = $1 OR at < now() - interval '1 day'`, [name]);
+  await db.query(`DELETE FROM staff_sessions WHERE expires_at < now()`);
   const token = crypto.randomBytes(32).toString("hex");
   const expires = new Date(Date.now() + SESSION_DAYS * 86400000);
   await db.query("INSERT INTO staff_sessions (token_hash, staff_id, expires_at) VALUES ($1, $2, $3)", [

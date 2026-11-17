@@ -1,24 +1,45 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CONTACT } from "../lib/contact";
+import { COMPANY, CONTACT } from "../lib/contact";
+import { type LatLng } from "./PinMap";
+import PinPicker from "./PinPicker";
+import PaymentDetails from "./PaymentDetails";
+import ReviewPrompt, { rememberForReview, reviewUrl, skipReview } from "./ReviewPrompt";
+import { mpesaCodeHint } from "../lib/payments";
+import { LicencePicker, SignatureBox } from "./CheckoutDocuments";
+import { buildBookingPdf, downloadPdf, loadPdfLogo, type BookingPdfData } from "../lib/bookingPdf";
+import {
+  AGREEMENT_TEXT,
+  AGREEMENT_TITLE,
+  AGREEMENT_VERSION,
+  MAX_DRIVERS,
+  CANCELLATION_SUMMARY,
+  agreementLine,
+  bookingSchedule,
+  damageLimitFor,
+  mileageFor,
+  type DocImage,
+} from "../lib/documents";
 import {
   addDays,
   assessBooking,
   assessmentError,
   dateProblem,
   dayNumber,
+  DELIVERY,
   DELIVERY_LABELS,
+  deliveryCharge,
   formatDay,
   HOURS,
   hoursReason,
   ksh,
   outOfHours,
   PICKUP_LOCATIONS,
-  PLACES,
-  PRICING,
   quoteDelivery,
+  straightKm,
   todayNairobi,
+  YARD,
   type AvailabilityResponse,
   type BookingInput,
   type DeliveryMode,
@@ -32,7 +53,7 @@ import {
 
 const STORED = "cfHireRequest";
 
-// Photos from Homer's design, one per model. They are illustrative until real photos replace them.
+// One photo per model (from Homer's design; the Land Cruiser is Homer's own photo, with the plate blanked).
 const PHOTOS: Record<string, string> = {
   "toyota-axio": "/images/vehicle-hire/models/toyota-axio.webp",
   "toyota-fielder": "/images/vehicle-hire/models/toyota-fielder.webp",
@@ -96,7 +117,8 @@ function scrollToId(id: string) {
 export default function HireBooking({ modelCount = 9 }: { modelCount?: number }) {
   const today = todayNairobi();
   const initialDates = useState(defaultWindow)[0];
-  const [location, setLocation] = useState<(typeof PICKUP_LOCATIONS)[number]>(PICKUP_LOCATIONS[0]);
+  // Customers either collect from the workshop in Karen or choose delivery to a pin on the map.
+  const location = PICKUP_LOCATIONS[0];
   const [pickup, setPickup] = useState(initialDates.pickup);
   const [returnOn, setReturnOn] = useState(initialDates.returnOn);
   const [pickTime, setPickTime] = useState("09:00");
@@ -104,8 +126,11 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const [type, setType] = useState("all");
   const [delivery, setDelivery] = useState<DeliveryMode>("none");
   const [address, setAddress] = useState("");
-  const [placeId, setPlaceId] = useState("");
-  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [pin, setPin] = useState<LatLng | null>(null);
+  // Collection from a different place (only for "Deliver and collect", when the toggle is on).
+  const [collectElsewhere, setCollectElsewhere] = useState(false);
+  const [collectPin, setCollectPin] = useState<LatLng | null>(null);
+  const [collectAddress, setCollectAddress] = useState("");
   const directions = "";
   const [note, setNote] = useState("");
   const [oohNote, setOohNote] = useState("");
@@ -117,6 +142,47 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const [insure, setInsure] = useState(false);
   const [mpesaCode, setMpesaCode] = useState("");
   const [terms, setTerms] = useState(false);
+  // Security update: licence photos for every driver, extra drivers, and the signed hire agreement.
+  const [mainLicence, setMainLicence] = useState<DocImage | null>(null);
+  const [extraDrivers, setExtraDrivers] = useState<{ name: string; phone: string; licence: DocImage | null }[]>([]);
+  const [sigMode, setSigMode] = useState<"drawn" | "typed">("drawn");
+  const [sigImage, setSigImage] = useState<DocImage | null>(null);
+  const [sigName, setSigName] = useState("");
+  const [pdfData, setPdfData] = useState<BookingPdfData | null>(null);
+  // Returning customers: a licence kept on file (email and mobile number both match) can be reused.
+  const [onFileSince, setOnFileSince] = useState("");
+  const [reviewDismissed, setReviewDismissed] = useState(false);
+  const [useOnFile, setUseOnFile] = useState(true);
+  const [keepOnFile, setKeepOnFile] = useState(false);
+  const usingOnFile = Boolean(onFileSince) && useOnFile;
+
+  useEffect(() => {
+    const cleanEmail = email.trim();
+    const digits = phone.replace(/\D/g, "");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail) || digits.length < 9) {
+      setOnFileSince("");
+      return;
+    }
+    let live = true;
+    const timer = window.setTimeout(() => {
+      fetch("/api/hire/licence-on-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: cleanEmail, phone }),
+      })
+        .then((response) => response.json())
+        .then((body: { onFile?: boolean; since?: string }) => {
+          if (!live) return;
+          setOnFileSince(body.onFile && body.since ? body.since : "");
+          if (body.onFile) setUseOnFile(true);
+        })
+        .catch(() => live && setOnFileSince(""));
+    }, 600);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [email, phone]);
   const [availability, setAvailability] = useState<AvailabilityResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -161,25 +227,36 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   }, [pickup, returnOn, refreshToken, dateError]);
 
   const hours = outOfHours(pickup, returnOn, pickTime, retTime);
-  // Every delivery stays a quote, as on the live page: staff set the delivery charge and the vehicle is
-  // not held until then. The place list only helps the customer type the address.
-  const deliveryQuote = quoteDelivery({ delivery, place: null, address, location, ooh: hours, directions, note });
+  // Delivery is priced from the pin: free within DELIVERY.freeKm (15 km) in a straight line of the workshop, then per km over that
+  // by vehicle type. The server works the price out again from the same pin, so this is only a preview.
   const models = useMemo(() => {
     const list = availability?.models || [];
     return type === "all" ? list : list.filter((model) => model.group === type);
   }, [availability, type]);
   const selected = (availability?.models || []).find((model) => model.id === selectedId) || null;
+  const pinPlace =
+    delivery !== "none" && pin ? { id: "pin", name: address || "Pinned location", area: "", lat: pin.lat, lng: pin.lng } : null;
+  const collecting = delivery === "both" && collectElsewhere;
+  const collectPlace =
+    collecting && collectPin
+      ? { id: "collect-pin", name: collectAddress || "Collection pin", area: "", lat: collectPin.lat, lng: collectPin.lng }
+      : null;
+  const deliveryQuote = quoteDelivery({
+    delivery,
+    place: pinPlace,
+    collectPlace,
+    address,
+    location,
+    ooh: hours,
+    directions,
+    note,
+    category: selected?.category,
+  });
   const days = availability?.days || 0;
   const hireTotal = selected ? days * selected.rate : 0;
   const insuranceTotal = selected && insure ? days * selected.addon : 0;
   const pricedDelivery = deliveryQuote.manual ? 0 : deliveryQuote.fee || 0;
   const total = hireTotal + insuranceTotal + pricedDelivery;
-
-  const suggestions = useMemo(() => {
-    const query = address.trim().toLowerCase();
-    if (query.length < 2 || placeId) return [];
-    return PLACES.filter((item) => (item.name + " " + item.area).toLowerCase().includes(query)).slice(0, 6);
-  }, [address, placeId]);
 
   function bookingInput(acceptTerms: boolean): Partial<BookingInput> {
     return {
@@ -191,6 +268,11 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       location,
       delivery,
       placeId: "",
+      pinLat: delivery !== "none" && pin ? pin.lat : "",
+      pinLng: delivery !== "none" && pin ? pin.lng : "",
+      collectLat: collectPlace ? collectPlace.lat : "",
+      collectLng: collectPlace ? collectPlace.lng : "",
+      collectAddress: collectPlace ? collectAddress : "",
       address: delivery === "none" ? "" : address,
       directions: delivery === "none" ? "" : directions,
       note: delivery === "none" ? "" : note,
@@ -204,10 +286,43 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
     };
   }
 
+  const selectedLimit = selected ? damageLimitFor(selected.name, selected.category) : null;
+
+  // The Booking Schedule shown at the top of the agreement, filled in from what the customer has entered.
+  function scheduleValues() {
+    const when = (day: string, time: string) => (day ? formatDay(day) + ", " + time + " EAT" : "");
+    const collectWhere = delivery === "none" ? location : "Delivered to " + (address || "your pin");
+    const returnWhere =
+      delivery === "none" ? location : delivery === "both" ? "Collected from " + (collectPlace ? collectAddress : address || "your pin") : location;
+    return {
+      reference: "",
+      hirer: { name: name.trim(), email: email.trim(), phone: phone.trim() },
+      verification: usingOnFile
+        ? "Licence photo on file from an earlier booking; checked at handover"
+        : "Licence photo uploaded for each driver; checked at handover",
+      drivers: [name.trim(), ...extraDrivers.map((driver) => driver.name.trim())],
+      vehicle: selected ? selected.name : "",
+      collect: collectWhere + ", " + when(pickup, pickTime),
+      ret: returnWhere + ", " + when(returnOn, retTime),
+      price:
+        "Hire " + ksh(hireTotal) +
+        (insuranceTotal ? " + collision damage waiver " + ksh(insuranceTotal) : "") +
+        (deliveryQuote.manual ? " + delivery (to be quoted)" : pricedDelivery ? " + delivery " + ksh(pricedDelivery) : "") +
+        " = " + ksh(total) + " (VAT included)",
+      damageLimit: selectedLimit,
+      waiver: insuranceTotal ? ksh(insuranceTotal) + " for " + plural(days) : "",
+      mileage: mileageFor(selected?.category),
+    };
+  }
+
   function check(acceptTerms: boolean) {
     if (!selected) return "Choose a vehicle.";
+    if (delivery !== "none" && !pin) return "For delivery, search for your address or tap the map to drop a pin.";
+    if (collecting && !collectPin) {
+      return "Drop a pin for where we collect the vehicle, or untick 'Collect the vehicle from a different place'.";
+    }
     const checked = assessBooking(
-      { id: selected.id, name: selected.name, rate: selected.rate, addon: selected.addon },
+      { id: selected.id, name: selected.name, rate: selected.rate, addon: selected.addon, category: selected.category },
       bookingInput(acceptTerms),
     );
     return assessmentError(checked) || (checked.ok ? "" : "Check the booking details.");
@@ -215,6 +330,9 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
 
   function remember(booking: PublicBookingResult) {
     setResult(booking);
+    if (booking.reviewToken) {
+      rememberForReview({ ref: booking.reference, t: booking.reviewToken, returnOn: booking.returnOn, model: booking.model });
+    }
     try {
       sessionStorage.setItem(STORED, JSON.stringify(booking));
     } catch {
@@ -229,8 +347,40 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
     scrollToId("checkout");
   }
 
+  function driversProblem() {
+    if (!usingOnFile && !mainLicence) return "Add a photo of the front of your driving licence.";
+    for (let index = 0; index < extraDrivers.length; index += 1) {
+      const driver = extraDrivers[index];
+      const n = index + 2;
+      if (driver.name.trim().length < 2) return "Enter the full name of driver " + n + ".";
+      const digits = driver.phone.replace(/\D/g, "");
+      if (digits.length < 9 || digits.length > 15) return "Enter a mobile number for driver " + n + ".";
+      if (!driver.licence) return "Add a photo of the front of driver " + n + "'s licence.";
+    }
+    return "";
+  }
+
+  function signatureProblem() {
+    if (sigMode === "drawn" && !sigImage) return "Draw your signature in the box, or choose to type your name.";
+    if (sigMode === "typed" && sigName.trim().length < 2) return "Type your full name to sign the hire agreement.";
+    return "";
+  }
+
+  function documentsPayload() {
+    return {
+      drivers: [
+        usingOnFile ? { name, phone, useOnFile: true } : { name, phone, licence: mainLicence },
+        ...extraDrivers.map((driver) => ({ name: driver.name, phone: driver.phone, licence: driver.licence })),
+      ],
+      signature:
+        sigMode === "drawn" ? { kind: "drawn", name, image: sigImage } : { kind: "typed", name: sigName.trim() },
+      agreementVersion: AGREEMENT_VERSION,
+      keepOnFile: !usingOnFile && keepOnFile,
+    };
+  }
+
   function goStep2() {
-    const problem = check(true);
+    const problem = check(true) || driversProblem();
     if (problem) {
       setFormError(problem);
       return;
@@ -242,7 +392,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
 
   async function submit() {
     if (!selected) return;
-    const problem = check(terms);
+    const problem = check(true) || driversProblem() || signatureProblem() || (terms ? "" : "Tick the box to confirm you have read and signed the hire agreement.");
     if (problem) {
       setFormError(problem);
       return;
@@ -253,11 +403,16 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       const response = await fetch("/api/hire/bookings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bookingInput(terms)),
+        body: JSON.stringify({ ...bookingInput(terms), documents: documentsPayload() }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "The booking could not be saved.");
+      setPdfData(pdfFor(body as PublicBookingResult));
       remember(body);
+      setMainLicence(null);
+      setExtraDrivers([]);
+      setSigImage(null);
+      setSigName("");
       setSelectedId("");
       setStep(1);
       setTerms(false);
@@ -269,6 +424,69 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // The customer's PDF copy is made here in the browser from what they have just entered,
+  // so their licence photos are never served back over the internet.
+  function pdfFor(booking: PublicBookingResult): BookingPdfData {
+    const now = new Date();
+    const stamp = now.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Africa/Nairobi" });
+    const locationLines =
+      delivery === "none"
+        ? ["Collect from our workshop: " + CONTACT.locationShort + ".", "Return the vehicle to the same place."]
+        : [
+            booking.summary,
+            pin ? "Pin: " + pin.lat.toFixed(5) + ", " + pin.lng.toFixed(5) + " · about " + straightKm(pin.lat, pin.lng) + " km in a straight line from our workshop" : "",
+            note.trim() ? "Delivery instructions: " + note.trim() : "",
+          ].filter(Boolean);
+    const perDay = (amount: number) => ksh(booking.days ? amount / booking.days : 0);
+    const costs: BookingPdfData["costs"] = [
+      { label: "Vehicle hire: " + booking.model, qty: plural(booking.days), unit: perDay(booking.hireTotal), amount: ksh(booking.hireTotal) },
+    ];
+    if (booking.insuranceTotal) {
+      costs.push({ label: "Collision damage waiver", qty: plural(booking.days), unit: perDay(booking.insuranceTotal), amount: ksh(booking.insuranceTotal) });
+    }
+    if (delivery !== "none") {
+      costs.push({
+        label: delivery === "both" ? "Delivery and collection" : "Delivery",
+        qty: "1",
+        sub: !booking.manual ? deliveryQuote.breakdown : "",
+        amount: booking.manual ? "Quoted before you pay" : booking.deliveryFee ? ksh(booking.deliveryFee) : "Free",
+      });
+    }
+    return {
+      reference: booking.reference,
+      status: booking.manual ? "Request received – delivery to be priced by us" : "Vehicle held – awaiting full payment",
+      created: stamp,
+      vehicle: booking.model,
+      pickupText: formatDay(booking.pickup) + ", " + booking.pickTime,
+      returnText: formatDay(booking.returnOn) + ", " + booking.retTime,
+      daysText: plural(booking.days),
+      location: locationLines,
+      costs,
+      totalLabel: booking.manual ? "Hire so far" : "Due in full",
+      paid: booking.manual ? undefined : ksh(0),
+      balance: booking.manual ? undefined : ksh(booking.total),
+      total: ksh(booking.total),
+      customer: { name: name.trim(), phone: phone.trim(), email: email.trim() },
+      drivers: [
+        usingOnFile
+          ? {
+              name: name.trim(),
+              phone: phone.trim(),
+              licenceNote: "Licence on file from " + onFileSince + ". Bring it to collection, where we check it.",
+            }
+          : { name: name.trim(), phone: phone.trim(), licence: mainLicence! },
+        ...extraDrivers.map((driver) => ({ name: driver.name.trim(), phone: driver.phone.trim(), licence: driver.licence! })),
+      ],
+      signature: sigMode === "drawn" ? { kind: "drawn", name: name.trim(), image: sigImage! } : { kind: "typed", name: sigName.trim() },
+      signedAt: stamp,
+      agreementTitle: AGREEMENT_TITLE,
+      agreementVersion: AGREEMENT_VERSION,
+      agreementText: AGREEMENT_TEXT,
+      schedule: bookingSchedule({ ...scheduleValues(), reference: booking.reference }),
+      footer: COMPANY.name + " Ltd · " + COMPANY.postal + " · Tel " + CONTACT.phoneDisplay + " · " + CONTACT.email,
+    };
   }
 
   async function sendCode(event: React.FormEvent) {
@@ -298,6 +516,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
 
   function bookAnother() {
     setResult(null);
+    setPdfData(null);
     setCodeMessage("");
     try {
       sessionStorage.removeItem(STORED);
@@ -310,42 +529,32 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const wa = "https://wa.me/" + CONTACT.whatsappE164.replace(/\D/g, "");
   const tel = "tel:" + CONTACT.phoneE164.replace(/\s/g, "");
   const summaryLine = availability
-    ? plural(availability.days) + " · " + formatDay(pickup) + " to " + formatDay(returnOn) + " · " + location
+    ? plural(availability.days) +
+      " · " +
+      formatDay(pickup) +
+      " to " +
+      formatDay(returnOn) +
+      " · " +
+      (delivery === "none" ? "Collect in Karen" : "Delivered to you")
     : "Choose your dates to see availability and totals";
   const deliveryHelp =
     delivery === "both"
       ? "Tell us where to deliver the vehicle and where to collect it at the end."
-      : "Tell us where to deliver the vehicle. You return it to " + location + ".";
+      : "Tell us where to deliver the vehicle. You return it to our workshop in Karen.";
   const showCheckout = Boolean(selected || result);
   const manual = deliveryQuote.manual;
 
   return (
     <>
       <div className={sectionWrap}>
+        <ReviewPrompt />
         {/* Find your vehicle */}
         <div
           id="book"
           className="scroll-mt-28 border border-[#d9d1b8] bg-white px-5 py-[22px] text-[#171717] shadow-[0_6px_18px_rgba(60,50,20,0.08)] sm:px-6"
         >
           <h2 className="mb-4 text-[22px] font-bold tracking-[-0.02em]">Find your vehicle</h2>
-          <div className="grid items-end gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(190px,1fr))]">
-            <div>
-              <label htmlFor="loc" className={label}>
-                Pick-up location
-              </label>
-              <select
-                id="loc"
-                value={location}
-                onChange={(event) => setLocation(event.target.value as (typeof PICKUP_LOCATIONS)[number])}
-                className={field}
-              >
-                {PICKUP_LOCATIONS.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div className="grid items-end gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr))]">
             <div>
               <label htmlFor="pdate" className={label}>
                 Pick-up date and time
@@ -422,7 +631,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                 onChange={(event) => setDelivery(event.target.value as DeliveryMode)}
                 className={field}
               >
-                <option value="none">No, I will collect it</option>
+                <option value="none">No, I will collect it in Karen</option>
                 <option value="deliver">Deliver to me</option>
                 <option value="both">Deliver and collect</option>
               </select>
@@ -436,78 +645,126 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
             <div className="mt-[18px] border-t border-[#e5e5e5] pt-4">
               <div className="text-base font-bold">Where should we deliver?</div>
               <p className="mb-3 mt-0.5 text-[13px] text-[#595959]">
-                {deliveryHelp} Search for a place, or type the address.
+                {deliveryHelp} Search for your address, or tap the map to drop a pin where you want the vehicle.
               </p>
-              <div className="relative">
-                <label htmlFor="daddr" className={label}>
-                  Delivery address
-                </label>
-                <input
-                  id="daddr"
-                  type="text"
-                  autoComplete="off"
-                  value={address}
-                  onChange={(event) => {
-                    setAddress(event.target.value);
-                    setPlaceId("");
-                    setShowSuggestions(true);
-                  }}
-                  onFocus={() => setShowSuggestions(true)}
-                  onBlur={() => window.setTimeout(() => setShowSuggestions(false), 150)}
-                  placeholder="Start typing, e.g. Village Market or Naivasha"
-                  className={roundField}
-                />
-                {showSuggestions && suggestions.length > 0 && (
-                  <div
-                    role="listbox"
-                    aria-label="Suggested places"
-                    className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-lg border border-[#c8c8c8] bg-white shadow-[0_8px_24px_rgba(0,0,0,0.12)]"
-                  >
-                    {suggestions.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        role="option"
-                        aria-selected={false}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => {
-                          setPlaceId(item.id);
-                          setAddress(item.name + ", " + item.area);
-                          setShowSuggestions(false);
-                        }}
-                        className="block w-full cursor-pointer border-0 border-b border-[#f0f0f0] bg-white px-3.5 py-2.5 text-left text-sm text-[#171717] hover:bg-[#f7f7f5]"
-                      >
-                        <strong>{item.name}</strong> <span className="text-[#595959]">· {item.area}</span>
-                      </button>
-                    ))}
-                    <div className="bg-[#f7f7f5] px-3.5 py-1.5 text-[11px] text-[#595959]">
-                      Not in the list? Type the full address.
-                    </div>
-                  </div>
-                )}
-              </div>
+              <PinPicker
+                idPrefix="d"
+                searchLabel="Search for the delivery address"
+                placeholder="Address, area or landmark, e.g. Village Market, Gigiri"
+                pin={pin}
+                onChange={(point, name) => {
+                  setPin(point);
+                  setAddress(name);
+                }}
+              />
 
-              {manual && address.trim().length >= 3 && (
+              {delivery === "both" && (
                 <div className="mt-3.5">
-                  <p className="rounded-lg bg-[#fef7e0] px-3 py-2.5 text-sm text-[#5f4b00]">{deliveryQuote.message}</p>
-                  <label htmlFor="lnote" className="mb-1.5 mt-3 block text-sm font-bold">
-                    Delivery details
+                  <label className="flex items-start gap-2.5 text-sm">
+                    <input
+                      id="collectElsewhere"
+                      type="checkbox"
+                      checked={collectElsewhere}
+                      onChange={(event) => setCollectElsewhere(event.target.checked)}
+                      className="mt-0.5 h-5 w-5 flex-none"
+                    />
+                    <span>
+                      <strong>Collect the vehicle from a different place</strong>
+                      <span className="block text-[13px] text-[#595959]">
+                        For example, delivered in Watamu and collected in Nanyuki. Leave this off if we collect it from the
+                        delivery address.
+                      </span>
+                    </span>
                   </label>
-                  <textarea
-                    id="lnote"
-                    rows={3}
-                    value={note}
-                    onChange={(event) => setNote(event.target.value)}
-                    placeholder="Exact place, and when you need the vehicle there"
-                    className={area}
-                  />
+                  {collectElsewhere && (
+                    <div className="mt-3 rounded-[10px] border border-[#e5e5e5] p-3.5">
+                      <div className="text-base font-bold">Where should we collect it from?</div>
+                      <p className="mb-3 mt-0.5 text-[13px] text-[#595959]">
+                        Search for the collection address, or tap the map to drop a second pin.
+                      </p>
+                      <PinPicker
+                        idPrefix="c"
+                        searchLabel="Search for the collection address"
+                        placeholder="Collection address, area or landmark"
+                        pin={collectPin}
+                        onChange={(point, name) => {
+                          setCollectPin(point);
+                          setCollectAddress(name);
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
+              {pin && (
+                <div className="mt-3 rounded-[10px] border border-[#e5e5e5] bg-[#f5f5f3] px-4 py-3.5">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5">
+                    <div className="min-w-0">
+                      <strong className="break-words">{collecting ? "Delivery: " : ""}{address}</strong>
+                      <div className="text-[13px] text-[#595959]">
+                        About {straightKm(pin.lat, pin.lng)} km in a straight line from our workshop in Karen
+                      </div>
+                      {collecting && collectPin && (
+                        <>
+                          <strong className="mt-2 block break-words">Collection: {collectAddress}</strong>
+                          <div className="text-[13px] text-[#595959]">
+                            About {straightKm(collectPin.lat, collectPin.lng)} km in a straight line from our workshop in Karen
+                          </div>
+                        </>
+                      )}
+                      {collecting && !collectPin && (
+                        <div className="mt-2 text-[13px] font-bold text-[#5f4b00]">Drop the collection pin to see the full price.</div>
+                      )}
+                    </div>
+                    {selected && (
+                      <div className="text-right">
+                        <div className="text-xl font-bold">{deliveryQuote.fee ? ksh(deliveryQuote.fee) : "Free"}</div>
+                        <div className="max-w-[320px] text-[13px] text-[#595959]">{deliveryQuote.breakdown}</div>
+                      </div>
+                    )}
+                  </div>
+                  {!selected && (
+                    <p className="mt-2 text-sm text-[#3f3f3f]">
+                      {(() => {
+                        const km = straightKm(pin.lat, pin.lng);
+                        const backKm = collecting && collectPin ? straightKm(collectPin.lat, collectPin.lng) : km;
+                        const trips = delivery === "both" ? 2 : 1;
+                        const price = (cat: "saloon" | "suv" | "4x4") =>
+                          trips === 2
+                            ? deliveryCharge(km, cat, 1).fee + deliveryCharge(backKm, cat, 1).fee
+                            : deliveryCharge(km, cat, 1).fee;
+                        if (price("4x4") === 0) return "Delivery is free for every vehicle.";
+                        return (
+                          "Delivery charge: saloon " + ksh(price("saloon")) + " · SUV " + ksh(price("suv")) + " · Prado or 4x4 " +
+                          ksh(price("4x4")) +
+                          (trips === 2 ? " (delivery and collection)" : "") +
+                          ". It is added to the full amount when you book."
+                        );
+                      })()}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <label htmlFor="lnote" className="mb-1.5 mt-3.5 block text-[13px] text-[#595959]">
+                Delivery instructions (optional)
+              </label>
+              <textarea
+                id="lnote"
+                rows={2}
+                maxLength={500}
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                placeholder="e.g. Gate B, ask for me at reception, or call when you arrive"
+                className={area}
+              />
+
               <p className="mt-2.5 text-xs text-[#595959]">
-                Collection from Karen, JKIA or Wilson Airport is included. Delivery inside Nairobi is free during opening
-                hours. Otherwise it is {ksh(PRICING.base)} per trip plus {ksh(PRICING.perKm)} per km after the first{" "}
-                {PRICING.freeKm} km, measured by road from our workshop in Karen.
+                Delivery is free within {DELIVERY.freeKm} km of our workshop in Karen, measured in a straight line to your
+                pin. Beyond that, each km over {DELIVERY.freeKm} costs {ksh(DELIVERY.perKm.saloon)} for a saloon,{" "}
+                {ksh(DELIVERY.perKm.suv)} for an SUV and {ksh(DELIVERY.perKm["4x4"])} for a Prado or 4x4
+                {delivery === "both" ? ", for each trip" : ""}.
               </p>
             </div>
           )}
@@ -529,7 +786,6 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
               <p className="mb-2.5 mt-1 text-sm">
                 We are open Monday to Friday 08:00–17:00 and Saturday 08:00–13:00. Tell us what you need below and we will
                 arrange it with you.
-                {delivery !== "none" && " Delivery inside Nairobi is charged by distance outside opening hours."}
               </p>
               <label htmlFor="oohNote" className="mb-1.5 block text-[13px] font-bold text-[#3f3f3f]">
                 Out-of-hours details
@@ -695,6 +951,39 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                   )}
                 </div>
                 {!result.manual && (
+                  <div className="mx-auto mb-[18px] max-w-[620px] text-left">
+                    <div className="mb-2 text-center text-sm font-bold">
+                      How to pay {ksh(result.total)}
+                    </div>
+                    <PaymentDetails reference={result.reference} />
+                  </div>
+                )}
+                {pdfData && pdfData.reference === result.reference ? (
+                  <div className="mx-auto mb-[18px] max-w-[520px] rounded-lg border-2 border-[#171717] bg-white p-4 text-left">
+                    <strong className="block">Your booking PDF</strong>
+                    <p className="mt-1 text-[13px] text-[#595959]">
+                      Your details, signed agreement, licence photos, dates and costs. Please download and keep it as your
+                      confirmation.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={async () =>
+                        downloadPdf(
+                          buildBookingPdf({ ...pdfData, logo: await loadPdfLogo() }),
+                          "Chequered-Flag-" + pdfData.reference + ".pdf",
+                        )
+                      }
+                      className={btnDark + " mt-3"}
+                    >
+                      Download booking PDF
+                    </button>
+                  </div>
+                ) : (
+                  <p className="mx-auto mb-[18px] max-w-[520px] text-[13px] text-[#595959]">
+                    Your booking PDF is kept on our booking desk. Contact us if you need a copy.
+                  </p>
+                )}
+                {!result.manual && (
                   <form
                     onSubmit={sendCode}
                     className="mx-auto mb-[18px] flex max-w-[520px] flex-col gap-3 text-left sm:flex-row sm:items-end"
@@ -707,8 +996,10 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                         id="laterCode"
                         value={laterCode}
                         onChange={(event) => setLaterCode(event.target.value)}
+                        placeholder="e.g. QJK3X7AB12"
                         className={roundField}
                       />
+                      {mpesaCodeHint(laterCode) && <p className="mt-1 text-[13px] font-bold text-[#7a3e00]">{mpesaCodeHint(laterCode)}</p>}
                     </div>
                     <button type="submit" className={btnLight}>
                       Send code
@@ -716,6 +1007,30 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                   </form>
                 )}
                 {codeMessage && <p className="mb-4 text-sm text-[#3f3f3f]">{codeMessage}</p>}
+                {result.reviewToken && !reviewDismissed && (
+                  <div className="mx-auto mb-[18px] max-w-[520px] rounded-lg border border-[#e5e5e5] bg-[#fafaf8] p-4 text-left">
+                    <strong className="block">Tell us how it went</strong>
+                    <p className="mt-1 text-[13px] text-[#595959]">
+                      After your hire we&apos;d love a short review. Keep this link, or come back to this page after your return
+                      date and we&apos;ll remind you.
+                    </p>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-3">
+                      <a href={reviewUrl(result.reference, result.reviewToken)} className="text-sm font-bold underline">
+                        Your review link
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          skipReview(result.reference, result.reviewToken!);
+                          setReviewDismissed(true);
+                        }}
+                        className="text-[13px] font-semibold text-[#595959] underline"
+                      >
+                        No thanks
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <button type="button" onClick={bookAnother} className={btnDark}>
                   Book another vehicle
                 </button>
@@ -773,9 +1088,133 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                           />
                         </div>
                       </div>
+                      <div className="mt-4">
+                        {usingOnFile ? (
+                          <div className="rounded-lg border border-[#81c995] bg-[#eef8f1] p-3.5 text-sm">
+                            <strong className="block text-[#0d5a2a]">Welcome back. We have your driving licence on file.</strong>
+                            <span className="mt-0.5 block text-[#3f3f3f]">
+                              Saved in {onFileSince}, so you don&apos;t need to upload it again. Please bring it to collection,
+                              where we check it.
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setUseOnFile(false)}
+                              className="mt-2 text-[13px] font-semibold underline"
+                            >
+                              Upload a new photo instead
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <LicencePicker
+                              id="licMain"
+                              label="Your driving licence (front)"
+                              value={mainLicence}
+                              onChange={(image) => {
+                                setMainLicence(image);
+                                if (image && /licence/i.test(formError)) setFormError("");
+                              }}
+                            />
+                            {onFileSince && (
+                              <button
+                                type="button"
+                                onClick={() => setUseOnFile(true)}
+                                className="mt-1.5 text-[13px] font-semibold underline"
+                              >
+                                Use the licence we have on file instead
+                              </button>
+                            )}
+                            <label className="mt-2.5 flex items-start gap-2.5 text-[13px] text-[#3f3f3f]">
+                              <input
+                                id="keepOnFile"
+                                type="checkbox"
+                                checked={keepOnFile}
+                                onChange={(event) => setKeepOnFile(event.target.checked)}
+                                className="mt-0.5 h-[18px] w-[18px] flex-none"
+                              />
+                              <span>
+                                Keep my licence on file for 12 months, so I don&apos;t need to upload it next time I book with
+                                this email and mobile number. You can ask us to remove it at any time.
+                              </span>
+                            </label>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="mt-5">
+                        <div className="text-[15px] font-bold">Other drivers</div>
+                        <p className="mt-0.5 text-[13px] text-[#595959]">
+                          Only drivers named here may drive the vehicle. Add anyone else who might drive it during the hire.
+                        </p>
+                        {extraDrivers.map((driver, index) => (
+                          <div key={index} className="mt-3 rounded-lg border border-[#e5e5e5] bg-white p-3.5">
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <strong className="text-sm">Driver {index + 2}</strong>
+                              <button
+                                type="button"
+                                onClick={() => setExtraDrivers((list) => list.filter((_, i) => i !== index))}
+                                className="text-[13px] font-semibold underline"
+                              >
+                                Remove driver
+                              </button>
+                            </div>
+                            <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(200px,1fr))]">
+                              <div>
+                                <label htmlFor={"dName" + index} className={label}>
+                                  Full name
+                                </label>
+                                <input
+                                  id={"dName" + index}
+                                  value={driver.name}
+                                  onChange={(event) =>
+                                    setExtraDrivers((list) => list.map((d, i) => (i === index ? { ...d, name: event.target.value } : d)))
+                                  }
+                                  autoComplete="off"
+                                  className={field}
+                                />
+                              </div>
+                              <div>
+                                <label htmlFor={"dPhone" + index} className={label}>
+                                  Mobile number
+                                </label>
+                                <input
+                                  id={"dPhone" + index}
+                                  type="tel"
+                                  value={driver.phone}
+                                  onChange={(event) =>
+                                    setExtraDrivers((list) => list.map((d, i) => (i === index ? { ...d, phone: event.target.value } : d)))
+                                  }
+                                  autoComplete="off"
+                                  placeholder="+254"
+                                  className={field}
+                                />
+                              </div>
+                            </div>
+                            <div className="mt-3">
+                              <LicencePicker
+                                id={"dLic" + index}
+                                label={"Driver " + (index + 2) + "'s driving licence (front)"}
+                                value={driver.licence}
+                                onChange={(image) => {
+                                  setExtraDrivers((list) => list.map((d, i) => (i === index ? { ...d, licence: image } : d)));
+                                  if (image && /licence/i.test(formError)) setFormError("");
+                                }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                        {extraDrivers.length < MAX_DRIVERS - 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setExtraDrivers((list) => [...list, { name: "", phone: "", licence: null }])}
+                            className={btnLight + " mt-3"}
+                          >
+                            + Add driver
+                          </button>
+                        )}
+                      </div>
                       <p className="mt-3 text-[13px] text-[#595959]">
-                        Please bring your driving licence and ID to collection. We check them at handover, so there is
-                        nothing to upload now.
+                        Every driver must be at least 25. Please also bring the licences and ID to collection.
                       </p>
                       {formError && (
                         <p role="alert" className="mt-3 text-sm font-bold text-[#9b1c1c]">
@@ -817,11 +1256,15 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                             className="mt-px h-[22px] w-[22px] flex-none"
                           />
                           <label htmlFor="insBox" className="text-sm leading-normal">
-                            <strong>Add damage cover for {ksh(selected.addon)} a day</strong>
+                            <strong>Add the collision damage waiver for {ksh(selected.addon)} a day</strong>
                             <br />
                             <span className="text-[#595959]">
-                              Covers damage to the vehicle, repaired by our own workshop. Without it, you pay for any
-                              damage.
+                              {selectedLimit
+                                ? "Without it, you pay for damage to this vehicle up to " + ksh(selectedLimit) + " for the whole hire. "
+                                : ""}
+                              With it, you don&apos;t pay for accident or collision damage. Fines, and damage to the
+                              suspension, tyres, transmission or underbody from bad driving or off-road use, are not
+                              covered.
                             </span>
                           </label>
                         </div>
@@ -850,6 +1293,25 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                             <li>Pay the full amount by M-Pesa or bank transfer, and quote the booking reference.</li>
                             <li>We check the payment and confirm your booking.</li>
                           </ol>
+                          <div className="mb-3">
+                            <PaymentDetails />
+                          </div>
+                          <dl className="mb-3 grid gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3.5 py-3 text-[13px]">
+                            <div>
+                              <dt className="inline font-bold">Damage liability limit: </dt>
+                              <dd className="inline">
+                                {selectedLimit ? ksh(selectedLimit) + " per hire, the most you pay for damage to the vehicle (clause 7)." : "Not set"}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="inline font-bold">Cancellation: </dt>
+                              <dd className="inline">{CANCELLATION_SUMMARY}</dd>
+                            </div>
+                            <div>
+                              <dt className="inline font-bold">Mileage: </dt>
+                              <dd className="inline">{selected ? mileageFor(selected.category) : ""}</dd>
+                            </div>
+                          </dl>
                           <p className="text-[13px] text-[#595959]">Nothing is taken on this page.</p>
                           <label htmlFor="mpesa" className={label + " mt-3"}>
                             M-Pesa code (optional, if you have already paid)
@@ -858,10 +1320,86 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                             id="mpesa"
                             value={mpesaCode}
                             onChange={(event) => setMpesaCode(event.target.value)}
+                            placeholder="e.g. QJK3X7AB12"
                             className={roundField}
                           />
+                          {mpesaCodeHint(mpesaCode) && (
+                            <p className="mt-1 text-[13px] font-bold text-[#7a3e00]">{mpesaCodeHint(mpesaCode)}</p>
+                          )}
                         </div>
                       )}
+
+                      <div className="mt-5">
+                        <div className="text-[15px] font-bold">{AGREEMENT_TITLE}</div>
+                        <p className="mt-0.5 text-[13px] text-[#595959]">Scroll inside the box to read it all.</p>
+                        <div
+                          tabIndex={0}
+                          role="region"
+                          aria-label={AGREEMENT_TITLE}
+                          className="mt-2 h-[300px] overflow-y-auto overscroll-contain rounded-lg border border-[#c8c8c8] bg-white text-sm leading-relaxed text-[#3f3f3f] focus:outline focus:outline-2 focus:outline-[#171717]"
+                        >
+                          {/* Letterhead look: a faint chequered strip down the left and the logo top right, as in the PDF */}
+                          <div className="relative min-h-full py-3 pl-9 pr-4">
+                          <div
+                            aria-hidden="true"
+                            className="pointer-events-none absolute inset-y-0 left-0 w-[18px]"
+                            style={{ background: "repeating-conic-gradient(#ececea 0 25%, transparent 0 50%) 0 0 / 18px 18px" }}
+                          />
+                          <div className="mb-2 flex items-start justify-between gap-3">
+                            <p className="pt-1 text-base font-bold text-[#171717]">{AGREEMENT_TITLE}</p>
+                            <img
+                              src="/images/brand/chequered-flag-ltd.jpg"
+                              alt="The Chequered Flag Ltd"
+                              width={96}
+                              height={44}
+                              className="h-auto w-[96px] flex-none"
+                            />
+                          </div>
+                          {AGREEMENT_TEXT.map((paragraph, index) => {
+                            const line = agreementLine(paragraph);
+                            if (line.kind === "heading") {
+                              return (
+                                <p key={index} className="mb-1.5 mt-4 font-bold text-[#171717]">
+                                  {line.text}
+                                </p>
+                              );
+                            }
+                            if (line.kind === "schedule") {
+                              return (
+                                <dl key={index} className="mb-3 grid gap-px overflow-hidden rounded-md border border-[#e5e5e5] bg-[#e5e5e5] text-[13px]">
+                                  {bookingSchedule(scheduleValues()).map(([label, value]) => (
+                                    <div key={label} className="grid gap-x-3 bg-white px-3 py-1.5 sm:grid-cols-[190px_minmax(0,1fr)]">
+                                      <dt className="text-[#595959]">{label}</dt>
+                                      <dd className="text-[#171717]">{value}</dd>
+                                    </div>
+                                  ))}
+                                </dl>
+                              );
+                            }
+                            return (
+                              <p key={index} className={line.level === 2 ? "mb-1 pl-8" : line.level === 1 ? "mb-2 pl-4" : "mb-2"}>
+                                {line.text}
+                              </p>
+                            );
+                          })}
+                          <p className="mt-3 text-xs text-[#595959]">Version {AGREEMENT_VERSION}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4">
+                        <div className="mb-1 text-[15px] font-bold">Sign the agreement</div>
+                        <SignatureBox
+                          mode={sigMode}
+                          onMode={setSigMode}
+                          typedName={sigName}
+                          onTypedName={setSigName}
+                          onDrawn={(image) => {
+                            setSigImage(image);
+                            if (image && /signature|sign the hire/i.test(formError)) setFormError("");
+                          }}
+                        />
+                      </div>
 
                       <div className="mt-3.5 flex items-start gap-2.5">
                         <input
@@ -872,7 +1410,8 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                           className="mt-px h-[22px] w-[22px] flex-none"
                         />
                         <label htmlFor="termsBox" className="text-sm leading-normal">
-                          I am at least 25 and I will bring a valid driving licence and ID to collection.
+                          I agree to the Rental Terms. I have read and signed the hire agreement, and every driver named on
+                          this booking is at least 25 with a valid driving licence.
                         </label>
                       </div>
                       {formError && (
@@ -923,10 +1462,17 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                     <div>
                       to {formatDay(returnOn)}, {retTime}
                     </div>
-                    <div>{location}</div>
-                    {delivery !== "none" && (
+                    {delivery === "none" ? (
+                      <div>Collect from our workshop in Karen</div>
+                    ) : (
                       <div>
                         <strong>Delivery:</strong> {DELIVERY_LABELS[delivery]}
+                        {address ? " · " + address : ""}
+                        {collectPlace && (
+                          <span className="block">
+                            <strong>Collection:</strong> {collectAddress}
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
@@ -945,7 +1491,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                     )}
                     {insuranceTotal > 0 && (
                       <div className="flex justify-between gap-2">
-                        <span>Damage cover, {plural(days)}</span>
+                        <span>Collision damage waiver, {plural(days)}</span>
                         <span>{ksh(insuranceTotal)}</span>
                       </div>
                     )}
@@ -983,14 +1529,11 @@ function VehicleCard({
         <div className="relative">
           <img
             src={photo}
-            alt={model.name + ", illustrative photo"}
+            alt={model.name}
             loading="lazy"
             decoding="async"
             className="block h-[118px] w-full object-cover object-[center_60%]"
           />
-          <span className="absolute bottom-2 left-2 rounded bg-[rgba(23,23,23,0.78)] px-[7px] py-0.5 text-[11px] font-semibold text-white">
-            Illustrative photo
-          </span>
         </div>
       ) : (
         <div className="grid h-[118px] place-items-center bg-[#ececea] p-2.5 text-center text-[13px] text-[#595959]">
@@ -1023,7 +1566,15 @@ function VehicleCard({
           </div>
         )}
 
-        {model.available ? (
+        {damageLimitFor(model.name, model.category) === null ? (
+          // No damage liability limit in the hire agreement yet, so this vehicle is booked by phone.
+          <div className="mt-auto flex flex-col gap-2">
+            <div className="text-[13px] font-bold text-[#3f3f3f]">Book by phone</div>
+            <a href={"tel:" + CONTACT.phoneE164.replace(/\s/g, "")} className={btnLight + " min-h-[44px] w-full"}>
+              Call {CONTACT.phoneDisplay}
+            </a>
+          </div>
+        ) : model.available ? (
           <div className="mt-auto flex flex-col gap-2">
             <div className="text-[13px] font-bold text-[#1d6b3a]">
               Available for your dates

@@ -1,8 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { addDays, dayNumber, exclusiveEnd, formatDay, ksh, todayNairobi, type PublicBookingResult, type StaffBooking } from "../lib/hire";
+import { addDays, balanceOf, dayNumber, exclusiveEnd, formatDay, ksh, todayNairobi, type PublicBookingResult, type StaffBooking } from "../lib/hire";
 import DeskAddBooking from "./DeskAddBooking";
+import DeskEditBooking from "./DeskEditBooking";
+import DeskVehicleEdit from "./DeskVehicleEdit";
+import DeskMatchPayment from "./DeskMatchPayment";
+import DeskReviews, { AskForReview } from "./DeskReviews";
+import { bookingCodes, duplicateCodes, looksLikeMpesaCode, normaliseCode } from "../lib/payments";
+import DeskCustomers, { type LicenceOnFileRow } from "./DeskCustomers";
+import DeskPerformance from "./DeskPerformance";
+import { canSeePerformance } from "../lib/access";
+import DeskDocuments from "./DeskDocuments";
 
 // Staff desk laid out like Homer's fleet dashboard design (V1.5).
 // It only uses the data and actions the desk already had: bookings, the fleet list, staff logins,
@@ -21,10 +30,13 @@ export type DeskVehicle = {
   addon?: number;
   year?: number | null;
   km?: number | null;
+  notes?: string;
+  updatedAt?: string; // when the record was last saved (ISO)
+  updatedBy?: string;
 };
 
 type Chip = { label: string; bg: string; fg: string; bd: string };
-type SectionKey = "overview" | "calendar" | "table" | "payments" | "vehicles" | "compare" | "schedule";
+type SectionKey = "overview" | "calendar" | "table" | "payments" | "customers" | "performance" | "vehicles" | "compare" | "schedule" | "reviews";
 
 const WIN = 28;
 const PAID = { bg: "#ceead6", fg: "#0d5a2a" };
@@ -35,6 +47,7 @@ const CHIP_PAID: Chip = { label: "Paid in full", bg: "#ceead6", fg: "#0d5a2a", b
 const CHIP_AWAIT: Chip = { label: "Awaiting payment", bg: "#feefc3", fg: "#5f4400", bd: "#f9d46b" };
 const CHIP_CODE: Chip = { label: "Payment code to check", bg: "#e8f0fe", fg: "#174ea6", bd: "#aecbfa" };
 const CHIP_LATE: Chip = { label: "Unpaid, pick-up reached", bg: "#fce8e6", fg: "#a50e0e", bd: "#f1a9a3" };
+const CHIP_PART: Chip = { label: "Part paid", bg: "#fff4e5", fg: "#7a3e00", bd: "#f7b267" };
 const CHIP_QUOTE: Chip = { label: "Quote, not held", bg: "#e8def8", fg: "#3c1f7a", bd: "#cdb9f0" };
 const CHIP_CLOSED: Chip = { label: "Closed", bg: "#e8eaed", fg: "#3c4043", bd: "#dadce0" };
 
@@ -132,11 +145,24 @@ function buildDays(first: number, todayNum: number) {
   });
 }
 
+// Unpaid website holds are flagged after 24 hours, so staff can chase the customer or release the hold by hand.
+const HOLD_FLAG_HOURS = 24;
+
+function holdInfo(booking: StaffBooking) {
+  const watch = booking.status === "pending" && booking.source !== "desk" && booking.amountPaid === 0 && !booking.mpesaCode;
+  const hours = (Date.now() - Date.parse(booking.heldAt || booking.createdAt)) / 3.6e6;
+  return { flagged: watch && hours >= HOLD_FLAG_HOURS, hours: Math.floor(hours) };
+}
+
 function chipFor(booking: StaffBooking, today: string): Chip {
-  if (booking.status === "confirmed") return CHIP_PAID;
+  const part = booking.amountPaid > 0 && balanceOf(booking) > 0;
+  if (booking.status === "confirmed") return part ? { ...CHIP_PART, label: "Balance owed" } : CHIP_PAID;
   if (booking.status === "quote") return CHIP_QUOTE;
   if (booking.status === "cancelled") return CHIP_CLOSED;
-  if (booking.pickup <= today) return CHIP_LATE;
+  if (booking.pickup <= today) return part ? { ...CHIP_LATE, label: "Balance owed, pick-up reached" } : CHIP_LATE;
+  const hold = holdInfo(booking);
+  if (hold.flagged) return { label: "Unpaid for " + (hold.hours >= 48 ? Math.floor(hold.hours / 24) + " days" : "24h+"), bg: "#fff4e5", fg: "#7a3e00", bd: "#f7b267" };
+  if (part) return CHIP_PART;
   if (booking.mpesaCode) return CHIP_CODE;
   return CHIP_AWAIT;
 }
@@ -174,6 +200,7 @@ export default function HireDesk() {
   const [authError, setAuthError] = useState("");
   const [bookings, setBookings] = useState<StaffBooking[]>([]);
   const [fleet, setFleet] = useState<DeskVehicle[]>([]);
+  const [licences, setLicences] = useState<LicenceOnFileRow[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [fees, setFees] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
@@ -189,15 +216,19 @@ export default function HireDesk() {
   const [addingMember, setAddingMember] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState("");
 
   const [open, setOpen] = useState<Record<SectionKey, boolean>>({
     overview: false,
     calendar: true,
     table: false,
     payments: false,
+    customers: false,
+    performance: false,
     vehicles: false,
     compare: false,
     schedule: false,
+    reviews: false,
   });
   const [selectedId, setSelectedId] = useState("");
   const [detailOpen, setDetailOpen] = useState(true);
@@ -216,6 +247,9 @@ export default function HireDesk() {
   const [vehQuery, setVehQuery] = useState("");
   const [vehType, setVehType] = useState<(typeof TYPES)[number]["id"]>("all");
   const [vehOpen, setVehOpen] = useState<Record<string, boolean>>({});
+  const [vehEditing, setVehEditing] = useState("");
+  const [reviewsWaiting, setReviewsWaiting] = useState(0);
+  const [vehFlagOnly, setVehFlagOnly] = useState(false);
 
   async function loadSession() {
     const response = await fetch("/api/hire/session");
@@ -244,6 +278,7 @@ export default function HireDesk() {
     }
     setBookings(body.bookings || []);
     setFleet(body.fleet || []);
+    setLicences(body.licences || []);
     return body.bookings || [];
   }
 
@@ -406,6 +441,7 @@ export default function HireDesk() {
 
   function pick(id: string) {
     setSelectedId(id);
+    setEditingId("");
     setDetailOpen(true);
     window.setTimeout(() => {
       document.getElementById("booking-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -423,15 +459,31 @@ export default function HireDesk() {
     () => bookings.filter((booking) => (booking.status === "pending" || booking.status === "confirmed") && booking.vehicleId),
     [bookings],
   );
+  // A vehicle is flagged once a hire's return time has passed and its record has not been saved since.
+  const nowMs = Date.now();
+  const backFromHire = new Map<string, { booking: StaffBooking; at: number }>();
+  for (const vehicle of fleet) {
+    let last: { booking: StaffBooking; at: number } | null = null;
+    for (const booking of holds) {
+      if (booking.vehicleId !== vehicle.id) continue;
+      const at = Date.parse(booking.returnOn + "T" + booking.retTime + ":00+03:00");
+      if (Number.isFinite(at) && at <= nowMs && (!last || at > last.at)) last = { booking, at };
+    }
+    const saved = vehicle.updatedAt ? Date.parse(vehicle.updatedAt) : 0;
+    if (last && saved < last.at) backFromHire.set(vehicle.id, last);
+  }
   const current = holds.filter((booking) => lastHireDay(booking.pickup, booking.returnOn) >= today);
   const outToday = holds.filter((booking) => booking.pickup <= today && lastHireDay(booking.pickup, booking.returnOn) >= today);
   const coming = holds.filter((booking) => booking.pickup >= today && booking.pickup <= addDays(today, 6));
   const awaiting = current.filter((booking) => booking.status === "pending");
   const chase = awaiting.filter((booking) => booking.pickup <= today);
-  const awaitingTotal = awaiting.reduce((sum, booking) => sum + booking.total, 0);
-  const chaseTotal = chase.reduce((sum, booking) => sum + booking.total, 0);
+  // Money still to come in counts the balance, so part payments are taken off.
+  const awaitingTotal = awaiting.reduce((sum, booking) => sum + balanceOf(booking), 0);
+  const chaseTotal = chase.reduce((sum, booking) => sum + balanceOf(booking), 0);
   const paidCurrent = current.filter((booking) => booking.status === "confirmed");
-  const paidTotal = paidCurrent.reduce((sum, booking) => sum + booking.total, 0);
+  const fullPaidTotal = paidCurrent.reduce((sum, booking) => sum + booking.total, 0);
+  const paidTotal = current.reduce((sum, booking) => sum + Math.min(booking.amountPaid, booking.total), 0);
+  const dupCodes = duplicateCodes(bookings);
   const codesToCheck = bookings.filter((booking) => booking.status === "pending" && booking.mpesaCode);
   const quotes = bookings.filter((booking) => booking.status === "quote");
   const selected = bookings.find((booking) => booking.id === selectedId) || null;
@@ -442,17 +494,25 @@ export default function HireDesk() {
     .filter((b) => b.pickup < today && b.returnOn > today)
     .sort((a, b) => a.returnOn.localeCompare(b.returnOn));
 
+  const staleHolds = bookings.filter((booking) => holdInfo(booking).flagged);
   const chaseText = chase.length
     ? plural(chase.length, "booking") + " reached pick-up still unpaid (" + ksh(chaseTotal) + ")"
     : "";
   const flags: Record<SectionKey, string> = {
     overview: chaseText,
     calendar: "",
-    table: chaseText,
-    payments: codesToCheck.length ? plural(codesToCheck.length, "payment code") + " to check" : "",
-    vehicles: "",
+    table: [chaseText, staleHolds.length ? plural(staleHolds.length, "unpaid hold") + " over 24 hours" : ""].filter(Boolean).join(" · "),
+    payments: dupCodes.size
+      ? plural(dupCodes.size, "M-Pesa code") + " used on more than one booking"
+      : codesToCheck.length
+        ? plural(codesToCheck.length, "payment code") + " to check"
+        : "",
+    customers: "",
+    performance: "",
+    vehicles: backFromHire.size ? plural(backFromHire.size, "vehicle") + " back from hire to check" : "",
     compare: chase.length ? plural(chase.length, "booking") + " unpaid at pick-up" : "",
     schedule: "",
+    reviews: reviewsWaiting ? plural(reviewsWaiting, "review") + " waiting for approval" : "",
   };
 
   // Calendar
@@ -545,6 +605,7 @@ export default function HireDesk() {
   const thisYear = Number(today.slice(0, 4));
   const vehCards = fleet
     .filter((vehicle) => vehType === "all" || vehicle.category === vehType)
+    .filter((vehicle) => !vehFlagOnly || backFromHire.has(vehicle.id))
     .filter((vehicle) => matches(vehQuery, [vehicle.model, vehicle.plate, vehicle.year ? String(vehicle.year) : ""]))
     .map((vehicle) => {
       const mine = holds
@@ -557,10 +618,10 @@ export default function HireDesk() {
   const allVehOpen = vehCards.length > 0 && vehCards.every((card) => vehOpen[card.vehicle.id]);
 
   function downloadCsv() {
-    const header = ["Reference", "Status", "Customer", "Phone", "Email", "Vehicle", "Plate", "Pick-up", "Return", "Total (KSh)", "M-Pesa code", "Staff note"];
+    const header = ["Reference", "Status", "Customer", "Phone", "Email", "Vehicle", "Plate", "Pick-up", "Return", "Total (KSh)", "Paid so far (KSh)", "Balance (KSh)", "M-Pesa code", "Staff note"];
     const lines = [header.join(",")].concat(
       bookings.map((b) =>
-        [b.reference, chipFor(b, today).label, b.customerName, b.phone, b.email, b.model, b.plate || "", b.pickup, b.returnOn, b.total, b.mpesaCode, b.staffNote]
+        [b.reference, chipFor(b, today).label, b.customerName, b.phone, b.email, b.model, b.plate || "", b.pickup, b.returnOn, b.total, b.amountPaid, balanceOf(b), b.mpesaCode, b.staffNote]
           .map(csvCell)
           .join(","),
       ),
@@ -1194,11 +1255,46 @@ export default function HireDesk() {
                 <button type="button" aria-expanded={detailOpen} onClick={() => setDetailOpen((v) => !v)} className={btnLight + " rounded-full"}>
                   {detailOpen ? "Hide details ▲" : "Show details ▼"}
                 </button>
-                <button type="button" onClick={() => setSelectedId("")} className={btnLight + " rounded-full"}>
+                {selected.status !== "cancelled" && editingId !== selected.id && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingId(selected.id);
+                      setDetailOpen(true);
+                      setNotice("");
+                      setMessage("");
+                    }}
+                    className={btnDark + " rounded-full"}
+                  >
+                    Edit
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedId("");
+                    setEditingId("");
+                  }}
+                  className={btnLight + " rounded-full"}
+                >
                   Close
                 </button>
               </div>
             </div>
+            {editingId === selected.id && (
+              <DeskEditBooking
+                key={selected.id}
+                booking={selected}
+                fleet={fleet}
+                holds={holds}
+                onClose={() => setEditingId("")}
+                onSaved={async () => {
+                  setEditingId("");
+                  setNotice(selected.reference + " updated.");
+                  await loadBookings();
+                }}
+              />
+            )}
             {!detailOpen && (
               <p className="mt-2 text-sm text-[#595959]">
                 {selected.model} · {short(selected.pickup)} to {short(selected.returnOn)} · {ksh(selected.total)}
@@ -1225,6 +1321,13 @@ export default function HireDesk() {
                     )}
                   </Row>
                   <Row label="Booked">{formatDay(selected.createdAt.slice(0, 10))}</Row>
+                  {selected.licenceOnFile && (
+                    <Row label="Licence">
+                      <span className="inline-block rounded-[10px] border border-[#f9d46b] bg-[#feefc3] px-2 py-0.5 text-xs font-bold text-[#5f4400]">
+                        On file from an earlier booking: check it at handover
+                      </span>
+                    </Row>
+                  )}
                 </DetailBox>
 
                 <DetailBox title="Hire">
@@ -1243,13 +1346,35 @@ export default function HireDesk() {
                   <Row label="Delivery">
                     {selected.deliverySummary}
                     {selected.deliveryDetail && <span className="block whitespace-pre-line text-[#595959]">{selected.deliveryDetail}</span>}
+                    {(() => {
+                      const pin = /(?:^|\n)Pin: (-?\d+\.\d+), (-?\d+\.\d+)/.exec(selected.deliveryDetail);
+                      const back = /Collection pin: (-?\d+\.\d+), (-?\d+\.\d+)/.exec(selected.deliveryDetail);
+                      const link = (m: RegExpExecArray, text: string) => (
+                        <a
+                          href={"https://www.google.com/maps/search/?api=1&query=" + m[1] + "%2C" + m[2]}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1 block font-semibold underline"
+                        >
+                          {text}
+                        </a>
+                      );
+                      return (
+                        <>
+                          {pin && link(pin, back ? "Open delivery pin in Google Maps" : "Open pin in Google Maps")}
+                          {back && link(back, "Open collection pin in Google Maps")}
+                        </>
+                      );
+                    })()}
                   </Row>
                   {selected.ooh && <Row label="Out of hours">{selected.oohNote || "No note"}</Row>}
                 </DetailBox>
 
+                {selected.hasDocuments && <DeskDocuments booking={selected} />}
+
                 <DetailBox title="Payment">
                   <Row label="Hire">{ksh(selected.hireTotal)}</Row>
-                  {selected.insuranceTotal > 0 && <Row label="Damage cover">{ksh(selected.insuranceTotal)}</Row>}
+                  {selected.insuranceTotal > 0 && <Row label="Collision damage waiver">{ksh(selected.insuranceTotal)}</Row>}
                   <Row label="Delivery">
                     {selected.deliveryManual || selected.deliveryFee === null
                       ? "To be set"
@@ -1257,14 +1382,61 @@ export default function HireDesk() {
                         ? ksh(selected.deliveryFee)
                         : "None"}
                   </Row>
-                  <Row label={selected.status === "confirmed" ? "Paid in full" : "Due in full"}>
+                  <Row label="Total">
                     <strong>
                       {ksh(selected.total)}
                       {selected.deliveryManual ? " plus delivery" : ""}
                     </strong>
                   </Row>
-                  <Row label="M-Pesa code">{selected.mpesaCode || "None sent yet"}</Row>
+                  <Row label="Paid so far">{ksh(selected.amountPaid)}</Row>
+                  <Row label="Balance">
+                    <strong className={balanceOf(selected) > 0 ? "text-[#a50e0e]" : "text-[#0d5a2a]"}>
+                      {balanceOf(selected) > 0 ? ksh(balanceOf(selected)) : "Nothing owed"}
+                      {selected.deliveryManual ? " plus delivery" : ""}
+                    </strong>
+                  </Row>
+                  {holdInfo(selected).flagged && (
+                    <Row label="Hold">
+                      <span className="font-bold text-[#7a3e00]">
+                        Unpaid for over 24 hours. Chase the customer, or release the hold if they won&apos;t be paying.
+                      </span>
+                    </Row>
+                  )}
+                  <Row label="M-Pesa code">
+                    {selected.mpesaCode || "None sent yet"}
+                    {selected.mpesaCode && !looksLikeMpesaCode(selected.mpesaCode) && (
+                      <span className="block text-xs font-bold text-[#7a3e00]">Unusual format: check it on the statement</span>
+                    )}
+                    {bookingCodes(selected).some((code) => dupCodes.has(code)) && (
+                      <span className="block text-xs font-bold text-[#a50e0e]">
+                        This code is also on{" "}
+                        {bookingCodes(selected)
+                          .flatMap((code) => dupCodes.get(code) || [])
+                          .filter((ref) => ref !== selected.reference)
+                          .join(", ")}
+                      </span>
+                    )}
+                  </Row>
+                  {(selected.paymentLog || []).length > 0 && (
+                    <Row label="Payments">
+                      {(selected.paymentLog || []).map((entry, index) => (
+                        <span key={index} className="block">
+                          {ksh(entry.amount)}
+                          {entry.code ? " · " + entry.code : ""}
+                          <span className="text-xs text-[#595959]">
+                            {" · "}
+                            {short(new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Nairobi" }).format(new Date(entry.at)))} by {entry.by}
+                          </span>
+                        </span>
+                      ))}
+                    </Row>
+                  )}
                   {selected.staffNote && <Row label="Note">{selected.staffNote}</Row>}
+                  {(selected.status === "pending" || selected.status === "confirmed") && selected.pickup <= today && (
+                    <Row label="Review">
+                      <AskForReview key={selected.id} bookingId={selected.id} name={selected.customerName} phone={selected.phone} model={selected.model} />
+                    </Row>
+                  )}
 
                   {(selected.status === "pending" || selected.status === "confirmed" || selected.status === "quote") && (
                     <div className="mt-3 space-y-2.5">
@@ -1465,6 +1637,11 @@ export default function HireDesk() {
                         <td className="px-2 py-2.5 font-bold">
                           {ksh(booking.total)}
                           {booking.deliveryManual ? " + delivery" : ""}
+                          {booking.amountPaid > 0 && balanceOf(booking) > 0 && (
+                            <span className="block text-xs font-normal text-[#7a3e00]">
+                              Paid {ksh(booking.amountPaid)} · balance {ksh(balanceOf(booking))}
+                            </span>
+                          )}
                         </td>
                         <td className="px-2 py-2.5">{booking.mpesaCode || <span className="text-[#595959]">—</span>}</td>
                         <td className="px-2 py-2.5">
@@ -1520,9 +1697,17 @@ export default function HireDesk() {
                   value={String(codesToCheck.length)}
                   note={ksh(codesToCheck.reduce((sum, b) => sum + b.total, 0)) + " if they all match"}
                 />
-                <MiniTile label="Paid in full, current and upcoming" value={ksh(paidTotal)} note={plural(paidCurrent.length, "booking")} />
+                <MiniTile label="Received so far, current and upcoming" value={ksh(paidTotal)} note="Including part payments" />
                 <MiniTile label="Still to collect" value={ksh(awaitingTotal)} note={plural(awaiting.length, "booking") + " held"} />
               </div>
+              <DeskMatchPayment
+                bookings={bookings}
+                onOpen={pick}
+                onRecorded={async (message) => {
+                  setNotice(message);
+                  await loadBookings();
+                }}
+              />
               <div className="mb-3.5">
                 <label htmlFor="paySearch" className="mb-1.5 block text-[13px] text-[#595959]">
                   Search by name, phone, M-Pesa code or booking
@@ -1543,7 +1728,7 @@ export default function HireDesk() {
                       <th className="px-2 py-2 font-semibold">Customer</th>
                       <th className="px-2 py-2 font-semibold">Booking</th>
                       <th className="px-2 py-2 font-semibold">M-Pesa code</th>
-                      <th className="px-2 py-2 font-semibold">Amount due</th>
+                      <th className="px-2 py-2 font-semibold">Still due</th>
                       <th className="px-2 py-2 font-semibold">Status</th>
                       <th className="px-2 py-2 font-semibold">Actions</th>
                     </tr>
@@ -1561,8 +1746,25 @@ export default function HireDesk() {
                             {booking.model} · {short(booking.pickup)}
                           </span>
                         </td>
-                        <td className="px-2 py-2.5 font-bold">{booking.mpesaCode}</td>
-                        <td className="px-2 py-2.5 font-bold">{ksh(booking.total)}</td>
+                        <td className="px-2 py-2.5">
+                          <strong>{booking.mpesaCode}</strong>
+                          {dupCodes.has(normaliseCode(booking.mpesaCode)) && (
+                            <span className="mt-1 block w-fit rounded-[10px] border border-[#f1a9a3] bg-[#fce8e6] px-2 py-0.5 text-xs font-bold text-[#a50e0e]">
+                              Also on {dupCodes.get(normaliseCode(booking.mpesaCode))!.filter((r) => r !== booking.reference).join(", ")}
+                            </span>
+                          )}
+                          {!looksLikeMpesaCode(booking.mpesaCode) && (
+                            <span className="mt-1 block w-fit rounded-[10px] border border-[#f9d46b] bg-[#feefc3] px-2 py-0.5 text-xs font-bold text-[#5f4400]">
+                              Unusual format: check it
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-2 py-2.5">
+                          <strong>{ksh(balanceOf(booking))}</strong>
+                          <span className="block text-xs text-[#595959]">
+                            {booking.amountPaid > 0 ? "of " + ksh(booking.total) + " · paid " + ksh(booking.amountPaid) : "full amount"}
+                          </span>
+                        </td>
                         <td className="px-2 py-2.5">
                           <ChipView
                             chip={
@@ -1609,13 +1811,44 @@ export default function HireDesk() {
         </section>
 
 
+        {/* Customer log */}
+        <section className={card + " mt-[22px] p-[22px]"}>
+          {sectionHead("customers", "Customer log")}
+          <p className="mb-3.5 mt-1 max-w-[760px] text-sm text-[#595959]">
+            Who hires from us, how often and how much. Customers are matched by mobile number. Open a customer to see
+            their hire history.
+          </p>
+          {open.customers && <DeskCustomers
+              bookings={bookings}
+              today={today}
+              licences={licences}
+              onOpenBooking={pick}
+              onLicenceRemoved={async (who) => {
+                setNotice("Licence on file removed for " + who + ".");
+                await loadBookings();
+              }}
+            />}
+        </section>
+
+        {/* Performance (owners only: Homer and James). The server checks this too. */}
+        {canSeePerformance(signedIn) && (
+          <section className={card + " mt-[22px] p-[22px]"}>
+            {sectionHead("performance", "Performance")}
+            <p className="mb-3.5 mt-1 max-w-[760px] text-sm text-[#595959]">
+              Income, hire days and utilisation by month and by vehicle, against the 70% target. Only you and James can
+              see this section.
+            </p>
+            {open.performance && <DeskPerformance today={today} />}
+          </section>
+        )}
+
         {/* Vehicle records */}
         <section className={card + " mt-[22px] p-[22px]"}>
           {sectionHead("vehicles", "Vehicle records")}
           <p className="mb-3.5 mt-1 max-w-[760px] text-sm text-[#595959]">
-            Make, plate, year, odometer and rates for each vehicle, with what it is doing now. Read-only for now: the year
-            and odometer come from the fleet list, and editing a record will be added once James sets up somewhere to save
-            it.
+            Make, plate, year, odometer, rates and condition notes for each vehicle, with what it is doing now. Open a
+            vehicle and press Edit record to update it. When a vehicle comes back from a hire it is flagged until its record
+            is updated.
           </p>
           {open.vehicles && (
             <>
@@ -1642,7 +1875,22 @@ export default function HireDesk() {
                   </button>
                 ))}
               </div>
-              <div className="mb-3.5">
+              <div className="mb-3.5 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  aria-pressed={vehFlagOnly}
+                  onClick={() => setVehFlagOnly((value) => !value)}
+                  className={
+                    pill +
+                    (vehFlagOnly
+                      ? " border-[#a50e0e] bg-[#a50e0e] text-white"
+                      : backFromHire.size
+                        ? " border-[#f1a9a3] bg-[#fce8e6] text-[#a50e0e]"
+                        : " bg-white text-[#171717]")
+                  }
+                >
+                  Back from hire, to check ({backFromHire.size})
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -1662,8 +1910,26 @@ export default function HireDesk() {
                     ? { label: "On hire now", bg: "#e8f0fe", fg: "#174ea6", bd: "#aecbfa" }
                     : { label: "Free today", bg: "#ceead6", fg: "#0d5a2a", bd: "#81c995" };
                   const [make, ...rest] = vehicle.model.split(" ");
+                  const back = backFromHire.get(vehicle.id);
+                  const backNote = back
+                    ? "Back from " +
+                      back.booking.customerName +
+                      "'s hire (" +
+                      back.booking.reference +
+                      ") on " +
+                      short(back.booking.returnOn) +
+                      " at " +
+                      back.booking.retTime +
+                      ". Check the vehicle, then update the odometer and notes."
+                    : "";
                   return (
-                    <div key={vehicle.id} className="self-start overflow-hidden rounded-[10px] border border-[#e5e5e5] bg-white">
+                    <div
+                      key={vehicle.id}
+                      className={
+                        "self-start overflow-hidden rounded-[10px] border bg-white " +
+                        (back ? "border-[#e58b84] shadow-[inset_4px_0_0_#d93025]" : "border-[#e5e5e5]")
+                      }
+                    >
                       <button
                         type="button"
                         aria-expanded={isOpen}
@@ -1673,6 +1939,11 @@ export default function HireDesk() {
                         <span className="min-w-0">
                           <strong className="block">{vehicle.model}</strong>
                           <span className="text-[13px] text-[#595959]">Number plate {vehicle.plate}</span>
+                          {back && (
+                            <span className="mt-1 block">
+                              <ChipView chip={{ label: "Back from hire: update record", bg: "#fce8e6", fg: "#a50e0e", bd: "#f1a9a3" }} />
+                            </span>
+                          )}
                         </span>
                         <span className="flex flex-none items-center gap-2">
                           <ChipView chip={status} />
@@ -1681,8 +1952,23 @@ export default function HireDesk() {
                           </span>
                         </span>
                       </button>
-                      {isOpen && (
+                      {isOpen && vehEditing === vehicle.id && (
+                        <DeskVehicleEdit
+                          vehicle={vehicle}
+                          returnNote={backNote}
+                          onClose={() => setVehEditing("")}
+                          onSaved={async () => {
+                            setVehEditing("");
+                            setNotice(vehicle.plate + " record saved.");
+                            await loadBookings();
+                          }}
+                        />
+                      )}
+                      {isOpen && vehEditing !== vehicle.id && (
                         <div className="grid gap-1.5 border-t border-[#e5e5e5] bg-[#f5f5f3] px-3.5 py-3">
+                          {back && (
+                            <p className="rounded-md border border-[#f1a9a3] bg-[#fce8e6] px-3 py-2 text-[13px] text-[#a50e0e]">{backNote}</p>
+                          )}
                           <Row label="Make">{make}</Row>
                           <Row label="Model">{rest.join(" ")}</Row>
                           <Row label="Number plate">
@@ -1698,7 +1984,7 @@ export default function HireDesk() {
                           </Row>
                           <Row label="Odometer">{vehicle.km ? vehicle.km.toLocaleString("en-US") + " km" : "Not entered"}</Row>
                           <Row label="Daily rate">{vehicle.rate ? ksh(vehicle.rate) : "—"}</Row>
-                          <Row label="Damage cover">{vehicle.addon ? ksh(vehicle.addon) + " a day" : "—"}</Row>
+                          <Row label="Collision damage waiver">{vehicle.addon ? ksh(vehicle.addon) + " a day" : "—"}</Row>
                           <Row label="Now">
                             {now ? (
                               <button type="button" className="text-left underline" onClick={() => pick(now.id)}>
@@ -1717,6 +2003,24 @@ export default function HireDesk() {
                               "Nothing booked"
                             )}
                           </Row>
+                          <Row label="Condition notes">
+                            {vehicle.notes ? <span className="whitespace-pre-line">{vehicle.notes}</span> : <span className="text-[#595959]">None</span>}
+                          </Row>
+                          <Row label="Last updated">
+                            {vehicle.updatedAt ? (
+                              <span className="text-[#595959]">
+                                {short(new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Nairobi" }).format(new Date(vehicle.updatedAt)))}
+                                {vehicle.updatedBy ? " by " + vehicle.updatedBy : ""}
+                              </span>
+                            ) : (
+                              <span className="text-[#595959]">Never</span>
+                            )}
+                          </Row>
+                          <div className="mt-1.5">
+                            <button type="button" onClick={() => setVehEditing(vehicle.id)} className={back ? btnDark : btnLight}>
+                              {back ? "Update record" : "Edit record"}
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1751,7 +2055,7 @@ export default function HireDesk() {
                     <div className="text-[13px] font-bold">Awaiting payment</div>
                     <div className="text-[22px] font-bold">{plural(awaiting.length, "booking")}</div>
                     <div className="text-[13px] text-[#3f3f3f]">
-                      Due in full <strong>{ksh(awaitingTotal)}</strong>
+                      Balance still due <strong>{ksh(awaitingTotal)}</strong>
                       <br />
                       {chase.length ? plural(chase.length, "booking") + " already at pick-up" : "None at pick-up yet"}
                     </div>
@@ -1760,7 +2064,7 @@ export default function HireDesk() {
                     <div className="text-[13px] font-bold">Paid in full</div>
                     <div className="text-[22px] font-bold">{plural(paidCurrent.length, "booking")}</div>
                     <div className="text-[13px] text-[#3f3f3f]">
-                      Collected <strong>{ksh(paidTotal)}</strong>
+                      Collected <strong>{ksh(fullPaidTotal)}</strong>
                       <br />
                       Nothing due
                     </div>
@@ -1809,6 +2113,19 @@ export default function HireDesk() {
                 )}
               </>
             )}
+          </div>
+        </section>
+
+        {/* Customer reviews */}
+        <section className={card + " mt-[22px] p-[22px]"}>
+          {sectionHead("reviews", "Customer reviews")}
+          <p className="mb-3.5 mt-1 max-w-[760px] text-sm text-[#595959]">
+            Reviews customers leave after their hire. Approve a review to show it on the hire page, or hide it. To ask a
+            customer for a review, open their booking and press Ask for a review.
+          </p>
+          {/* Always mounted so the header can show how many are waiting; the list only shows when opened. */}
+          <div hidden={!open.reviews}>
+            <DeskReviews onOpenBooking={pick} onCount={setReviewsWaiting} />
           </div>
         </section>
       </main>
@@ -1861,6 +2178,11 @@ function HoverCard({
       <div className="mt-1">
         <strong>{booking.status === "confirmed" ? "Paid in full" : "Due in full"}:</strong> {ksh(booking.total)}
         {booking.deliveryManual ? " plus delivery" : ""}
+        {booking.amountPaid > 0 && balanceOf(booking) > 0 && (
+          <span className="block">
+            <strong>Balance:</strong> {ksh(balanceOf(booking))} (paid {ksh(booking.amountPaid)})
+          </span>
+        )}
       </div>
     </div>
   );

@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { CONTACT } from "../lib/contact";
 import ScrollReveal from "./ScrollReveal";
+import EmailChooser from "./EmailChooser";
 
 // Workshop page laid out from Homer's "Design B, Bold" workshop design (light version).
-// The enquiry form has no inbox behind it yet, so sending opens WhatsApp, or the customer's own email app,
-// with the details filled in.
+// The enquiry form has no inbox behind it yet, so sending opens WhatsApp, or the email the customer chooses
+// (Gmail, Outlook, Yahoo or their own email app, see EmailChooser), with the details filled in.
 // Nothing is stored on the website.
 
 const GREEN = "#1d6b3a";
@@ -102,6 +103,7 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
   const [contact, setContact] = useState<"call" | "whatsapp">("call");
   const [error, setError] = useState("");
   const [sent, setSent] = useState(false);
+  const [choosingEmail, setChoosingEmail] = useState(false);
   const [via, setVia] = useState<"whatsapp" | "email">("whatsapp");
   const [service, setService] = useState(SERVICES[0].id);
 
@@ -147,9 +149,8 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
     return "https://wa.me/" + waNumber + "?text=" + encodeURIComponent(message());
   }
 
-  function emailLink() {
-    const subject = "Workshop enquiry: " + (vehicle.trim() || "my vehicle");
-    return "mailto:" + CONTACT.email + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(message());
+  function email() {
+    return { to: CONTACT.email, subject: "Workshop enquiry: " + (vehicle.trim() || "my vehicle"), body: message() };
   }
 
   function send(channel: "whatsapp" | "email") {
@@ -157,17 +158,30 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
     if (!name.trim()) return setError("Please enter your name.");
     if (digits < 9) return setError("Please enter a phone number with at least 9 digits.");
     // For a phone call back we only need a name and number; we get the rest on the call.
-    if (!callBack && !vehicle.trim()) return setError("Please tell us the make and model of your vehicle.");
+    // The vehicle is always required: it is the one detail the workshop needs before calling back.
+    if (!vehicle.trim()) return setError("Please tell us the make and model of your vehicle.");
     if (!callBack && notes.trim().length < 10) return setError("Please add a few words about the issue so we can prepare.");
     setError("");
-    if (channel === "whatsapp") window.open(whatsappLink(), "_blank", "noopener");
-    else window.location.href = emailLink();
+    if (channel === "email") {
+      // The customer chooses which email to use first; see EmailChooser.
+      setChoosingEmail(true);
+      window.setTimeout(() => document.getElementById("emailChooser")?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 60);
+      return;
+    }
+    window.open(whatsappLink(), "_blank", "noopener");
     setVia(channel);
+    setSent(true);
+  }
+
+  function emailOpened() {
+    setChoosingEmail(false);
+    setVia("email");
     setSent(true);
   }
 
   function reset() {
     setSent(false);
+    setChoosingEmail(false);
     setName("");
     setPhone("");
     setVehicle("");
@@ -308,9 +322,9 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
                   </div>
                   <div>
                     <label htmlFor="bveh" className={label}>
-                      Vehicle make and model{callBack ? " (optional)" : ""}
+                      Vehicle make and model *
                     </label>
-                    <input id="bveh" type="text" value={vehicle} onChange={(e) => { setVehicle(e.target.value); setError(""); }} placeholder="e.g. Toyota Prado 2014" className={field} />
+                    <input id="bveh" type="text" required aria-required="true" value={vehicle} onChange={(e) => { setVehicle(e.target.value); setError(""); }} placeholder="e.g. Toyota Prado 2014" className={field} />
                   </div>
                   <div>
                     <label htmlFor="breg" className={label}>
@@ -390,9 +404,16 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
                     Send by email
                   </button>
                 </div>
+                {choosingEmail && <EmailChooser mail={email()} onOpened={emailOpened} onCancel={() => setChoosingEmail(false)} />}
                 <p className="mt-2.5 text-center text-xs text-[#595959]">
-                  No payment needed. Either button opens WhatsApp or your email app with your details filled in; press send
+                  No payment needed. Either button opens WhatsApp or your email with your details filled in; press send
                   there to reach us.
+                </p>
+                <p className="mt-2 text-center text-[13px] text-[#3f3f3f]">
+                  Prefer to write yourself? Email{" "}
+                  <a href={"mailto:" + CONTACT.email + "?subject=Workshop%20enquiry"} className="font-semibold text-[#171717] underline">
+                    {CONTACT.email}
+                  </a>
                 </p>
               </div>
             ) : (
@@ -406,7 +427,7 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
                   {firstName ? "Thanks, " + firstName + "." : "Thanks."} Your message is ready.
                 </h2>
                 <p className="mx-auto mb-4 max-w-[440px] text-[#595959]">
-                  {via === "email" ? "Your email app has opened" : "WhatsApp has opened"} with your details. Press send there,
+                  {via === "email" ? "Your email has opened" : "WhatsApp has opened"} with your details. Press send there,
                   and we will {contact === "whatsapp" ? "message" : "call"} you on {phone} to arrange a time.
                 </p>
                 <div className="mb-4 whitespace-pre-line rounded-lg bg-[#f5f5f3] p-3.5 text-left text-sm leading-[1.7]">
@@ -422,10 +443,17 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
                 <p className="mb-3.5 text-[13px] text-[#595959]">
                   {via === "email" ? (
                     <>
-                      Email app did not open?{" "}
-                      <a href={emailLink()} className="font-semibold underline">
-                        Try again
-                      </a>
+                      Email did not open?{" "}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSent(false);
+                          setChoosingEmail(true);
+                        }}
+                        className="cursor-pointer border-0 bg-transparent p-0 font-semibold underline"
+                      >
+                        Choose another email
+                      </button>
                       , email us at <span className="select-all font-semibold text-[#171717]">{CONTACT.email}</span>,{" "}
                       <a href={whatsappLink()} target="_blank" rel="noopener noreferrer" className="font-semibold underline">
                         send it on WhatsApp
@@ -438,9 +466,16 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
                         Open it again
                       </a>
                       ,{" "}
-                      <a href={emailLink()} className="font-semibold underline">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSent(false);
+                          setChoosingEmail(true);
+                        }}
+                        className="cursor-pointer border-0 bg-transparent p-0 font-semibold underline"
+                      >
                         send it by email
-                      </a>
+                      </button>
                     </>
                   )}{" "}
                   or call{" "}
@@ -669,7 +704,7 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
               ))}
             </ol>
             <div className="mt-4 rounded-lg bg-[#f5f5f3] px-3.5 py-3 text-sm leading-relaxed">
-              <strong>Opening hours:</strong> Monday to Friday 08:00–17:00, Saturday 08:00–13:00. Closed Sundays and bank
+              <strong>Opening hours:</strong> Monday to Friday 08:00–17:00, Saturday 08:00–13:00. Closed Sundays and public
               holidays.
               <br />
               <strong>Lost or running late?</strong> Call or WhatsApp{" "}

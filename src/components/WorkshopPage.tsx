@@ -158,7 +158,8 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
     if (!name.trim()) return setError("Please enter your name.");
     if (digits < 9) return setError("Please enter a phone number with at least 9 digits.");
     // For a phone call back we only need a name and number; we get the rest on the call.
-    if (!callBack && !vehicle.trim()) return setError("Please tell us the make and model of your vehicle.");
+    // The vehicle is always required: it is the one detail the workshop needs before calling back.
+    if (!vehicle.trim()) return setError("Please tell us the make and model of your vehicle.");
     if (!callBack && notes.trim().length < 10) return setError("Please add a few words about the issue so we can prepare.");
     setError("");
     if (channel === "email") {
@@ -321,9 +322,9 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
                   </div>
                   <div>
                     <label htmlFor="bveh" className={label}>
-                      Vehicle make and model{callBack ? " (optional)" : ""}
+                      Vehicle make and model *
                     </label>
-                    <input id="bveh" type="text" value={vehicle} onChange={(e) => { setVehicle(e.target.value); setError(""); }} placeholder="e.g. Toyota Prado 2014" className={field} />
+                    <input id="bveh" type="text" required aria-required="true" value={vehicle} onChange={(e) => { setVehicle(e.target.value); setError(""); }} placeholder="e.g. Toyota Prado 2014" className={field} />
                   </div>
                   <div>
                     <label htmlFor="breg" className={label}>
@@ -407,6 +408,12 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
                 <p className="mt-2.5 text-center text-xs text-[#595959]">
                   No payment needed. Either button opens WhatsApp or your email with your details filled in; press send
                   there to reach us.
+                </p>
+                <p className="mt-2 text-center text-[13px] text-[#3f3f3f]">
+                  Prefer to write yourself? Email{" "}
+                  <a href={"mailto:" + CONTACT.email + "?subject=Workshop%20enquiry"} className="font-semibold text-[#171717] underline">
+                    {CONTACT.email}
+                  </a>
                 </p>
               </div>
             ) : (
@@ -697,7 +704,7 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
               ))}
             </ol>
             <div className="mt-4 rounded-lg bg-[#f5f5f3] px-3.5 py-3 text-sm leading-relaxed">
-              <strong>Opening hours:</strong> Monday to Friday 08:00–17:00, Saturday 08:00–13:00. Closed Sundays and bank
+              <strong>Opening hours:</strong> Monday to Friday 08:00–17:00, Saturday 08:00–13:00. Closed Sundays and public
               holidays.
               <br />
               <strong>Lost or running late?</strong> Call or WhatsApp{" "}

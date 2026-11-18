@@ -167,7 +167,7 @@ export default function DeskAddBooking({
           <h2 className="text-[22px] font-bold tracking-[-0.02em]">Add a booking</h2>
           <p className="mt-1 max-w-[720px] text-sm text-[#595959]">
             For bookings taken by phone or in person. It uses the same checks and prices as the website and holds a free
-            vehicle of the chosen model. Email is optional here.
+            vehicle of the chosen model. Email and mobile number are optional here.
           </p>
         </div>
         <button type="button" onClick={onClose} className={btnLight}>
@@ -295,7 +295,7 @@ export default function DeskAddBooking({
         </div>
         <div>
           <label htmlFor="nbPhone" className={label}>
-            Mobile number
+            Mobile number (optional)
           </label>
           <input id="nbPhone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="off" placeholder="+254" className={input} />
         </div>

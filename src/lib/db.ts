@@ -30,6 +30,7 @@ import {
   type BookingInput,
   type PublicBookingResult,
   type PublicModelCard,
+  type PaymentEntry,
   type StaffBooking,
   ksh,
 } from "./hire";
@@ -869,7 +870,7 @@ export async function editBooking(id: string, raw: Partial<BookingEdit>, editedB
   if (!(PICKUP_LOCATIONS as readonly string[]).includes(location)) throw staffError("Choose a pick-up location.", 400);
   if (name.length < 2) throw staffError("Enter the customer's name.", 400);
   const digits = phone.replace(/\D/g, "");
-  if (digits.length < 9 || digits.length > 15) throw staffError("Enter a mobile number with at least 9 digits.", 400);
+  if (phone && (digits.length < 9 || digits.length > 15)) throw staffError("Enter a mobile number with at least 9 digits, or leave it blank.", 400);
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw staffError("Enter a valid email address, or leave it blank.", 400);
   if (mpesaCode && (mpesaCode.length < 5 || mpesaCode.length > 12)) throw staffError("Enter a valid M-Pesa code, or leave it blank.", 400);
   const ooh = outOfHours(pickup, returnOn, pickTime, retTime);
@@ -1191,6 +1192,116 @@ export async function markBookingsSeen(username: string) {
     [username],
   );
   return { ok: true };
+}
+
+// Staff choose which vehicle (by number plate) a held or paid booking uses ("Vehicle" on the desk booking card).
+// It must be the same model, active, and free for the booking's dates. Change the model with Edit instead.
+export async function allocateVehicle(id: string, vehicleIdRaw: unknown, allocatedBy: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const vehicleId = String(vehicleIdRaw ?? "").trim().slice(0, 40);
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query<{ status: string; reference: string; model_name: string; pickup_on: string; return_on: string; vehicle_id: string | null }>(
+      `SELECT status, reference, model_name, pickup_on::text, return_on::text, vehicle_id FROM bookings WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    const row = current.rows[0];
+    if (!row) throw staffError("That booking was not found.", 404);
+    if (row.status !== "pending" && row.status !== "confirmed") {
+      throw staffError("A vehicle can only be chosen for a held or paid booking.", 409);
+    }
+    const vehicle = await client.query<{ id: string; model: string; plate: string; active: boolean }>(
+      `SELECT id, model, plate, active FROM vehicles WHERE id = $1 FOR UPDATE`,
+      [vehicleId],
+    );
+    const chosen = vehicle.rows[0];
+    if (!chosen || !chosen.active) throw staffError("Choose a vehicle from the list.", 400);
+    if (chosen.model !== row.model_name) {
+      throw staffError(chosen.plate + " is a " + chosen.model + ". To change the model, use Edit.", 400);
+    }
+    if (chosen.id === row.vehicle_id) {
+      await client.query("COMMIT");
+      return { ok: true, reference: row.reference, plate: chosen.plate };
+    }
+    const end = exclusiveEnd(row.pickup_on, row.return_on);
+    const clash = await client.query<{ reference: string }>(
+      `SELECT reference FROM bookings
+       WHERE vehicle_id = $1 AND id <> $2 AND status IN ('pending', 'confirmed')
+         AND pickup_on < $4::date
+         AND $3::date < CASE WHEN return_on > pickup_on THEN return_on ELSE pickup_on + 1 END
+       LIMIT 1`,
+      [chosen.id, id, row.pickup_on, end],
+    );
+    if (clash.rows[0]) throw staffError(chosen.plate + " is already booked on " + clash.rows[0].reference + " for those dates.", 409);
+    const stamp = chosen.plate + " allocated by " + allocatedBy.slice(0, 60) + " on " + todayNairobi() + ".";
+    await client.query(
+      `UPDATE bookings
+       SET vehicle_id = $2,
+           staff_note = left(CASE WHEN staff_note = '' THEN $3 ELSE staff_note || ' · ' || $3 END, 500)
+       WHERE id = $1`,
+      [id, chosen.id, stamp],
+    );
+    await client.query("COMMIT");
+    return { ok: true, reference: row.reference, plate: chosen.plate };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// "Undo payment confirmed" on the desk, for a booking confirmed by mistake. It goes back to held (the vehicle
+// stays held). The amount paid goes back to the payments recorded with "Match a payment"; if those alone
+// cover the total, the latest one is taken off too, since that is the payment that confirmed it.
+export async function reverseConfirmation(id: string, reversedBy: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query<{ status: string; reference: string; total_due: number; payment_log: unknown }>(
+      `SELECT status, reference, total_due, payment_log FROM bookings WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    const row = current.rows[0];
+    if (!row) throw staffError("That booking was not found.", 404);
+    if (row.status !== "confirmed") throw staffError("Only a paid booking can have its payment confirmation undone.", 409);
+    const log = Array.isArray(row.payment_log) ? (row.payment_log as PaymentEntry[]) : [];
+    let entries = log;
+    let removed: PaymentEntry | null = null;
+    const sum = (list: PaymentEntry[]) => list.reduce((total, entry) => total + (Number(entry.amount) || 0), 0);
+    if (entries.length && sum(entries) >= Number(row.total_due)) {
+      removed = entries[entries.length - 1];
+      entries = entries.slice(0, -1);
+    }
+    const paid = Math.min(sum(entries), Number(row.total_due));
+    const stamp =
+      "Payment confirmation undone by " + reversedBy.slice(0, 60) + " on " + todayNairobi() +
+      (removed ? " (removed " + ksh(Number(removed.amount) || 0) + (removed.code ? " " + removed.code : "") + ")" : "") + ".";
+    await client.query(
+      `UPDATE bookings
+       SET status = 'pending',
+           confirmed_at = NULL,
+           amount_paid = $2,
+           payment_log = $3::jsonb,
+           mpesa_code = CASE WHEN $4 <> '' AND upper(mpesa_code) = $4 THEN '' ELSE mpesa_code END,
+           staff_note = left(CASE WHEN staff_note = '' THEN $5 ELSE staff_note || ' · ' || $5 END, 500)
+       WHERE id = $1`,
+      [id, paid, JSON.stringify(entries), removed?.code ? String(removed.code).toUpperCase() : "", stamp],
+    );
+    await client.query("COMMIT");
+    return { ok: true, reference: row.reference, paid, removed };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function updateBooking(id: string, action: string, note: string, deliveryFee?: unknown) {

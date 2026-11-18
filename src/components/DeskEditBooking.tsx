@@ -114,7 +114,8 @@ export default function DeskEditBooking({
   const hireTotal = model ? days * model.rate : 0;
   const coverTotal = model && insure ? days * model.addon : 0;
   const fee = feeEditable ? Number(deliveryFee.replace(/,/g, "")) || 0 : booking.deliveryFee || 0;
-  const total = hireTotal + coverTotal + fee;
+  const discount = booking.discount || 0; // kept when the booking is edited; change it with Discount on the card
+  const total = Math.max(0, hireTotal + coverTotal + fee - discount);
   const paidText = paidSoFar.replace(/,/g, "").trim();
   const paidAmount = /^\d+$/.test(paidText) ? Number(paidText) : 0;
   const unpricedDelivery = booking.deliveryManual || (delivered && booking.deliveryFee === null);
@@ -245,7 +246,7 @@ export default function DeskEditBooking({
         </div>
         <div>
           <label htmlFor="ebPhone" className={label}>
-            Mobile number
+            Mobile number (optional)
           </label>
           <input id="ebPhone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="off" className={input} />
         </div>
@@ -316,7 +317,8 @@ export default function DeskEditBooking({
             <>
               <strong>{model?.name}</strong> · {plural(days, "day")} · hire {ksh(hireTotal)}
               {coverTotal ? " + cover " + ksh(coverTotal) : ""}
-              {fee ? " + delivery " + ksh(fee) : ""} = <strong>{ksh(total)}</strong>
+              {fee ? " + delivery " + ksh(fee) : ""}
+              {discount ? " − discount " + ksh(discount) : ""} = <strong>{ksh(total)}</strong>
               {booking.status === "quote" ? " plus delivery (set when you hold it)" : ""}
               <span className="block">
                 Paid so far {ksh(paidAmount)} · <strong>Balance {ksh(balance)}</strong>

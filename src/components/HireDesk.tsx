@@ -6,6 +6,9 @@ import DeskAddBooking from "./DeskAddBooking";
 import DeskEditBooking from "./DeskEditBooking";
 import DeskVehicleEdit from "./DeskVehicleEdit";
 import DeskMatchPayment from "./DeskMatchPayment";
+import DeskBell from "./DeskBell";
+import DeskDiscount from "./DeskDiscount";
+import DeskAllocate from "./DeskAllocate";
 import DeskReviews, { AskForReview } from "./DeskReviews";
 import { bookingCodes, duplicateCodes, looksLikeMpesaCode, normaliseCode } from "../lib/payments";
 import DeskCustomers, { type LicenceOnFileRow } from "./DeskCustomers";
@@ -39,15 +42,17 @@ type Chip = { label: string; bg: string; fg: string; bd: string };
 type SectionKey = "overview" | "calendar" | "table" | "payments" | "customers" | "performance" | "vehicles" | "compare" | "schedule" | "reviews";
 
 const WIN = 28;
-const PAID = { bg: "#ceead6", fg: "#0d5a2a" };
-const AWAIT = { bg: "#feefc3", fg: "#5f4400" };
+// Payment colours (Homer, Nov 2026): dark green paid in full, yellow part paid, red nothing paid yet.
+const PAID = { bg: "#137333", fg: "#ffffff" };
+const PART = { bg: "#feefc3", fg: "#5f4400" };
+const UNPAID = { bg: "#c5221f", fg: "#ffffff" };
 const BUFFER = "#c4c7c5";
 
-const CHIP_PAID: Chip = { label: "Paid in full", bg: "#ceead6", fg: "#0d5a2a", bd: "#81c995" };
-const CHIP_AWAIT: Chip = { label: "Awaiting payment", bg: "#feefc3", fg: "#5f4400", bd: "#f9d46b" };
+const CHIP_PAID: Chip = { label: "Paid in full", bg: "#137333", fg: "#ffffff", bd: "#137333" };
+const CHIP_AWAIT: Chip = { label: "Awaiting payment", bg: "#fce8e6", fg: "#a50e0e", bd: "#f1a9a3" };
 const CHIP_CODE: Chip = { label: "Payment code to check", bg: "#e8f0fe", fg: "#174ea6", bd: "#aecbfa" };
-const CHIP_LATE: Chip = { label: "Unpaid, pick-up reached", bg: "#fce8e6", fg: "#a50e0e", bd: "#f1a9a3" };
-const CHIP_PART: Chip = { label: "Part paid", bg: "#fff4e5", fg: "#7a3e00", bd: "#f7b267" };
+const CHIP_LATE: Chip = { label: "Unpaid, pick-up reached", bg: "#c5221f", fg: "#ffffff", bd: "#c5221f" };
+const CHIP_PART: Chip = { label: "Part paid", bg: "#feefc3", fg: "#5f4400", bd: "#f9d46b" };
 const CHIP_QUOTE: Chip = { label: "Quote, not held", bg: "#e8def8", fg: "#3c1f7a", bd: "#cdb9f0" };
 const CHIP_CLOSED: Chip = { label: "Closed", bg: "#e8eaed", fg: "#3c4043", bd: "#dadce0" };
 
@@ -159,9 +164,9 @@ function chipFor(booking: StaffBooking, today: string): Chip {
   if (booking.status === "confirmed") return part ? { ...CHIP_PART, label: "Balance owed" } : CHIP_PAID;
   if (booking.status === "quote") return CHIP_QUOTE;
   if (booking.status === "cancelled") return CHIP_CLOSED;
-  if (booking.pickup <= today) return part ? { ...CHIP_LATE, label: "Balance owed, pick-up reached" } : CHIP_LATE;
+  if (booking.pickup <= today) return part ? { ...CHIP_PART, label: "Balance owed, pick-up reached" } : CHIP_LATE;
   const hold = holdInfo(booking);
-  if (hold.flagged) return { label: "Unpaid for " + (hold.hours >= 48 ? Math.floor(hold.hours / 24) + " days" : "24h+"), bg: "#fff4e5", fg: "#7a3e00", bd: "#f7b267" };
+  if (hold.flagged) return { ...CHIP_LATE, label: "Unpaid for " + (hold.hours >= 48 ? Math.floor(hold.hours / 24) + " days" : "24h+") };
   if (part) return CHIP_PART;
   if (booking.mpesaCode) return CHIP_CODE;
   return CHIP_AWAIT;
@@ -391,6 +396,34 @@ export default function HireDesk() {
 
   function needsDeliveryPrice(booking: StaffBooking) {
     return booking.deliveryManual || booking.deliveryFee === null;
+  }
+
+  // "Undo payment confirmed": for a booking confirmed by mistake. It goes back to held, keeping the vehicle.
+  async function undoConfirm(booking: StaffBooking) {
+    const logged = (booking.paymentLog || []).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+    const last = (booking.paymentLog || [])[(booking.paymentLog || []).length - 1];
+    const takesOff = logged >= booking.total && last;
+    if (
+      !window.confirm(
+        "Undo the payment confirmation on " + booking.reference + "? It goes back to held (awaiting payment) and keeps the vehicle." +
+          (takesOff ? " The last recorded payment, " + ksh(Number(last.amount) || 0) + (last.code ? " " + last.code : "") + ", is taken off too." : ""),
+      )
+    )
+      return;
+    setMessage("");
+    setNotice("");
+    const response = await fetch("/api/hire/staff/bookings/unconfirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: booking.id }),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      setMessage(body.error || "The confirmation could not be undone.");
+      return;
+    }
+    setNotice(booking.reference + " is back to held, awaiting payment. Paid so far: " + ksh(body.paid) + ".");
+    await loadBookings();
   }
 
   async function act(booking: StaffBooking, action: string, prompt: string) {
@@ -900,7 +933,7 @@ export default function HireDesk() {
                             </span>
                             <span className="block">{vehicle ? vehicle.plate + " " + vehicle.model : booking.model}</span>
                             <span className="block text-[#595959]">
-                              {booking.phone} · {booking.location} · {ksh(booking.total)}
+                              {booking.phone || "No phone"} · {booking.location} · {ksh(booking.total)}
                             </span>
                             <span className="mt-1 inline-block">
                               <ChipView chip={chipFor(booking, today)} />
@@ -920,7 +953,18 @@ export default function HireDesk() {
         <section className={card + " mt-[22px] p-[22px]"}>
           <div className="mb-4 flex flex-wrap items-end justify-between gap-x-7 gap-y-3.5">
             <div>
-              {sectionHead("calendar", "Booking calendar")}
+              <div className="flex flex-wrap items-center gap-3">
+                {sectionHead("calendar", "Booking calendar")}
+                <DeskBell
+                  onNewBookings={() => {
+                    loadBookings();
+                  }}
+                  onOpenBooking={async (id) => {
+                    if (!bookings.some((booking) => booking.id === id)) await loadBookings();
+                    pick(id);
+                  }}
+                />
+              </div>
               <p className="mt-1 max-w-[760px] text-sm text-[#595959]">
                 Four weeks at a time. Use Earlier and Later to see past and future bookings. Vehicles with nothing booked in
                 the period shown are hidden until you choose to show them. Select a booking to see its details.
@@ -1008,8 +1052,9 @@ export default function HireDesk() {
                 </span>
               </div>
               <div className="mb-3 flex flex-wrap gap-x-[18px] gap-y-2 text-[13px]">
-                <Legend bg={PAID.bg} h={16} label="Hire, paid in full" />
-                <Legend bg={AWAIT.bg} h={16} label="Hire, awaiting payment" />
+                <Legend bg={PAID.bg} h={16} label="Paid in full" />
+                <Legend bg={PART.bg} h={16} label="Part paid" />
+                <Legend bg={UNPAID.bg} h={16} label="Not paid yet" />
                 <Legend bg={BUFFER} h={8} label="Prep before / clean and service after" />
               </div>
               {calRows.length === 0 && (
@@ -1068,8 +1113,9 @@ export default function HireDesk() {
                         {mine.flatMap((booking) => {
                           const start = num(booking.pickup);
                           const end = num(lastHireDay(booking.pickup, booking.returnOn));
-                          const paid = booking.status === "confirmed";
-                          const pal = paid ? PAID : AWAIT;
+                          const fullyPaid = balanceOf(booking) === 0 && (booking.status === "confirmed" || booking.amountPaid > 0);
+                          const partPaid = !fullyPaid && booking.amountPaid > 0;
+                          const pal = fullyPaid ? PAID : partPaid ? PART : UNPAID;
                           const parts: React.ReactNode[] = [];
                           const hire = col(start, end);
                           if (hire) {
@@ -1091,7 +1137,7 @@ export default function HireDesk() {
                                   }}
                                 >
                                   {booking.customerName}
-                                  {paid ? "" : " · unpaid"}
+                                  {fullyPaid ? "" : partPaid ? " · part paid" : " · unpaid"}
                                 </button>
                               </div>,
                             );
@@ -1307,9 +1353,13 @@ export default function HireDesk() {
                     <strong>{selected.customerName}</strong>
                   </Row>
                   <Row label="Phone">
-                    <a href={"tel:" + selected.phone.replace(/\s/g, "")} className="underline">
-                      {selected.phone}
-                    </a>
+                    {selected.phone ? (
+                      <a href={"tel:" + selected.phone.replace(/\s/g, "")} className="underline">
+                        {selected.phone}
+                      </a>
+                    ) : (
+                      <span className="text-[#595959]">Not given</span>
+                    )}
                   </Row>
                   <Row label="Email">
                     {selected.email ? (
@@ -1333,6 +1383,17 @@ export default function HireDesk() {
                 <DetailBox title="Hire">
                   <Row label="Vehicle">
                     <strong>{selected.plate ? selected.plate + " " + selected.model : selected.model + " (not assigned yet)"}</strong>
+                    <DeskAllocate
+                      key={selected.id + ":" + (selected.vehicleId || "")}
+                      booking={selected}
+                      fleet={fleet}
+                      holds={holds}
+                      onSaved={async (text) => {
+                        setMessage("");
+                        setNotice(text);
+                        await loadBookings();
+                      }}
+                    />
                   </Row>
                   <Row label="Pick-up">
                     {short(selected.pickup)}, {selected.pickTime}
@@ -1382,12 +1443,40 @@ export default function HireDesk() {
                         ? ksh(selected.deliveryFee)
                         : "None"}
                   </Row>
+                  {(selected.discount || 0) > 0 && (
+                    <>
+                      <Row label="Normal price">{ksh(selected.total + (selected.discount || 0))}</Row>
+                      <Row label="Discount">
+                        <span className="font-bold text-[#0d5a2a]">− {ksh(selected.discount || 0)}</span>
+                        <span className="block text-xs text-[#595959]">
+                          {selected.discountNote}
+                          {selected.discountBy ? " · by " + selected.discountBy : ""}
+                          {selected.discountAt
+                            ? " on " + short(new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Nairobi" }).format(new Date(selected.discountAt)))
+                            : ""}
+                        </span>
+                      </Row>
+                    </>
+                  )}
                   <Row label="Total">
                     <strong>
                       {ksh(selected.total)}
                       {selected.deliveryManual ? " plus delivery" : ""}
                     </strong>
                   </Row>
+                  {selected.status !== "cancelled" && (
+                    <Row label={(selected.discount || 0) > 0 ? "" : "Discount"}>
+                      <DeskDiscount
+                        key={selected.id + ":" + (selected.discount || 0)}
+                        booking={selected}
+                        onSaved={async (text) => {
+                          setMessage("");
+                          setNotice(text);
+                          await loadBookings();
+                        }}
+                      />
+                    </Row>
+                  )}
                   <Row label="Paid so far">{ksh(selected.amountPaid)}</Row>
                   <Row label="Balance">
                     <strong className={balanceOf(selected) > 0 ? "text-[#a50e0e]" : "text-[#0d5a2a]"}>
@@ -1476,6 +1565,11 @@ export default function HireDesk() {
                             onClick={() => act(selected, "release", "Release the hold on " + (selected.plate || selected.model) + "?")}
                           >
                             Release hold
+                          </button>
+                        )}
+                        {selected.status === "confirmed" && (
+                          <button type="button" className={btnLight} onClick={() => undoConfirm(selected)}>
+                            Undo payment confirmed
                           </button>
                         )}
                         {selected.status === "confirmed" && (
@@ -1628,7 +1722,7 @@ export default function HireDesk() {
                         </td>
                         <td className="px-2 py-2.5">
                           {booking.customerName}
-                          <span className="block text-xs text-[#595959]">{booking.phone}</span>
+                          <span className="block text-xs text-[#595959]">{booking.phone || "No phone"}</span>
                         </td>
                         <td className="px-2 py-2.5">
                           {short(booking.pickup)}, {booking.pickTime}
@@ -1738,7 +1832,7 @@ export default function HireDesk() {
                       <tr key={booking.id} className="border-b border-[#eef0f2] align-top">
                         <td className="px-2 py-2.5">
                           <strong>{booking.customerName}</strong>
-                          <span className="block text-xs text-[#595959]">{booking.phone}</span>
+                          <span className="block text-xs text-[#595959]">{booking.phone || "No phone"}</span>
                         </td>
                         <td className="px-2 py-2.5">
                           <strong>{booking.reference}</strong>
@@ -2041,8 +2135,8 @@ export default function HireDesk() {
             <p className="mb-3.5 mt-1 text-sm text-[#595959]">Current and upcoming hires, by whether the full amount has arrived.</p>
             {open.compare && (
               <>
-                <div className="h-3.5 overflow-hidden rounded-full bg-[#feefc3]">
-                  <div className="h-full bg-[#81c995]" style={{ width: collectedPct + "%" }} />
+                <div className="h-3.5 overflow-hidden rounded-full bg-[#f6aea9]">
+                  <div className="h-full bg-[#137333]" style={{ width: collectedPct + "%" }} />
                 </div>
                 <div className="mt-2 flex flex-wrap justify-between gap-2 text-[13px]">
                   <span>
@@ -2051,7 +2145,7 @@ export default function HireDesk() {
                   <span>Still to collect {ksh(awaitingTotal)}</span>
                 </div>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-[10px] border-l-4 border-[#f9d46b] bg-[#f5f5f3] px-3.5 py-3">
+                  <div className="rounded-[10px] border-l-4 border-[#c5221f] bg-[#f5f5f3] px-3.5 py-3">
                     <div className="text-[13px] font-bold">Awaiting payment</div>
                     <div className="text-[22px] font-bold">{plural(awaiting.length, "booking")}</div>
                     <div className="text-[13px] text-[#3f3f3f]">
@@ -2060,7 +2154,7 @@ export default function HireDesk() {
                       {chase.length ? plural(chase.length, "booking") + " already at pick-up" : "None at pick-up yet"}
                     </div>
                   </div>
-                  <div className="rounded-[10px] border-l-4 border-[#81c995] bg-[#f5f5f3] px-3.5 py-3">
+                  <div className="rounded-[10px] border-l-4 border-[#137333] bg-[#f5f5f3] px-3.5 py-3">
                     <div className="text-[13px] font-bold">Paid in full</div>
                     <div className="text-[22px] font-bold">{plural(paidCurrent.length, "booking")}</div>
                     <div className="text-[13px] text-[#3f3f3f]">

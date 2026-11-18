@@ -80,7 +80,7 @@ export function sampleYear(real: YearData): YearData {
     return seed / 4294967296;
   };
   const rateFor = (v: PerfVehicle) =>
-    /land cruiser/i.test(v.model) ? 18000 : /prado/i.test(v.model) ? 13000 : /x-?trail/i.test(v.model) ? 7500 : 3500;
+    /land cruiser/i.test(v.model) ? 18000 : /3-door/i.test(v.model) ? 10000 : /prado/i.test(v.model) ? 13000 : /x-?trail/i.test(v.model) ? 7500 : 3500;
   const length = real.days[real.vehicles[0]?.id]?.length || 365;
   const [ty, tm, td] = real.today.split("-").map(Number);
   const lastIndex =

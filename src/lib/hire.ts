@@ -431,7 +431,8 @@ export function assessmentError(result: BookingAssessment) {
 }
 
 // opts.emailOptional is used only for bookings staff add on the desk (for example by phone),
-// where the customer may not have given an email address. Website bookings always need one.
+// where the customer may not have given an email address or a mobile number (both optional there, Homer,
+// Nov 2026). Website bookings always need both.
 export function assessBooking(
   model: QuoteModel | null,
   raw: Partial<BookingInput>,
@@ -513,7 +514,10 @@ export function assessBooking(
   const emailSkipped = Boolean(opts?.emailOptional) && email === "";
   if (!emailSkipped && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "Please enter a valid email address." };
   const digits = phone.replace(/\D/g, "");
-  if (digits.length < 9 || digits.length > 15) return { ok: false, error: "Please enter a mobile number with at least 9 digits." };
+  const phoneSkipped = Boolean(opts?.emailOptional) && phone === "";
+  if (!phoneSkipped && (digits.length < 9 || digits.length > 15)) {
+    return { ok: false, error: opts?.emailOptional ? "Enter a mobile number with at least 9 digits, or leave it blank." : "Please enter a mobile number with at least 9 digits." };
+  }
   if (!raw.terms) return { ok: false, error: "Please confirm that you meet the driver requirements." };
 
   const mpesaCode = normaliseMpesa(cleanText(raw.mpesaCode, 40));
@@ -658,6 +662,10 @@ export type StaffBooking = {
   source?: "website" | "desk"; // desk bookings aren't flagged as unpaid holds
   heldAt?: string; // when the vehicle was first held (ISO); unpaid website holds are flagged 24 hours after this // payments recorded on the desk with "Match a payment"
   amountPaid: number; // KSh received so far, entered by staff (part payments). Full when confirmed.
+  discount?: number; // KSh taken off the normal price by staff on the desk; total is after it
+  discountNote?: string;
+  discountBy?: string;
+  discountAt?: string;
 };
 
 export type PaymentEntry = { code: string; amount: number; by: string; at: string };

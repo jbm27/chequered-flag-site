@@ -658,6 +658,10 @@ export type StaffBooking = {
   source?: "website" | "desk"; // desk bookings aren't flagged as unpaid holds
   heldAt?: string; // when the vehicle was first held (ISO); unpaid website holds are flagged 24 hours after this // payments recorded on the desk with "Match a payment"
   amountPaid: number; // KSh received so far, entered by staff (part payments). Full when confirmed.
+  discount?: number; // KSh taken off the normal price by staff on the desk; total is after it
+  discountNote?: string;
+  discountBy?: string;
+  discountAt?: string;
 };
 
 export type PaymentEntry = { code: string; amount: number; by: string; at: string };

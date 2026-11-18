@@ -54,7 +54,7 @@ export const FLEET: FleetVehicle[] = [
   { id: "v27", model: "Toyota Prado", plate: "KCB 749H", category: "4x4", seats: 5, rate: 13000, addon: 2000 },
   { id: "v28", model: "Toyota Prado", plate: "KCE 404B", category: "4x4", seats: 5, rate: 13000, addon: 2000 },
   { id: "v29", model: "Toyota Prado", plate: "KCC 833T", category: "4x4", seats: 5, rate: 13000, addon: 2000 },
-  { id: "v30", model: "Toyota Prado 3-door", plate: "KBW 554A", category: "4x4", seats: 3, rate: 13000, addon: 2000 },
+  { id: "v30", model: "Toyota Prado 3-door", plate: "KBW 554A", category: "4x4", seats: 3, rate: 10000, addon: 2000 },
   { id: "v31", model: "Toyota Prado", plate: "KCE 132P", category: "4x4", seats: 5, rate: 13000, addon: 2000 },
   { id: "v33", model: "Toyota Land Cruiser", plate: "KAU 675F", category: "4x4", seats: 5, rate: 18000, addon: 2000 },
 ];

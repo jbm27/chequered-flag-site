@@ -30,6 +30,7 @@ import {
   type BookingInput,
   type PublicBookingResult,
   type PublicModelCard,
+  type PaymentEntry,
   type StaffBooking,
   ksh,
 } from "./hire";
@@ -151,6 +152,17 @@ async function setup() {
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'website';
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS held_at timestamptz;
     UPDATE bookings SET source = 'desk' WHERE source = 'website' AND staff_note LIKE 'Added on the desk by%';
+    -- Discounts given by staff on the desk (Homer, Nov 2026). The customer books at the normal price; staff can
+    -- then take a whole-shilling discount off. total_due is the price after the discount.
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS discount integer NOT NULL DEFAULT 0;
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS discount_note text NOT NULL DEFAULT '';
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS discount_by text NOT NULL DEFAULT '';
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS discount_at timestamptz;
+    -- When each staff member last opened the new-bookings bell on the desk.
+    CREATE TABLE IF NOT EXISTS staff_seen (
+      username text PRIMARY KEY,
+      bookings_seen_at timestamptz NOT NULL DEFAULT now()
+    );
     -- Payments recorded on the desk (code, amount, who, when), used to spot a code used twice.
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_log jsonb NOT NULL DEFAULT '[]'::jsonb;
     CREATE INDEX IF NOT EXISTS bookings_vehicle_status_idx ON bookings (vehicle_id, status);
@@ -676,6 +688,10 @@ function mapStaff(row: Record<string, unknown>): StaffBooking {
     insuranceTotal: Number(row.insurance_total),
     deliveryFee: row.delivery_fee === null || row.delivery_fee === undefined ? null : Number(row.delivery_fee),
     total: Number(row.total_due),
+    discount: Number(row.discount || 0),
+    discountNote: String(row.discount_note || ""),
+    discountBy: String(row.discount_by || ""),
+    discountAt: row.discount_at ? new Date(String(row.discount_at)).toISOString() : "",
     ooh: Boolean(row.ooh),
     oohNote: String(row.ooh_note || ""),
     mpesaCode: String(row.mpesa_code || ""),
@@ -696,7 +712,7 @@ export async function listBookings() {
             delivery_mode, delivery_summary, delivery_detail, delivery_manual,
             days, daily_rate, hire_total, insurance_total, delivery_fee, total_due,
             ooh, ooh_note, mpesa_code, status, staff_note, created_at, amount_paid, payment_log,
-            source, COALESCE(held_at, created_at) AS held_at,
+            source, COALESCE(held_at, created_at) AS held_at, discount, discount_note, discount_by, discount_at,
             EXISTS (SELECT 1 FROM booking_documents d WHERE d.booking_id = bookings.id) AS has_documents,
             COALESCE((SELECT d.drivers->0->>'fromFile' = 'true' FROM booking_documents d WHERE d.booking_id = bookings.id), false)
               AS licence_on_file
@@ -737,9 +753,10 @@ async function decideQuote(db: Pool, id: string, staffNote: string, nextStatus: 
       delivery_fee: number | null;
       delivery_manual: boolean;
       status: string;
+      discount: number;
     }>(
       `SELECT model_name, pickup_on::text, return_on::text, hire_total, insurance_total,
-              delivery_fee, delivery_manual, status
+              delivery_fee, delivery_manual, status, discount
        FROM bookings
        WHERE id = $1
        FOR UPDATE`,
@@ -776,7 +793,7 @@ async function decideQuote(db: Pool, id: string, staffNote: string, nextStatus: 
     const vehicleId = locked.rows[0]?.id;
     if (!vehicleId) throw staffError("No " + row.model_name + " is free for those dates.", 409);
 
-    const total = Number(row.hire_total) + Number(row.insurance_total) + fee;
+    const total = Math.max(0, Number(row.hire_total) + Number(row.insurance_total) + fee - Number(row.discount || 0));
     const saved = await client.query(
       `UPDATE bookings
        SET status = $2,
@@ -853,7 +870,7 @@ export async function editBooking(id: string, raw: Partial<BookingEdit>, editedB
   if (!(PICKUP_LOCATIONS as readonly string[]).includes(location)) throw staffError("Choose a pick-up location.", 400);
   if (name.length < 2) throw staffError("Enter the customer's name.", 400);
   const digits = phone.replace(/\D/g, "");
-  if (digits.length < 9 || digits.length > 15) throw staffError("Enter a mobile number with at least 9 digits.", 400);
+  if (phone && (digits.length < 9 || digits.length > 15)) throw staffError("Enter a mobile number with at least 9 digits, or leave it blank.", 400);
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw staffError("Enter a valid email address, or leave it blank.", 400);
   if (mpesaCode && (mpesaCode.length < 5 || mpesaCode.length > 12)) throw staffError("Enter a valid M-Pesa code, or leave it blank.", 400);
   const ooh = outOfHours(pickup, returnOn, pickTime, retTime);
@@ -871,8 +888,9 @@ export async function editBooking(id: string, raw: Partial<BookingEdit>, editedB
       delivery_fee: number | null;
       delivery_manual: boolean;
       staff_note: string;
+      discount: number;
     }>(
-      `SELECT status, vehicle_id, model_name, pickup_on::text, delivery_mode, delivery_fee, delivery_manual, staff_note
+      `SELECT status, vehicle_id, model_name, pickup_on::text, delivery_mode, delivery_fee, delivery_manual, staff_note, discount
        FROM bookings WHERE id = $1 FOR UPDATE`,
       [id],
     );
@@ -917,7 +935,15 @@ export async function editBooking(id: string, raw: Partial<BookingEdit>, editedB
     const days = hireDays(pickup, returnOn);
     const hireTotal = days * model.rate;
     const insuranceTotal = raw.insure && model.addon > 0 ? days * model.addon : 0;
-    const total = hireTotal + insuranceTotal + (fee || 0);
+    const discount = Number(row.discount || 0);
+    if (discount > hireTotal + insuranceTotal + (fee || 0)) {
+      throw staffError(
+        "The discount of " + ksh(discount) + " is more than the new price of " + ksh(hireTotal + insuranceTotal + (fee || 0)) +
+          ". Lower or remove the discount first.",
+        400,
+      );
+    }
+    const total = hireTotal + insuranceTotal + (fee || 0) - discount;
     let amountPaid: number | null = null; // null keeps what is stored
     if (raw.amountPaid !== undefined && String(raw.amountPaid).trim() !== "") {
       amountPaid = wholeShillings(raw.amountPaid);
@@ -1028,6 +1054,248 @@ export async function recordPayment(id: string, raw: { amount?: unknown; code?: 
     );
     await client.query("COMMIT");
     return { ok: true, status: updated.rows[0].status, balance: total - paid, reference: row.reference };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Staff give (or change, or remove) a discount on a booking ("Discount" on the desk booking card).
+// The amount is whole shillings off the booking's normal price (hire + waiver + delivery). A reason is required,
+// and who gave it and when are kept. 0 removes the discount. The discount can't take the price below what has
+// already been paid; a refund is arranged outside the website. A held booking that is now fully paid is confirmed.
+export async function setDiscount(id: string, raw: { amount?: unknown; note?: unknown }, givenBy: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const amount = wholeShillings(raw.amount);
+  if (amount === null) throw staffError("Enter the discount as a whole number of shillings (0 removes it).", 400);
+  const note = String(raw.note ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  if (amount > 0 && note.length < 3) throw staffError("Add a short reason for the discount.", 400);
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query<{
+      status: string;
+      reference: string;
+      hire_total: number;
+      insurance_total: number;
+      delivery_fee: number | null;
+      delivery_manual: boolean;
+      amount_paid: number;
+      total_due: number;
+    }>(
+      `SELECT status, reference, hire_total, insurance_total, delivery_fee, delivery_manual, amount_paid, total_due
+       FROM bookings WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    const row = current.rows[0];
+    if (!row) throw staffError("That booking was not found.", 404);
+    if (row.status === "cancelled") throw staffError("Closed bookings can't be discounted.", 409);
+    const normal = Number(row.hire_total) + Number(row.insurance_total) + Number(row.delivery_fee || 0);
+    if (amount > normal) throw staffError("The discount can't be more than the normal price of " + ksh(normal) + ".", 400);
+    // Bookings confirmed before part payments existed have 0 stored; confirmed means paid in full.
+    const paid = row.status === "confirmed" && !Number(row.amount_paid) ? Number(row.total_due) : Number(row.amount_paid);
+    const total = normal - amount;
+    if (paid > total && !row.delivery_manual) {
+      throw staffError(
+        ksh(paid) + " has already been paid on " + row.reference + ", so the price can't go below that. " +
+          "Arrange a refund with the customer and note it on the booking.",
+        409,
+      );
+    }
+    const updated = await client.query<{ status: string }>(
+      `UPDATE bookings
+       SET discount = $2, discount_note = $3, discount_by = $4, discount_at = CASE WHEN $2 > 0 THEN now() ELSE NULL END,
+           total_due = $5,
+           amount_paid = $6,
+           status = CASE WHEN status = 'pending' AND $6 > 0 AND $6 >= $5 THEN 'confirmed' ELSE status END,
+           confirmed_at = CASE WHEN status = 'pending' AND $6 > 0 AND $6 >= $5 THEN now() ELSE confirmed_at END
+       WHERE id = $1
+       RETURNING status`,
+      [id, amount, amount > 0 ? note : "", amount > 0 ? givenBy.slice(0, 60) : "", total, paid],
+    );
+    await client.query("COMMIT");
+    return { ok: true, reference: row.reference, total, discount: amount, status: updated.rows[0].status };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export type NewBookingNotice = {
+  id: string;
+  reference: string;
+  customerName: string;
+  model: string;
+  pickup: string;
+  returnOn: string;
+  status: string;
+  source: "website" | "desk";
+  total: number;
+  createdAt: string;
+  addedBy: string; // the staff member, for desk bookings
+  unseen: boolean;
+};
+
+// The bell on the desk: the 30 newest bookings (website and desk), except ones this staff member added
+// themselves, with when each was made and whether it is newer than the last time they opened the bell.
+export async function bookingNotices(username: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const seen = await db.query<{ bookings_seen_at: string }>(`SELECT bookings_seen_at FROM staff_seen WHERE username = $1`, [username]);
+  // First time: count only today's bookings as new, so a new login doesn't start with a long list.
+  const seenAt = seen.rows[0] ? new Date(String(seen.rows[0].bookings_seen_at)) : new Date(Date.now() - 24 * 36e5);
+  const result = await db.query(
+    `SELECT id, reference, customer_name, model_name, pickup_on::text, return_on::text, status, source, total_due, created_at, staff_note
+     FROM bookings
+     WHERE COALESCE(staff_note, '') NOT LIKE $1
+     ORDER BY created_at DESC
+     LIMIT 30`,
+    ["Added on the desk by " + username.replace(/[\\%_]/g, "\\$&") + "%"],
+  );
+  const notices: NewBookingNotice[] = result.rows.map((row) => {
+    const createdAt = new Date(String(row.created_at));
+    const desk = /^Added on the desk by ([^.]+)/.exec(String(row.staff_note || ""));
+    return {
+      id: String(row.id),
+      reference: String(row.reference),
+      customerName: String(row.customer_name),
+      model: String(row.model_name),
+      pickup: String(row.pickup_on),
+      returnOn: String(row.return_on),
+      status: String(row.status),
+      source: row.source === "desk" ? "desk" : "website",
+      total: Number(row.total_due),
+      createdAt: createdAt.toISOString(),
+      addedBy: desk ? desk[1] : "",
+      unseen: createdAt > seenAt,
+    };
+  });
+  return { notices, unseen: notices.filter((notice) => notice.unseen).length, seenAt: seenAt.toISOString() };
+}
+
+// Opening the bell marks every booking made so far as seen, for this staff member only.
+export async function markBookingsSeen(username: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  await db.query(
+    `INSERT INTO staff_seen (username, bookings_seen_at) VALUES ($1, now())
+     ON CONFLICT (username) DO UPDATE SET bookings_seen_at = now()`,
+    [username],
+  );
+  return { ok: true };
+}
+
+// Staff choose which vehicle (by number plate) a held or paid booking uses ("Vehicle" on the desk booking card).
+// It must be the same model, active, and free for the booking's dates. Change the model with Edit instead.
+export async function allocateVehicle(id: string, vehicleIdRaw: unknown, allocatedBy: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const vehicleId = String(vehicleIdRaw ?? "").trim().slice(0, 40);
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query<{ status: string; reference: string; model_name: string; pickup_on: string; return_on: string; vehicle_id: string | null }>(
+      `SELECT status, reference, model_name, pickup_on::text, return_on::text, vehicle_id FROM bookings WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    const row = current.rows[0];
+    if (!row) throw staffError("That booking was not found.", 404);
+    if (row.status !== "pending" && row.status !== "confirmed") {
+      throw staffError("A vehicle can only be chosen for a held or paid booking.", 409);
+    }
+    const vehicle = await client.query<{ id: string; model: string; plate: string; active: boolean }>(
+      `SELECT id, model, plate, active FROM vehicles WHERE id = $1 FOR UPDATE`,
+      [vehicleId],
+    );
+    const chosen = vehicle.rows[0];
+    if (!chosen || !chosen.active) throw staffError("Choose a vehicle from the list.", 400);
+    if (chosen.model !== row.model_name) {
+      throw staffError(chosen.plate + " is a " + chosen.model + ". To change the model, use Edit.", 400);
+    }
+    if (chosen.id === row.vehicle_id) {
+      await client.query("COMMIT");
+      return { ok: true, reference: row.reference, plate: chosen.plate };
+    }
+    const end = exclusiveEnd(row.pickup_on, row.return_on);
+    const clash = await client.query<{ reference: string }>(
+      `SELECT reference FROM bookings
+       WHERE vehicle_id = $1 AND id <> $2 AND status IN ('pending', 'confirmed')
+         AND pickup_on < $4::date
+         AND $3::date < CASE WHEN return_on > pickup_on THEN return_on ELSE pickup_on + 1 END
+       LIMIT 1`,
+      [chosen.id, id, row.pickup_on, end],
+    );
+    if (clash.rows[0]) throw staffError(chosen.plate + " is already booked on " + clash.rows[0].reference + " for those dates.", 409);
+    const stamp = chosen.plate + " allocated by " + allocatedBy.slice(0, 60) + " on " + todayNairobi() + ".";
+    await client.query(
+      `UPDATE bookings
+       SET vehicle_id = $2,
+           staff_note = left(CASE WHEN staff_note = '' THEN $3 ELSE staff_note || ' · ' || $3 END, 500)
+       WHERE id = $1`,
+      [id, chosen.id, stamp],
+    );
+    await client.query("COMMIT");
+    return { ok: true, reference: row.reference, plate: chosen.plate };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// "Undo payment confirmed" on the desk, for a booking confirmed by mistake. It goes back to held (the vehicle
+// stays held). The amount paid goes back to the payments recorded with "Match a payment"; if those alone
+// cover the total, the latest one is taken off too, since that is the payment that confirmed it.
+export async function reverseConfirmation(id: string, reversedBy: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query<{ status: string; reference: string; total_due: number; payment_log: unknown }>(
+      `SELECT status, reference, total_due, payment_log FROM bookings WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    const row = current.rows[0];
+    if (!row) throw staffError("That booking was not found.", 404);
+    if (row.status !== "confirmed") throw staffError("Only a paid booking can have its payment confirmation undone.", 409);
+    const log = Array.isArray(row.payment_log) ? (row.payment_log as PaymentEntry[]) : [];
+    let entries = log;
+    let removed: PaymentEntry | null = null;
+    const sum = (list: PaymentEntry[]) => list.reduce((total, entry) => total + (Number(entry.amount) || 0), 0);
+    if (entries.length && sum(entries) >= Number(row.total_due)) {
+      removed = entries[entries.length - 1];
+      entries = entries.slice(0, -1);
+    }
+    const paid = Math.min(sum(entries), Number(row.total_due));
+    const stamp =
+      "Payment confirmation undone by " + reversedBy.slice(0, 60) + " on " + todayNairobi() +
+      (removed ? " (removed " + ksh(Number(removed.amount) || 0) + (removed.code ? " " + removed.code : "") + ")" : "") + ".";
+    await client.query(
+      `UPDATE bookings
+       SET status = 'pending',
+           confirmed_at = NULL,
+           amount_paid = $2,
+           payment_log = $3::jsonb,
+           mpesa_code = CASE WHEN $4 <> '' AND upper(mpesa_code) = $4 THEN '' ELSE mpesa_code END,
+           staff_note = left(CASE WHEN staff_note = '' THEN $5 ELSE staff_note || ' · ' || $5 END, 500)
+       WHERE id = $1`,
+      [id, paid, JSON.stringify(entries), removed?.code ? String(removed.code).toUpperCase() : "", stamp],
+    );
+    await client.query("COMMIT");
+    return { ok: true, reference: row.reference, paid, removed };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -1350,8 +1618,8 @@ export async function performanceYear(year: number): Promise<PerformanceYear> {
   const first = year + "-01-01";
   const last = year + "-12-31";
   const today = todayNairobi();
-  const result = await db.query<{ vehicle_id: string; pickup_on: string; return_on: string; days: number; hire_total: number; insurance_total: number }>(
-    `SELECT vehicle_id, pickup_on::text, return_on::text, days, hire_total, insurance_total
+  const result = await db.query<{ vehicle_id: string; pickup_on: string; return_on: string; days: number; hire_total: number; insurance_total: number; discount: number }>(
+    `SELECT vehicle_id, pickup_on::text, return_on::text, days, hire_total, insurance_total, discount
      FROM bookings
      WHERE status IN ('pending', 'confirmed') AND vehicle_id IS NOT NULL
        AND pickup_on <= $2::date AND return_on >= $1::date`,
@@ -1366,7 +1634,8 @@ export async function performanceYear(year: number): Promise<PerformanceYear> {
     const list = days[row.vehicle_id];
     if (!list) continue;
     const n = Math.max(1, Number(row.days));
-    const perDay = (Number(row.hire_total) + Number(row.insurance_total)) / n / 1.16;
+    // Income after any desk discount (taken off the hire and waiver, never below 0).
+    const perDay = Math.max(0, Number(row.hire_total) + Number(row.insurance_total) - Number(row.discount || 0)) / n / 1.16;
     const end = exclusiveEnd(row.pickup_on, row.return_on);
     for (let d = row.pickup_on; d < end; d = addDays(d, 1)) {
       if (d > today || d < first || d > last) continue;

@@ -246,7 +246,7 @@ export default function DeskEditBooking({
         </div>
         <div>
           <label htmlFor="ebPhone" className={label}>
-            Mobile number
+            Mobile number (optional)
           </label>
           <input id="ebPhone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="off" className={input} />
         </div>

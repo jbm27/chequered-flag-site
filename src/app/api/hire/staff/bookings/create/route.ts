@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 const COOKIE = "cf_hire_session";
 
 // Staff add a booking by hand, for example one taken over the phone.
-// Same checks, prices and vehicle assignment as a website booking; email is optional,
+// Same checks, prices and vehicle assignment as a website booking; email and mobile number are optional,
 // and staff can mark it as already paid in full, or record a part payment (amount paid so far).
 export async function POST(request: Request) {
   if (!databaseConfigured()) {

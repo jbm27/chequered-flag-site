@@ -6,6 +6,8 @@ import DeskAddBooking from "./DeskAddBooking";
 import DeskEditBooking from "./DeskEditBooking";
 import DeskVehicleEdit from "./DeskVehicleEdit";
 import DeskMatchPayment from "./DeskMatchPayment";
+import DeskBell from "./DeskBell";
+import DeskDiscount from "./DeskDiscount";
 import DeskReviews, { AskForReview } from "./DeskReviews";
 import { bookingCodes, duplicateCodes, looksLikeMpesaCode, normaliseCode } from "../lib/payments";
 import DeskCustomers, { type LicenceOnFileRow } from "./DeskCustomers";
@@ -920,7 +922,18 @@ export default function HireDesk() {
         <section className={card + " mt-[22px] p-[22px]"}>
           <div className="mb-4 flex flex-wrap items-end justify-between gap-x-7 gap-y-3.5">
             <div>
-              {sectionHead("calendar", "Booking calendar")}
+              <div className="flex flex-wrap items-center gap-3">
+                {sectionHead("calendar", "Booking calendar")}
+                <DeskBell
+                  onNewBookings={() => {
+                    loadBookings();
+                  }}
+                  onOpenBooking={async (id) => {
+                    if (!bookings.some((booking) => booking.id === id)) await loadBookings();
+                    pick(id);
+                  }}
+                />
+              </div>
               <p className="mt-1 max-w-[760px] text-sm text-[#595959]">
                 Four weeks at a time. Use Earlier and Later to see past and future bookings. Vehicles with nothing booked in
                 the period shown are hidden until you choose to show them. Select a booking to see its details.
@@ -1382,12 +1395,40 @@ export default function HireDesk() {
                         ? ksh(selected.deliveryFee)
                         : "None"}
                   </Row>
+                  {(selected.discount || 0) > 0 && (
+                    <>
+                      <Row label="Normal price">{ksh(selected.total + (selected.discount || 0))}</Row>
+                      <Row label="Discount">
+                        <span className="font-bold text-[#0d5a2a]">− {ksh(selected.discount || 0)}</span>
+                        <span className="block text-xs text-[#595959]">
+                          {selected.discountNote}
+                          {selected.discountBy ? " · by " + selected.discountBy : ""}
+                          {selected.discountAt
+                            ? " on " + short(new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Nairobi" }).format(new Date(selected.discountAt)))
+                            : ""}
+                        </span>
+                      </Row>
+                    </>
+                  )}
                   <Row label="Total">
                     <strong>
                       {ksh(selected.total)}
                       {selected.deliveryManual ? " plus delivery" : ""}
                     </strong>
                   </Row>
+                  {selected.status !== "cancelled" && (
+                    <Row label={(selected.discount || 0) > 0 ? "" : "Discount"}>
+                      <DeskDiscount
+                        key={selected.id + ":" + (selected.discount || 0)}
+                        booking={selected}
+                        onSaved={async (text) => {
+                          setMessage("");
+                          setNotice(text);
+                          await loadBookings();
+                        }}
+                      />
+                    </Row>
+                  )}
                   <Row label="Paid so far">{ksh(selected.amountPaid)}</Row>
                   <Row label="Balance">
                     <strong className={balanceOf(selected) > 0 ? "text-[#a50e0e]" : "text-[#0d5a2a]"}>

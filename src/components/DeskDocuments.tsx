@@ -47,6 +47,10 @@ function pdfData(booking: StaffBooking, docs: StoredDocuments): BookingPdfData {
       amount: booking.deliveryManual || booking.deliveryFee === null ? "To be set" : booking.deliveryFee ? ksh(booking.deliveryFee) : "Free",
     });
   }
+  if (booking.discount) {
+    // Desk discount: shown as its own line so the normal price and the saving are both clear.
+    costs.push({ label: "Discount", sub: booking.discountNote || undefined, qty: "1", amount: "- " + ksh(booking.discount) });
+  }
   const sameText = docs.agreementVersion === AGREEMENT_VERSION;
   const plusDelivery = booking.deliveryManual ? " plus delivery" : "";
   return {

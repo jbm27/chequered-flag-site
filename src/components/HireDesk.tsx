@@ -590,7 +590,7 @@ export default function HireDesk() {
       }
       // Bookings that overlap each other form a group. Inside a group the prep and cleaning bars that would fall
       // during the hires are hidden: only the prep before the group's first pick-up and the cleaning after its last
-      // return are shown, plus a cleaning bar directly above each overlapping hire, between it and the hire above.
+      // return are shown, plus a cleaning bar between the two hires across only the days they overlap.
       const sorted = [...mine].sort((a, b) => a.pickup.localeCompare(b.pickup));
       const groupOf: Record<string, number> = {};
       const groups: { start: number; end: number; ids: string[] }[] = [];
@@ -616,12 +616,21 @@ export default function HireDesk() {
         if (members.length > 1) {
           for (const b of members) {
             if ((lane[b.id] || 0) > 0) {
-              handovers.push({
-                lane: lane[b.id],
-                at: num(b.pickup),
-                end: num(lastHireDay(b.pickup, b.returnOn)),
-                title: "Cleaning around " + b.customerName + "'s overlapping hire",
-              });
+              // Only the days where this hire and the one on the line above overlap.
+              const bStart = num(b.pickup);
+              const bEnd = num(lastHireDay(b.pickup, b.returnOn));
+              for (const above of members) {
+                if (lane[above.id] !== lane[b.id] - 1) continue;
+                const at = Math.max(bStart, num(above.pickup));
+                const end = Math.min(bEnd, num(lastHireDay(above.pickup, above.returnOn)));
+                if (end < at) continue;
+                handovers.push({
+                  lane: lane[b.id],
+                  at,
+                  end,
+                  title: "Cleaning where " + above.customerName + " and " + b.customerName + " overlap",
+                });
+              }
             }
           }
         }
@@ -1227,14 +1236,14 @@ export default function HireDesk() {
                           return parts;
                         })}
                         {handovers.map((h) => {
-                          // The cleaning bar sits directly above the overlapping hire, the same length as it:
-                          // top hire, cleaning, overlapping hire (a "cleaning sandwich").
+                          // The cleaning bar sits between the two hires, only across the days they overlap
+                          // (top hire, cleaning, overlapping hire: a "cleaning sandwich").
                           const len = h.end - h.at + 1;
                           const box = bufferBox(h.at, len);
                           if (!box) return null;
                           return (
                             <div
-                              key={"handover" + h.lane + "-" + h.at}
+                              key={"handover" + h.lane + "-" + h.at + "-" + h.end}
                               title={h.title + ", " + bufferWhen(h.at, len)}
                               className="absolute h-1.5 rounded border-x-2 border-white"
                               style={{ top: 6 + h.lane * 42 - 9, left: box.left, width: box.width, background: BUFFER }}

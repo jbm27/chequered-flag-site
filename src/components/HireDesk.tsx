@@ -7,6 +7,7 @@ import DeskEditBooking from "./DeskEditBooking";
 import DeskVehicleEdit from "./DeskVehicleEdit";
 import DeskMatchPayment from "./DeskMatchPayment";
 import DeskBell from "./DeskBell";
+import DeskCalendarLink from "./DeskCalendarLink";
 import DeskDiscount from "./DeskDiscount";
 import DeskAllocate from "./DeskAllocate";
 import { clashesFor } from "./DeskPlateChoice";
@@ -14,7 +15,7 @@ import DeskReviews, { AskForReview } from "./DeskReviews";
 import { bookingCodes, duplicateCodes, looksLikeMpesaCode, normaliseCode } from "../lib/payments";
 import DeskCustomers, { type LicenceOnFileRow } from "./DeskCustomers";
 import DeskPerformance from "./DeskPerformance";
-import { canSeePerformance } from "../lib/access";
+import { canSeePerformance, canUseCalendarLink } from "../lib/access";
 import DeskDocuments from "./DeskDocuments";
 
 // Staff desk laid out like Homer's fleet dashboard design (V1.5).
@@ -1044,6 +1045,7 @@ export default function HireDesk() {
                     pick(id);
                   }}
                 />
+                {canUseCalendarLink(signedIn) && <DeskCalendarLink />}
               </div>
               <p className="mt-1 max-w-[760px] text-sm text-[#595959]">
                 Four weeks at a time. Use Earlier and Later to see past and future bookings. Vehicles with nothing booked in

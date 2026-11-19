@@ -11,6 +11,8 @@ import {
   type StoredDocuments,
 } from "./documents";
 import { VEHICLE_RECORDS } from "./vehicleRecords";
+import type { CalendarBooking } from "./ics";
+import { canUseCalendarLink } from "./access";
 import {
   addDays,
   assessBooking,
@@ -168,6 +170,13 @@ async function setup() {
     CREATE TABLE IF NOT EXISTS staff_seen (
       username text PRIMARY KEY,
       bookings_seen_at timestamptz NOT NULL DEFAULT now()
+    );
+    -- Private calendar links (Google Calendar, Apple Calendar, Outlook): one secret key per staff member,
+    -- removed with the staff member. Anyone with the link can read the bookings, so it can be reset.
+    CREATE TABLE IF NOT EXISTS staff_calendar_links (
+      staff_id integer PRIMARY KEY REFERENCES staff_users(id) ON DELETE CASCADE,
+      token text NOT NULL UNIQUE,
+      created_at timestamptz NOT NULL DEFAULT now()
     );
     -- Payments recorded on the desk (code, amount, who, when), used to spot a code used twice.
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_log jsonb NOT NULL DEFAULT '[]'::jsonb;
@@ -1438,6 +1447,79 @@ export async function reverseConfirmation(id: string, reversedBy: string) {
   } finally {
     client.release();
   }
+}
+
+// ---------- Calendar link (staff subscribe from Google Calendar) ----------
+
+// This staff member's private calendar key, made the first time it is asked for. reset makes a new one, so the
+// old link stops working (for example if it was shared by mistake).
+export async function calendarToken(username: string, reset = false) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const staff = await db.query<{ id: number }>(`SELECT id FROM staff_users WHERE username = $1`, [username]);
+  const staffId = staff.rows[0]?.id;
+  if (!staffId) throw staffError("Sign in to the hire desk.", 401);
+  if (!reset) {
+    const existing = await db.query<{ token: string }>(`SELECT token FROM staff_calendar_links WHERE staff_id = $1`, [staffId]);
+    if (existing.rows[0]) return existing.rows[0].token;
+  }
+  const token = crypto.randomBytes(24).toString("base64url");
+  await db.query(
+    `INSERT INTO staff_calendar_links (staff_id, token) VALUES ($1, $2)
+     ON CONFLICT (staff_id) DO UPDATE SET token = EXCLUDED.token, created_at = now()`,
+    [staffId, token],
+  );
+  return token;
+}
+
+// The bookings for a calendar link: every held, paid and quoted booking returning from 60 days ago onwards.
+// Returns null for an unknown key.
+export async function calendarBookings(token: string): Promise<CalendarBooking[] | null> {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return null;
+  const owner = await db.query<{ username: string }>(
+    `SELECT u.username FROM staff_calendar_links l JOIN staff_users u ON u.id = l.staff_id WHERE l.token = $1`,
+    [token],
+  );
+  // Only logins allowed a calendar link (lib/access.ts); a link stops working if that changes.
+  if (!owner.rows[0] || !canUseCalendarLink(owner.rows[0].username)) return null;
+  const result = await db.query(
+    `SELECT b.id::text, b.reference, b.status, b.customer_name, b.phone, b.email, b.model_name, COALESCE(v.plate, '') AS plate,
+            b.pickup_on::text, b.pickup_time, b.return_on::text, b.return_time, b.pickup_location, b.delivery_summary,
+            b.total_due, b.amount_paid, b.overlap_approved, b.overlap_note, b.staff_note,
+            GREATEST(b.created_at, COALESCE(b.confirmed_at, b.created_at), COALESCE(b.held_at, b.created_at),
+                     COALESCE(b.discount_at, b.created_at)) AS updated_at
+     FROM bookings b LEFT JOIN vehicles v ON v.id = b.vehicle_id
+     WHERE b.status IN ('pending', 'confirmed', 'quote')
+       AND b.return_on >= (now() AT TIME ZONE 'Africa/Nairobi')::date - 60
+     ORDER BY b.pickup_on`,
+  );
+  return result.rows.map((row) => ({
+    id: String(row.id),
+    reference: String(row.reference),
+    status: String(row.status),
+    customerName: String(row.customer_name),
+    phone: String(row.phone || ""),
+    email: String(row.email || ""),
+    model: String(row.model_name),
+    plate: String(row.plate || ""),
+    pickup: String(row.pickup_on),
+    pickTime: String(row.pickup_time),
+    returnOn: String(row.return_on),
+    retTime: String(row.return_time),
+    location: String(row.pickup_location),
+    deliverySummary: String(row.delivery_summary || ""),
+    total: Number(row.total_due),
+    // Bookings confirmed before part payments existed have 0 stored; confirmed means paid in full.
+    amountPaid: row.status === "confirmed" && !Number(row.amount_paid) ? Number(row.total_due) : Number(row.amount_paid || 0),
+    overlapApproved: Boolean(row.overlap_approved),
+    overlapNote: String(row.overlap_note || ""),
+    staffNote: String(row.staff_note || ""),
+    updatedAt: new Date(String(row.updated_at)).toISOString(),
+  }));
 }
 
 export async function updateBooking(id: string, action: string, note: string, deliveryFee?: unknown) {

@@ -590,7 +590,7 @@ export default function HireDesk() {
       }
       // Bookings that overlap each other form a group. Inside a group the prep and cleaning bars that would fall
       // during the hires are hidden: only the prep before the group's first pick-up and the cleaning after its last
-      // return are shown, plus a small cleaning bar between the top and bottom hire where the vehicle changes hands.
+      // return are shown, plus a cleaning bar directly above each overlapping hire, between it and the hire above.
       const sorted = [...mine].sort((a, b) => a.pickup.localeCompare(b.pickup));
       const groupOf: Record<string, number> = {};
       const groups: { start: number; end: number; ids: string[] }[] = [];
@@ -606,7 +606,7 @@ export default function HireDesk() {
       }
       const showPrep: Record<string, boolean> = {};
       const showClean: Record<string, boolean> = {};
-      const handovers: { lane: number; at: number; title: string }[] = [];
+      const handovers: { lane: number; at: number; end: number; title: string }[] = [];
       for (const group of groups) {
         const members = sorted.filter((b) => group.ids.includes(b.id));
         const firstIn = members.find((b) => num(b.pickup) === group.start);
@@ -615,7 +615,14 @@ export default function HireDesk() {
         if (lastIn) showClean[lastIn.id] = true;
         if (members.length > 1) {
           for (const b of members) {
-            if ((lane[b.id] || 0) > 0) handovers.push({ lane: lane[b.id], at: num(b.pickup), title: "Clean before " + b.customerName + "'s hire" });
+            if ((lane[b.id] || 0) > 0) {
+              handovers.push({
+                lane: lane[b.id],
+                at: num(b.pickup),
+                end: num(lastHireDay(b.pickup, b.returnOn)),
+                title: "Cleaning around " + b.customerName + "'s overlapping hire",
+              });
+            }
           }
         }
       }
@@ -1220,14 +1227,15 @@ export default function HireDesk() {
                           return parts;
                         })}
                         {handovers.map((h) => {
-                          // A small cleaning bar between the top and bottom hire, ending where the lower hire starts.
-                          const len = after > 0 ? after : STEP;
-                          const box = bufferBox(h.at - len, len);
+                          // The cleaning bar sits directly above the overlapping hire, the same length as it:
+                          // top hire, cleaning, overlapping hire (a "cleaning sandwich").
+                          const len = h.end - h.at + 1;
+                          const box = bufferBox(h.at, len);
                           if (!box) return null;
                           return (
                             <div
                               key={"handover" + h.lane + "-" + h.at}
-                              title={h.title + ", " + bufferWhen(h.at - len, len)}
+                              title={h.title + ", " + bufferWhen(h.at, len)}
                               className="absolute h-1.5 rounded border-x-2 border-white"
                               style={{ top: 6 + h.lane * 42 - 9, left: box.left, width: box.width, background: BUFFER }}
                             />

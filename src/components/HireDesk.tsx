@@ -92,16 +92,14 @@ function lastHireDay(pickup: string, returnOn: string) {
   return pickup;
 }
 
-// A booking's exact position on the calendar in days: the day plus the time of day, so a bar starts at the
-// pick-up time and ends at the drop-off time on the drop-off date.
-function exactAt(day: string, time: string) {
-  const [h, m] = (time || "00:00").split(":").map(Number);
-  return num(day) + ((h || 0) + (m || 0) / 60) / 24;
-}
+// Where a booking sits on the calendar, in day numbers.
+// hireSpan: the days the vehicle is taken (the drop-off day is free for a new pick-up), used to decide
+// which bookings overlap. barSpan: what is drawn, the whole pick-up day to the end of the drop-off day.
 function hireSpan(booking: StaffBooking) {
-  const s = exactAt(booking.pickup, booking.pickTime);
-  const e = exactAt(booking.returnOn, booking.retTime);
-  return { s, e: e > s ? e : s + 0.25 };
+  return { s: num(booking.pickup), e: num(lastHireDay(booking.pickup, booking.returnOn)) + 1 };
+}
+function barSpan(booking: StaffBooking) {
+  return { s: num(booking.pickup), e: num(booking.returnOn) + 1 };
 }
 
 function num(iso: string) {
@@ -623,11 +621,11 @@ export default function HireDesk() {
           for (const b of members) {
             if ((lane[b.id] || 0) > 0) {
               // Only where this hire and the one on the line above overlap.
-              const { s: bStart, e: bEnd } = hireSpan(b);
+              const { s: bStart, e: bEnd } = barSpan(b);
               for (const above of members) {
                 if (lane[above.id] !== lane[b.id] - 1) continue;
-                const at = Math.max(bStart, hireSpan(above).s);
-                const end = Math.min(bEnd, hireSpan(above).e);
+                const at = Math.max(bStart, barSpan(above).s);
+                const end = Math.min(bEnd, barSpan(above).e);
                 if (end <= at) continue;
                 handovers.push({
                   lane: lane[b.id],
@@ -640,7 +638,23 @@ export default function HireDesk() {
           }
         }
       }
-      return { vehicle, mine, busy, hit, lane, lanes: Math.max(1, laneEnds.length), showPrep, showClean, handovers, groupOf };
+      // Bars fill whole days. When a hire on the same line is picked up on the day the previous one is dropped
+      // off, the two bars share that day, half each, so neither hides the other.
+      const bar: Record<string, { s: number; e: number }> = {};
+      for (const booking of mine) bar[booking.id] = barSpan(booking);
+      for (let l = 0; l < laneEnds.length; l += 1) {
+        const onLine = sorted.filter((b) => (lane[b.id] || 0) === l);
+        for (let k = 1; k < onLine.length; k += 1) {
+          const prev = bar[onLine[k - 1].id];
+          const next = bar[onLine[k].id];
+          if (prev.e > next.s) {
+            const mid = next.s + 0.5;
+            prev.e = Math.min(prev.e, mid);
+            next.s = Math.max(next.s, mid);
+          }
+        }
+      }
+      return { vehicle, mine, busy, hit, lane, lanes: Math.max(1, laneEnds.length), showPrep, showClean, handovers, groupOf, bar };
     })
     .filter((row) => row.hit && !(hideIdle && !row.busy && !calQuery.trim()));
   const idleCount = fleet.filter((vehicle) => type === "all" || vehicle.category === type).length - calRows.length;
@@ -1155,7 +1169,7 @@ export default function HireDesk() {
                       ))}
                     </div>
                   </div>
-                  {calRows.map(({ vehicle, mine, lane, lanes, showPrep, showClean, handovers }) => (
+                  {calRows.map(({ vehicle, mine, lane, lanes, showPrep, showClean, handovers, bar }) => (
                     <div
                       key={vehicle.id}
                       className="grid border-b border-[#dadce0] bg-white last:border-b-0"
@@ -1181,13 +1195,13 @@ export default function HireDesk() {
                         }}
                       >
                         {mine.flatMap((booking) => {
-                          const { s: start, e: end } = hireSpan(booking);
+                          const { s: start, e: end } = bar[booking.id] || barSpan(booking);
                           const gap = lanes > 1 ? 12 : 4;
                           const fullyPaid = balanceOf(booking) === 0 && (booking.status === "confirmed" || booking.amountPaid > 0);
                           const partPaid = !fullyPaid && booking.amountPaid > 0;
                           const pal = fullyPaid ? PAID : partPaid ? PART : UNPAID;
                           const parts: React.ReactNode[] = [];
-                          // The bar runs from the pick-up time to the drop-off time on the drop-off date.
+                          // The bar fills the pick-up day through the drop-off day.
                           const hire = bufferBox(start, end - start);
                           if (hire) {
                             parts.push(
@@ -1220,23 +1234,24 @@ export default function HireDesk() {
                               </div>,
                             );
                           }
-                          const prep = before > 0 && showPrep[booking.id] ? bufferBox(start - before, before) : null;
+                          const prep = before > 0 && showPrep[booking.id] ? bufferBox(num(booking.pickup) - before, before) : null;
                           if (prep) {
                             parts.push(
                               <div
                                 key={booking.id + "p"}
-                                title={"Prep before hire for " + booking.customerName + ", " + bufferWhen(start - before, before)}
+                                title={"Prep before hire for " + booking.customerName + ", " + bufferWhen(num(booking.pickup) - before, before)}
                                 className="absolute h-2 rounded border-x-2 border-white"
                                 style={{ top: 6 + lanes * (30 + gap), left: prep.left, width: prep.width, background: BUFFER }}
                               />,
                             );
                           }
-                          const clean = after > 0 && showClean[booking.id] ? bufferBox(end, after) : null;
+                          const cleanFrom = num(booking.returnOn) + 1;
+                          const clean = after > 0 && showClean[booking.id] ? bufferBox(cleanFrom, after) : null;
                           if (clean) {
                             parts.push(
                               <div
                                 key={booking.id + "c"}
-                                title={"Clean and service after " + booking.customerName + ", " + bufferWhen(end, after)}
+                                title={"Clean and service after " + booking.customerName + ", " + bufferWhen(cleanFrom, after)}
                                 className="absolute h-2 rounded border-x-2 border-white"
                                 style={{ top: 6 + lanes * (30 + gap), left: clean.left, width: clean.width, background: BUFFER }}
                               />,

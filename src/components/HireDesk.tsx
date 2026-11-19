@@ -92,6 +92,18 @@ function lastHireDay(pickup: string, returnOn: string) {
   return pickup;
 }
 
+// A booking's exact position on the calendar in days: the day plus the time of day, so a bar starts at the
+// pick-up time and ends at the drop-off time on the drop-off date.
+function exactAt(day: string, time: string) {
+  const [h, m] = (time || "00:00").split(":").map(Number);
+  return num(day) + ((h || 0) + (m || 0) / 60) / 24;
+}
+function hireSpan(booking: StaffBooking) {
+  const s = exactAt(booking.pickup, booking.pickTime);
+  const e = exactAt(booking.returnOn, booking.retTime);
+  return { s, e: e > s ? e : s + 0.25 };
+}
+
 function num(iso: string) {
   return dayNumber(iso) ?? 0;
 }
@@ -559,12 +571,6 @@ export default function HireDesk() {
     if (b <= a) return null;
     return { left: ((a - first) / WIN) * 100 + "%", width: ((b - a) / WIN) * 100 + "%" };
   }
-  function col(start: number, end: number) {
-    const a = Math.max(start, first);
-    const b = Math.min(end, lastCol);
-    if (b < a) return null;
-    return a - first + 1 + " / " + (b - first + 2);
-  }
   const calRows = fleet
     .filter((vehicle) => type === "all" || vehicle.category === type)
     .map((vehicle) => {
@@ -578,10 +584,11 @@ export default function HireDesk() {
       // Approved overlaps go on a second line in the vehicle's row so both bookings stay visible.
       const lane: Record<string, number> = {};
       const laneEnds: number[] = [];
-      for (const booking of [...mine].sort((a, b) => a.pickup.localeCompare(b.pickup))) {
-        const start = num(booking.pickup);
-        const end = num(lastHireDay(booking.pickup, booking.returnOn));
-        let i = laneEnds.findIndex((laneEnd) => laneEnd < start);
+      const byStart = (a: StaffBooking, b: StaffBooking) => hireSpan(a).s - hireSpan(b).s;
+      for (const booking of [...mine].sort(byStart)) {
+        const { s: start, e: end } = hireSpan(booking);
+        // A hire that starts when (or after) the previous one is dropped off shares its line.
+        let i = laneEnds.findIndex((laneEnd) => laneEnd <= start);
         if (i === -1) {
           i = laneEnds.length;
           laneEnds.push(end);
@@ -591,14 +598,13 @@ export default function HireDesk() {
       // Bookings that overlap each other form a group. Inside a group the prep and cleaning bars that would fall
       // during the hires are hidden: only the prep before the group's first pick-up and the cleaning after its last
       // return are shown, plus a cleaning bar between the two hires across only the days they overlap.
-      const sorted = [...mine].sort((a, b) => a.pickup.localeCompare(b.pickup));
+      const sorted = [...mine].sort(byStart);
       const groupOf: Record<string, number> = {};
       const groups: { start: number; end: number; ids: string[] }[] = [];
       for (const booking of sorted) {
-        const start = num(booking.pickup);
-        const end = num(lastHireDay(booking.pickup, booking.returnOn));
+        const { s: start, e: end } = hireSpan(booking);
         const last = groups[groups.length - 1];
-        if (last && start <= last.end) {
+        if (last && start < last.end) {
           last.end = Math.max(last.end, end);
           last.ids.push(booking.id);
         } else groups.push({ start, end, ids: [booking.id] });
@@ -609,21 +615,20 @@ export default function HireDesk() {
       const handovers: { lane: number; at: number; end: number; title: string }[] = [];
       for (const group of groups) {
         const members = sorted.filter((b) => group.ids.includes(b.id));
-        const firstIn = members.find((b) => num(b.pickup) === group.start);
-        const lastIn = [...members].reverse().find((b) => num(lastHireDay(b.pickup, b.returnOn)) === group.end);
+        const firstIn = members.find((b) => hireSpan(b).s === group.start);
+        const lastIn = [...members].reverse().find((b) => hireSpan(b).e === group.end);
         if (firstIn) showPrep[firstIn.id] = true;
         if (lastIn) showClean[lastIn.id] = true;
         if (members.length > 1) {
           for (const b of members) {
             if ((lane[b.id] || 0) > 0) {
-              // Only the days where this hire and the one on the line above overlap.
-              const bStart = num(b.pickup);
-              const bEnd = num(lastHireDay(b.pickup, b.returnOn));
+              // Only where this hire and the one on the line above overlap.
+              const { s: bStart, e: bEnd } = hireSpan(b);
               for (const above of members) {
                 if (lane[above.id] !== lane[b.id] - 1) continue;
-                const at = Math.max(bStart, num(above.pickup));
-                const end = Math.min(bEnd, num(lastHireDay(above.pickup, above.returnOn)));
-                if (end < at) continue;
+                const at = Math.max(bStart, hireSpan(above).s);
+                const end = Math.min(bEnd, hireSpan(above).e);
+                if (end <= at) continue;
                 handovers.push({
                   lane: lane[b.id],
                   at,
@@ -1176,16 +1181,21 @@ export default function HireDesk() {
                         }}
                       >
                         {mine.flatMap((booking) => {
-                          const start = num(booking.pickup);
-                          const end = num(lastHireDay(booking.pickup, booking.returnOn));
+                          const { s: start, e: end } = hireSpan(booking);
+                          const gap = lanes > 1 ? 12 : 4;
                           const fullyPaid = balanceOf(booking) === 0 && (booking.status === "confirmed" || booking.amountPaid > 0);
                           const partPaid = !fullyPaid && booking.amountPaid > 0;
                           const pal = fullyPaid ? PAID : partPaid ? PART : UNPAID;
                           const parts: React.ReactNode[] = [];
-                          const hire = col(start, end);
+                          // The bar runs from the pick-up time to the drop-off time on the drop-off date.
+                          const hire = bufferBox(start, end - start);
                           if (hire) {
                             parts.push(
-                              <div key={booking.id + "h"} className="min-w-0 px-0.5" style={{ gridColumn: hire, gridRow: (lane[booking.id] || 0) + 1 }}>
+                              <div
+                                key={booking.id + "h"}
+                                className="absolute min-w-0 px-px"
+                                style={{ top: 6 + (lane[booking.id] || 0) * (30 + gap), left: hire.left, width: hire.width }}
+                              >
                                 <button
                                   type="button"
                                   onClick={() => pick(booking.id)}
@@ -1210,7 +1220,6 @@ export default function HireDesk() {
                               </div>,
                             );
                           }
-                          const gap = lanes > 1 ? 12 : 4;
                           const prep = before > 0 && showPrep[booking.id] ? bufferBox(start - before, before) : null;
                           if (prep) {
                             parts.push(
@@ -1222,12 +1231,12 @@ export default function HireDesk() {
                               />,
                             );
                           }
-                          const clean = after > 0 && showClean[booking.id] ? bufferBox(end + 1, after) : null;
+                          const clean = after > 0 && showClean[booking.id] ? bufferBox(end, after) : null;
                           if (clean) {
                             parts.push(
                               <div
                                 key={booking.id + "c"}
-                                title={"Clean and service after " + booking.customerName + ", " + bufferWhen(end + 1, after)}
+                                title={"Clean and service after " + booking.customerName + ", " + bufferWhen(end, after)}
                                 className="absolute h-2 rounded border-x-2 border-white"
                                 style={{ top: 6 + lanes * (30 + gap), left: clean.left, width: clean.width, background: BUFFER }}
                               />,
@@ -1236,9 +1245,9 @@ export default function HireDesk() {
                           return parts;
                         })}
                         {handovers.map((h) => {
-                          // The cleaning bar sits between the two hires, only across the days they overlap
+                          // The cleaning bar sits between the two hires, only across the time they overlap
                           // (top hire, cleaning, overlapping hire: a "cleaning sandwich").
-                          const len = h.end - h.at + 1;
+                          const len = h.end - h.at;
                           const box = bufferBox(h.at, len);
                           if (!box) return null;
                           return (

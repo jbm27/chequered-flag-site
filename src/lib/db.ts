@@ -993,8 +993,18 @@ export async function editBooking(id: string, raw: Partial<BookingEdit>, editedB
         [model.name, pickup, end, id, row.vehicle_id || ""],
       );
       vehicleId = free.rows[0]?.id || null;
-      // An approved overlap keeps its vehicle when edited, if the model is the same.
-      if (!vehicleId && row.overlap_approved && row.vehicle_id && model.name === row.model_name) vehicleId = row.vehicle_id;
+      // Both bookings in an approved overlap keep their shared vehicle when edited (same model), as long as every
+      // booking it still clashes with is part of an approved overlap with this one.
+      if (!vehicleId && row.vehicle_id && model.name === row.model_name) {
+        const clashes = await client.query<{ overlap_approved: boolean }>(
+          `SELECT overlap_approved FROM bookings
+           WHERE vehicle_id = $1 AND id <> $2 AND status IN ('pending', 'confirmed')
+             AND pickup_on < $4::date
+             AND $3::date < CASE WHEN return_on > pickup_on THEN return_on ELSE pickup_on + 1 END`,
+          [row.vehicle_id, id, pickup, end],
+        );
+        if (clashes.rows.every((clash) => clash.overlap_approved || row.overlap_approved)) vehicleId = row.vehicle_id;
+      }
       if (!vehicleId) throw staffError("No " + model.name + " is free for those dates.", 409);
     }
 

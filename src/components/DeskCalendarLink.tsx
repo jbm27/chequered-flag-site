@@ -121,6 +121,11 @@ export default function DeskCalendarLink() {
                   {copied ? "Copied ✓" : "Copy link"}
                 </button>
               </div>
+              <p className="mt-3 rounded-lg bg-[#fff8e1] px-3 py-2 text-xs text-[#5f4b00]">
+                <strong>Make the bookings yellow:</strong> in Google Calendar, find &quot;Chequered Flag hire bookings&quot;
+                under Other calendars, press ⋮ next to it and choose <strong>Banana</strong>. Each booking shows as one
+                bar from the day the vehicle goes out to the day it comes back, titled Paid, Part-paid or Awaiting payment.
+              </p>
               <p className="mt-3 text-xs text-[#595959]">
                 Keep this link private: anyone with it can see customer names and phone numbers.{" "}
                 <button

@@ -24,15 +24,22 @@ export type CalendarBooking = {
   updatedAt: string; // ISO
 };
 
-const STATUS: Record<string, string> = { pending: "Held, awaiting payment", confirmed: "Paid", quote: "Delivery quote, not held" };
-const SHORT: Record<string, string> = { pending: "Held", confirmed: "Paid", quote: "Quote" };
+const STATUS: Record<string, string> = { pending: "Held", confirmed: "Confirmed", quote: "Delivery quote, not held" };
 
-// Nairobi is UTC+3 all year, so local times convert to UTC by taking 3 hours off.
-function utcStamp(day: string, time: string) {
+// The payment state at the start of each event title (Homer: no payment colours in Google, a word instead).
+function paymentWord(b: CalendarBooking) {
+  if (b.status === "quote") return "Quote";
+  if (b.amountPaid >= b.total && b.total > 0) return "Paid";
+  if (b.amountPaid > 0) return "Part-paid";
+  return "Awaiting payment";
+}
+
+// Whole-day events, so Google shows one bar from the day the vehicle goes out to the day it comes back,
+// like the desk calendar. DTEND for a whole-day event is the day after the last day.
+function dateValue(day: string, plusDays = 0) {
   const [y, m, d] = day.split("-").map(Number);
-  const [h, min] = (time || "09:00").split(":").map(Number);
-  const date = new Date(Date.UTC(y, m - 1, d, (h || 0) - 3, min || 0));
-  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  const date = new Date(Date.UTC(y, m - 1, d + plusDays));
+  return date.toISOString().slice(0, 10).replace(/-/g, "");
 }
 
 function isoStamp(iso: string) {
@@ -73,6 +80,10 @@ export function buildCalendar(bookings: CalendarBooking[], deskUrl: string, now 
     "X-WR-CALNAME:Chequered Flag hire bookings",
     "X-WR-TIMEZONE:Africa/Nairobi",
     "X-WR-CALDESC:Vehicle hire bookings from the Chequered Flag hire desk",
+    // Yellow for hire bookings. Google Calendar ignores this (set the calendar's colour to Banana there);
+    // Apple Calendar and some others use it.
+    "COLOR:gold",
+    "X-APPLE-CALENDAR-COLOR:#F6BF26",
     "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
     "X-PUBLISHED-TTL:PT1H",
   ];
@@ -80,15 +91,14 @@ export function buildCalendar(bookings: CalendarBooking[], deskUrl: string, now 
   for (const b of bookings) {
     const vehicle = (b.plate ? b.plate + " " : "") + b.model;
     const balance = Math.max(0, b.total - b.amountPaid);
-    const summary =
-      (b.overlapApproved ? "⇄ " : "") + b.customerName + " · " + vehicle + " (" + (SHORT[b.status] || b.status) + ")";
+    const summary = paymentWord(b) + " · " + (b.overlapApproved ? "⇄ " : "") + b.customerName + " · " + vehicle;
     const description = [
-      b.reference + " · " + (STATUS[b.status] || b.status),
+      b.reference + " · " + paymentWord(b) + " · " + (STATUS[b.status] || b.status),
       "Customer: " + b.customerName,
       b.phone ? "Phone: " + b.phone : "Phone: not given",
       b.email ? "Email: " + b.email : "",
       "Vehicle: " + vehicle,
-      "Pick-up: " + b.pickup + " " + b.pickTime + " · Return: " + b.returnOn + " " + b.retTime,
+      "Goes out: " + b.pickup + " at " + b.pickTime + " · Comes back: " + b.returnOn + " at " + b.retTime,
       b.deliverySummary ? "Delivery: " + b.deliverySummary : "",
       "Total: " + ksh(b.total) + " · Paid: " + ksh(b.amountPaid) + " · Balance: " + ksh(balance),
       b.overlapApproved ? "Approved overlap on this vehicle" + (b.overlapNote ? ": " + b.overlapNote : "") : "",
@@ -102,8 +112,8 @@ export function buildCalendar(bookings: CalendarBooking[], deskUrl: string, now 
       "UID:" + b.id + "@thechequeredflag.net",
       "DTSTAMP:" + stamp,
       "LAST-MODIFIED:" + isoStamp(b.updatedAt),
-      "DTSTART:" + utcStamp(b.pickup, b.pickTime),
-      "DTEND:" + utcStamp(b.returnOn, b.retTime),
+      "DTSTART;VALUE=DATE:" + dateValue(b.pickup),
+      "DTEND;VALUE=DATE:" + dateValue(b.returnOn >= b.pickup ? b.returnOn : b.pickup, 1),
       "SUMMARY:" + text(summary),
       "LOCATION:" + text(b.deliverySummary || b.location),
       "DESCRIPTION:" + text(description),

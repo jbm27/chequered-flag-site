@@ -9,6 +9,7 @@ import DeskMatchPayment from "./DeskMatchPayment";
 import DeskBell from "./DeskBell";
 import DeskDiscount from "./DeskDiscount";
 import DeskAllocate from "./DeskAllocate";
+import { clashesFor } from "./DeskPlateChoice";
 import DeskReviews, { AskForReview } from "./DeskReviews";
 import { bookingCodes, duplicateCodes, looksLikeMpesaCode, normaliseCode } from "../lib/payments";
 import DeskCustomers, { type LicenceOnFileRow } from "./DeskCustomers";
@@ -574,7 +575,20 @@ export default function HireDesk() {
         return start - before <= lastCol && end + after >= first;
       });
       const hit = matches(calQuery, [vehicle.model, vehicle.plate, ...mine.map((b) => b.customerName + " " + b.reference)]);
-      return { vehicle, mine, busy, hit };
+      // Approved overlaps go on a second line in the vehicle's row so both bookings stay visible.
+      const lane: Record<string, number> = {};
+      const laneEnds: number[] = [];
+      for (const booking of [...mine].sort((a, b) => a.pickup.localeCompare(b.pickup))) {
+        const start = num(booking.pickup);
+        const end = num(lastHireDay(booking.pickup, booking.returnOn));
+        let i = laneEnds.findIndex((laneEnd) => laneEnd < start);
+        if (i === -1) {
+          i = laneEnds.length;
+          laneEnds.push(end);
+        } else laneEnds[i] = end;
+        lane[booking.id] = i;
+      }
+      return { vehicle, mine, busy, hit, lane, lanes: Math.max(1, laneEnds.length) };
     })
     .filter((row) => row.hit && !(hideIdle && !row.busy && !calQuery.trim()));
   const idleCount = fleet.filter((vehicle) => type === "all" || vehicle.category === type).length - calRows.length;
@@ -1055,6 +1069,10 @@ export default function HireDesk() {
                 <Legend bg={PAID.bg} h={16} label="Paid in full" />
                 <Legend bg={PART.bg} h={16} label="Part paid" />
                 <Legend bg={UNPAID.bg} h={16} label="Not paid yet" />
+                <span className="inline-flex items-center gap-1.5">
+                  <span aria-hidden="true" className="inline-block h-4 w-6 rounded border-2 border-dashed border-[#171717]" />
+                  ⇄ Approved overlap on the same vehicle
+                </span>
                 <Legend bg={BUFFER} h={8} label="Prep before / clean and service after" />
               </div>
               {calRows.length === 0 && (
@@ -1085,7 +1103,7 @@ export default function HireDesk() {
                       ))}
                     </div>
                   </div>
-                  {calRows.map(({ vehicle, mine }) => (
+                  {calRows.map(({ vehicle, mine, lane, lanes }) => (
                     <div
                       key={vehicle.id}
                       className="grid border-b border-[#dadce0] bg-white last:border-b-0"
@@ -1099,7 +1117,7 @@ export default function HireDesk() {
                         className="relative grid py-1.5"
                         style={{
                           gridTemplateColumns: "repeat(" + WIN + ", minmax(0, 1fr))",
-                          gridTemplateRows: "30px 8px",
+                          gridTemplateRows: "30px ".repeat(lanes) + "8px",
                           rowGap: "4px",
                           backgroundImage:
                             "linear-gradient(to right, #eef0f2 1px, transparent 1px)" +
@@ -1120,7 +1138,7 @@ export default function HireDesk() {
                           const hire = col(start, end);
                           if (hire) {
                             parts.push(
-                              <div key={booking.id + "h"} className="min-w-0 px-0.5" style={{ gridColumn: hire, gridRow: 1 }}>
+                              <div key={booking.id + "h"} className="min-w-0 px-0.5" style={{ gridColumn: hire, gridRow: (lane[booking.id] || 0) + 1 }}>
                                 <button
                                   type="button"
                                   onClick={() => pick(booking.id)}
@@ -1134,8 +1152,11 @@ export default function HireDesk() {
                                     background: pal.bg,
                                     color: pal.fg,
                                     boxShadow: selectedId === booking.id ? "0 0 0 2px #1a73e8" : "none",
+                                    outline: booking.overlapApproved ? "2px dashed #171717" : "none",
+                                    outlineOffset: "-2px",
                                   }}
                                 >
+                                  {booking.overlapApproved ? "⇄ " : ""}
                                   {booking.customerName}
                                   {fullyPaid ? "" : partPaid ? " · part paid" : " · unpaid"}
                                 </button>
@@ -1148,8 +1169,8 @@ export default function HireDesk() {
                               <div
                                 key={booking.id + "p"}
                                 title={"Prep before hire for " + booking.customerName + ", " + bufferWhen(start - before, before)}
-                                className="absolute top-[40px] h-2 rounded border-x-2 border-white"
-                                style={{ left: prep.left, width: prep.width, background: BUFFER }}
+                                className="absolute h-2 rounded border-x-2 border-white"
+                                style={{ top: 6 + lanes * 34, left: prep.left, width: prep.width, background: BUFFER }}
                               />,
                             );
                           }
@@ -1159,8 +1180,8 @@ export default function HireDesk() {
                               <div
                                 key={booking.id + "c"}
                                 title={"Clean and service after " + booking.customerName + ", " + bufferWhen(end + 1, after)}
-                                className="absolute top-[40px] h-2 rounded border-x-2 border-white"
-                                style={{ left: clean.left, width: clean.width, background: BUFFER }}
+                                className="absolute h-2 rounded border-x-2 border-white"
+                                style={{ top: 6 + lanes * 34, left: clean.left, width: clean.width, background: BUFFER }}
                               />,
                             );
                           }
@@ -1383,6 +1404,19 @@ export default function HireDesk() {
                 <DetailBox title="Hire">
                   <Row label="Vehicle">
                     <strong>{selected.plate ? selected.plate + " " + selected.model : selected.model + " (not assigned yet)"}</strong>
+                    {(selected.overlapApproved || clashesFor(selected.vehicleId || "", selected.pickup, selected.returnOn, holds, selected.id).length > 0) && (
+                      <span className="mt-1 block rounded-lg border border-[#f1a9a3] bg-[#fce8e6] px-2 py-1 text-xs text-[#5c0b0b]">
+                        <strong>⇄ {selected.overlapApproved ? "Approved overlap" : "Shares this vehicle"}</strong>
+                        {(() => {
+                          const others = clashesFor(selected.vehicleId || "", selected.pickup, selected.returnOn, holds, selected.id);
+                          return others.length ? " with " + others.map((b) => b.reference + " (" + b.customerName + ")").join(", ") : " (no longer overlapping)";
+                        })()}
+                        <span className="block">
+                          {selected.overlapNote}
+                          {selected.overlapBy ? " · approved by " + selected.overlapBy : ""}
+                        </span>
+                      </span>
+                    )}
                     <DeskAllocate
                       key={selected.id + ":" + (selected.vehicleId || "")}
                       booking={selected}

@@ -158,6 +158,12 @@ async function setup() {
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS discount_note text NOT NULL DEFAULT '';
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS discount_by text NOT NULL DEFAULT '';
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS discount_at timestamptz;
+    -- Overlapping bookings on one vehicle (Homer, Nov 2026): only staff on the desk can make one, by choosing the
+    -- number plate and approving the overlap with a reason (for example a friend collecting the day another
+    -- hire returns). Website bookings never overlap.
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS overlap_approved boolean NOT NULL DEFAULT false;
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS overlap_note text NOT NULL DEFAULT '';
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS overlap_by text NOT NULL DEFAULT '';
     -- When each staff member last opened the new-bookings bell on the desk.
     CREATE TABLE IF NOT EXISTS staff_seen (
       username text PRIMARY KEY,
@@ -422,9 +428,40 @@ function deliveryDetail(booking: {
 
 // Website bookings call this with no options. The staff desk passes options for bookings added by hand:
 // confirmed (payment already received), a staff note, and an optional email address.
+// A number plate chosen on the desk: it must be an active vehicle of the booking's model. Returns the reference
+// of a held or paid booking it already has on those dates (other than `ignoreId`), or "" when it is free.
+async function pickVehicle(client: PoolClient, vehicleId: string, modelName: string, pickup: string, returnOn: string, ignoreId: string) {
+  const vehicle = await client.query<{ id: string; model: string; plate: string; active: boolean }>(
+    `SELECT id, model, plate, active FROM vehicles WHERE id = $1 FOR UPDATE`,
+    [vehicleId.slice(0, 40)],
+  );
+  const chosen = vehicle.rows[0];
+  if (!chosen || !chosen.active) throw staffError("Choose a vehicle from the list.", 400);
+  if (chosen.model !== modelName) throw staffError(chosen.plate + " is a " + chosen.model + ". To change the model, use Edit.", 400);
+  const clash = await client.query<{ reference: string }>(
+    `SELECT reference FROM bookings
+     WHERE vehicle_id = $1 AND id::text <> $2 AND status IN ('pending', 'confirmed')
+       AND pickup_on < $4::date
+       AND $3::date < CASE WHEN return_on > pickup_on THEN return_on ELSE pickup_on + 1 END
+     ORDER BY pickup_on
+     LIMIT 1`,
+    [chosen.id, ignoreId, pickup, exclusiveEnd(pickup, returnOn)],
+  );
+  return { id: chosen.id, plate: chosen.plate, clash: clash.rows[0]?.reference || "" };
+}
+
 export async function createBooking(
   raw: Partial<BookingInput>,
-  opts?: { confirmed?: boolean; staffNote?: string; emailOptional?: boolean; documents?: BookingDocuments; amountPaid?: unknown },
+  opts?: {
+    confirmed?: boolean;
+    staffNote?: string;
+    emailOptional?: boolean;
+    documents?: BookingDocuments;
+    amountPaid?: unknown;
+    // Desk only: a chosen number plate, and an approved overlap (who and why) if that vehicle is already booked.
+    vehicleId?: string;
+    overlap?: { by: string; note: string };
+  },
 ): Promise<PublicBookingResult> {
   await ensureReady();
   const db = pool();
@@ -453,7 +490,18 @@ export async function createBooking(
   try {
     await client.query("BEGIN");
     let vehicleId: string | null = null;
-    if (!booking.manual && model) {
+    let overlapping = false;
+    if (!booking.manual && model && opts?.vehicleId) {
+      const chosen = await pickVehicle(client, String(opts.vehicleId), model.name, booking.pickup, booking.returnOn, "");
+      if (chosen.clash && !opts.overlap) {
+        throw staffError(
+          chosen.plate + " is already booked on " + chosen.clash + " for those dates. Approve the overlap to book it anyway.",
+          409,
+        );
+      }
+      vehicleId = chosen.id;
+      overlapping = Boolean(chosen.clash);
+    } else if (!booking.manual && model) {
       const end = exclusiveEnd(booking.pickup, booking.returnOn);
       const locked = await client.query<{ id: string }>(
         `SELECT v.id
@@ -473,7 +521,11 @@ export async function createBooking(
       );
       vehicleId = locked.rows[0]?.id || null;
       if (!vehicleId) {
-        const error = new Error("That vehicle is no longer free for those dates. Please choose another.");
+        const error = new Error(
+          opts?.emailOptional
+            ? "No " + model.name + " is free for those dates. To book it anyway, choose a number plate and approve the overlap."
+            : "That vehicle is no longer free for those dates. Please choose another.",
+        );
         (error as Error & { status?: number }).status = 409;
         throw error;
       }
@@ -597,6 +649,12 @@ export async function createBooking(
       }
     }
     const reviewToken = newReviewToken();
+    if (overlapping && opts?.overlap) {
+      await client.query(
+        `UPDATE bookings SET overlap_approved = true, overlap_note = $2, overlap_by = $3 WHERE id = $1`,
+        [bookingId, opts.overlap.note.slice(0, 200), opts.overlap.by.slice(0, 60)],
+      );
+    }
     await client.query(`INSERT INTO reviews (booking_id, token) VALUES ($1, $2)`, [bookingId, reviewToken]);
     await client.query("COMMIT");
     return {
@@ -689,6 +747,9 @@ function mapStaff(row: Record<string, unknown>): StaffBooking {
     deliveryFee: row.delivery_fee === null || row.delivery_fee === undefined ? null : Number(row.delivery_fee),
     total: Number(row.total_due),
     discount: Number(row.discount || 0),
+    overlapApproved: Boolean(row.overlap_approved),
+    overlapNote: String(row.overlap_note || ""),
+    overlapBy: String(row.overlap_by || ""),
     discountNote: String(row.discount_note || ""),
     discountBy: String(row.discount_by || ""),
     discountAt: row.discount_at ? new Date(String(row.discount_at)).toISOString() : "",
@@ -713,6 +774,7 @@ export async function listBookings() {
             days, daily_rate, hire_total, insurance_total, delivery_fee, total_due,
             ooh, ooh_note, mpesa_code, status, staff_note, created_at, amount_paid, payment_log,
             source, COALESCE(held_at, created_at) AS held_at, discount, discount_note, discount_by, discount_at,
+            overlap_approved, overlap_note, overlap_by,
             EXISTS (SELECT 1 FROM booking_documents d WHERE d.booking_id = bookings.id) AS has_documents,
             COALESCE((SELECT d.drivers->0->>'fromFile' = 'true' FROM booking_documents d WHERE d.booking_id = bookings.id), false)
               AS licence_on_file
@@ -889,8 +951,10 @@ export async function editBooking(id: string, raw: Partial<BookingEdit>, editedB
       delivery_manual: boolean;
       staff_note: string;
       discount: number;
+      overlap_approved: boolean;
     }>(
-      `SELECT status, vehicle_id, model_name, pickup_on::text, delivery_mode, delivery_fee, delivery_manual, staff_note, discount
+      `SELECT status, vehicle_id, model_name, pickup_on::text, delivery_mode, delivery_fee, delivery_manual, staff_note, discount,
+              overlap_approved
        FROM bookings WHERE id = $1 FOR UPDATE`,
       [id],
     );
@@ -929,6 +993,8 @@ export async function editBooking(id: string, raw: Partial<BookingEdit>, editedB
         [model.name, pickup, end, id, row.vehicle_id || ""],
       );
       vehicleId = free.rows[0]?.id || null;
+      // An approved overlap keeps its vehicle when edited, if the model is the same.
+      if (!vehicleId && row.overlap_approved && row.vehicle_id && model.name === row.model_name) vehicleId = row.vehicle_id;
       if (!vehicleId) throw staffError("No " + model.name + " is free for those dates.", 409);
     }
 
@@ -1196,11 +1262,19 @@ export async function markBookingsSeen(username: string) {
 
 // Staff choose which vehicle (by number plate) a held or paid booking uses ("Vehicle" on the desk booking card).
 // It must be the same model, active, and free for the booking's dates. Change the model with Edit instead.
-export async function allocateVehicle(id: string, vehicleIdRaw: unknown, allocatedBy: string) {
+export async function allocateVehicle(
+  id: string,
+  vehicleIdRaw: unknown,
+  allocatedBy: string,
+  overlapRaw?: { approve?: unknown; note?: unknown },
+) {
   await ensureReady();
   const db = pool();
   if (!db) throw new Error("DATABASE_URL is not set");
   const vehicleId = String(vehicleIdRaw ?? "").trim().slice(0, 40);
+  const overlapNote = String(overlapRaw?.note ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  const approve = overlapRaw?.approve === true;
+  if (approve && overlapNote.length < 3) throw staffError("Add a short reason for the overlap.", 400);
   const client = await db.connect();
   try {
     await client.query("BEGIN");
@@ -1213,39 +1287,27 @@ export async function allocateVehicle(id: string, vehicleIdRaw: unknown, allocat
     if (row.status !== "pending" && row.status !== "confirmed") {
       throw staffError("A vehicle can only be chosen for a held or paid booking.", 409);
     }
-    const vehicle = await client.query<{ id: string; model: string; plate: string; active: boolean }>(
-      `SELECT id, model, plate, active FROM vehicles WHERE id = $1 FOR UPDATE`,
-      [vehicleId],
-    );
-    const chosen = vehicle.rows[0];
-    if (!chosen || !chosen.active) throw staffError("Choose a vehicle from the list.", 400);
-    if (chosen.model !== row.model_name) {
-      throw staffError(chosen.plate + " is a " + chosen.model + ". To change the model, use Edit.", 400);
+    const chosen = await pickVehicle(client, vehicleId, row.model_name, row.pickup_on, row.return_on, id);
+    if (chosen.clash && !approve) {
+      throw staffError(chosen.plate + " is already booked on " + chosen.clash + " for those dates. Approve the overlap to use it anyway.", 409);
     }
-    if (chosen.id === row.vehicle_id) {
+    if (chosen.id === row.vehicle_id && !chosen.clash) {
       await client.query("COMMIT");
-      return { ok: true, reference: row.reference, plate: chosen.plate };
+      return { ok: true, reference: row.reference, plate: chosen.plate, overlap: "" };
     }
-    const end = exclusiveEnd(row.pickup_on, row.return_on);
-    const clash = await client.query<{ reference: string }>(
-      `SELECT reference FROM bookings
-       WHERE vehicle_id = $1 AND id <> $2 AND status IN ('pending', 'confirmed')
-         AND pickup_on < $4::date
-         AND $3::date < CASE WHEN return_on > pickup_on THEN return_on ELSE pickup_on + 1 END
-       LIMIT 1`,
-      [chosen.id, id, row.pickup_on, end],
-    );
-    if (clash.rows[0]) throw staffError(chosen.plate + " is already booked on " + clash.rows[0].reference + " for those dates.", 409);
-    const stamp = chosen.plate + " allocated by " + allocatedBy.slice(0, 60) + " on " + todayNairobi() + ".";
+    const stamp =
+      chosen.plate + " allocated by " + allocatedBy.slice(0, 60) + " on " + todayNairobi() +
+      (chosen.clash ? ", overlapping " + chosen.clash + " (approved)" : "") + ".";
     await client.query(
       `UPDATE bookings
        SET vehicle_id = $2,
+           overlap_approved = $4, overlap_note = $5, overlap_by = $6,
            staff_note = left(CASE WHEN staff_note = '' THEN $3 ELSE staff_note || ' · ' || $3 END, 500)
        WHERE id = $1`,
-      [id, chosen.id, stamp],
+      [id, chosen.id, stamp, Boolean(chosen.clash), chosen.clash ? overlapNote : "", chosen.clash ? allocatedBy.slice(0, 60) : ""],
     );
     await client.query("COMMIT");
-    return { ok: true, reference: row.reference, plate: chosen.plate };
+    return { ok: true, reference: row.reference, plate: chosen.plate, overlap: chosen.clash };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

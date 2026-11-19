@@ -666,6 +666,9 @@ export type StaffBooking = {
   discountNote?: string;
   discountBy?: string;
   discountAt?: string;
+  overlapApproved?: boolean; // staff approved this booking overlapping another on the same vehicle
+  overlapNote?: string;
+  overlapBy?: string;
 };
 
 export type PaymentEntry = { code: string; amount: number; by: string; at: string };

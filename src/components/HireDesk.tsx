@@ -588,7 +588,38 @@ export default function HireDesk() {
         } else laneEnds[i] = end;
         lane[booking.id] = i;
       }
-      return { vehicle, mine, busy, hit, lane, lanes: Math.max(1, laneEnds.length) };
+      // Bookings that overlap each other form a group. Inside a group the prep and cleaning bars that would fall
+      // during the hires are hidden: only the prep before the group's first pick-up and the cleaning after its last
+      // return are shown, plus a small cleaning bar between the top and bottom hire where the vehicle changes hands.
+      const sorted = [...mine].sort((a, b) => a.pickup.localeCompare(b.pickup));
+      const groupOf: Record<string, number> = {};
+      const groups: { start: number; end: number; ids: string[] }[] = [];
+      for (const booking of sorted) {
+        const start = num(booking.pickup);
+        const end = num(lastHireDay(booking.pickup, booking.returnOn));
+        const last = groups[groups.length - 1];
+        if (last && start <= last.end) {
+          last.end = Math.max(last.end, end);
+          last.ids.push(booking.id);
+        } else groups.push({ start, end, ids: [booking.id] });
+        groupOf[booking.id] = groups.length - 1;
+      }
+      const showPrep: Record<string, boolean> = {};
+      const showClean: Record<string, boolean> = {};
+      const handovers: { lane: number; at: number; title: string }[] = [];
+      for (const group of groups) {
+        const members = sorted.filter((b) => group.ids.includes(b.id));
+        const firstIn = members.find((b) => num(b.pickup) === group.start);
+        const lastIn = [...members].reverse().find((b) => num(lastHireDay(b.pickup, b.returnOn)) === group.end);
+        if (firstIn) showPrep[firstIn.id] = true;
+        if (lastIn) showClean[lastIn.id] = true;
+        if (members.length > 1) {
+          for (const b of members) {
+            if ((lane[b.id] || 0) > 0) handovers.push({ lane: lane[b.id], at: num(b.pickup), title: "Clean before " + b.customerName + "'s hire" });
+          }
+        }
+      }
+      return { vehicle, mine, busy, hit, lane, lanes: Math.max(1, laneEnds.length), showPrep, showClean, handovers, groupOf };
     })
     .filter((row) => row.hit && !(hideIdle && !row.busy && !calQuery.trim()));
   const idleCount = fleet.filter((vehicle) => type === "all" || vehicle.category === type).length - calRows.length;
@@ -1103,7 +1134,7 @@ export default function HireDesk() {
                       ))}
                     </div>
                   </div>
-                  {calRows.map(({ vehicle, mine, lane, lanes }) => (
+                  {calRows.map(({ vehicle, mine, lane, lanes, showPrep, showClean, handovers }) => (
                     <div
                       key={vehicle.id}
                       className="grid border-b border-[#dadce0] bg-white last:border-b-0"
@@ -1118,7 +1149,7 @@ export default function HireDesk() {
                         style={{
                           gridTemplateColumns: "repeat(" + WIN + ", minmax(0, 1fr))",
                           gridTemplateRows: "30px ".repeat(lanes) + "8px",
-                          rowGap: "4px",
+                          rowGap: lanes > 1 ? "12px" : "4px",
                           backgroundImage:
                             "linear-gradient(to right, #eef0f2 1px, transparent 1px)" +
                             (T >= first && T <= lastCol ? ", linear-gradient(rgba(26,115,232,0.08), rgba(26,115,232,0.08))" : ""),
@@ -1163,29 +1194,44 @@ export default function HireDesk() {
                               </div>,
                             );
                           }
-                          const prep = before > 0 ? bufferBox(start - before, before) : null;
+                          const gap = lanes > 1 ? 12 : 4;
+                          const prep = before > 0 && showPrep[booking.id] ? bufferBox(start - before, before) : null;
                           if (prep) {
                             parts.push(
                               <div
                                 key={booking.id + "p"}
                                 title={"Prep before hire for " + booking.customerName + ", " + bufferWhen(start - before, before)}
                                 className="absolute h-2 rounded border-x-2 border-white"
-                                style={{ top: 6 + lanes * 34, left: prep.left, width: prep.width, background: BUFFER }}
+                                style={{ top: 6 + lanes * (30 + gap), left: prep.left, width: prep.width, background: BUFFER }}
                               />,
                             );
                           }
-                          const clean = after > 0 ? bufferBox(end + 1, after) : null;
+                          const clean = after > 0 && showClean[booking.id] ? bufferBox(end + 1, after) : null;
                           if (clean) {
                             parts.push(
                               <div
                                 key={booking.id + "c"}
                                 title={"Clean and service after " + booking.customerName + ", " + bufferWhen(end + 1, after)}
                                 className="absolute h-2 rounded border-x-2 border-white"
-                                style={{ top: 6 + lanes * 34, left: clean.left, width: clean.width, background: BUFFER }}
+                                style={{ top: 6 + lanes * (30 + gap), left: clean.left, width: clean.width, background: BUFFER }}
                               />,
                             );
                           }
                           return parts;
+                        })}
+                        {handovers.map((h) => {
+                          // A small cleaning bar between the top and bottom hire, ending where the lower hire starts.
+                          const len = after > 0 ? after : STEP;
+                          const box = bufferBox(h.at - len, len);
+                          if (!box) return null;
+                          return (
+                            <div
+                              key={"handover" + h.lane + "-" + h.at}
+                              title={h.title + ", " + bufferWhen(h.at - len, len)}
+                              className="absolute h-1.5 rounded border-x-2 border-white"
+                              style={{ top: 6 + h.lane * 42 - 9, left: box.left, width: box.width, background: BUFFER }}
+                            />
+                          );
                         })}
                       </div>
                     </div>

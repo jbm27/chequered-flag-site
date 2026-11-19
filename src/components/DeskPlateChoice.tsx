@@ -7,7 +7,7 @@ import { exclusiveEnd, type StaffBooking } from "../lib/hire";
 // friend collecting the day another hire comes back). The server checks the same rules when it saves.
 // Customers on the website can never make an overlapping booking.
 
-export type PlateOption = { id: string; plate: string };
+export type PlateOption = { id: string; plate: string; model?: string };
 
 // The held or paid bookings a vehicle already has on these dates (other than `ignoreId`).
 export function clashesFor(vehicleId: string, pickup: string, returnOn: string, holds: StaffBooking[], ignoreId = "") {
@@ -21,6 +21,9 @@ export function clashesFor(vehicleId: string, pickup: string, returnOn: string, 
 export default function DeskPlateChoice({
   idPrefix,
   label,
+  swap = null,
+  swapChosen = false,
+  onSwapChosen,
   vehicles,
   pickup,
   returnOn,
@@ -50,6 +53,10 @@ export default function DeskPlateChoice({
   onApprove: (value: boolean) => void;
   note: string;
   onNote: (value: string) => void;
+  // Change vehicle: offer to swap plates with the one booking on the chosen vehicle, when it fits on ours.
+  swap?: { other: StaffBooking; toPlate: string } | null;
+  swapChosen?: boolean;
+  onSwapChosen?: (value: boolean) => void;
 }) {
   const options = [...vehicles]
     .sort((a, b) => a.plate.localeCompare(b.plate))
@@ -68,6 +75,7 @@ export default function DeskPlateChoice({
         onChange={(e) => {
           onChange(e.target.value);
           onApprove(false);
+          onSwapChosen?.(false);
         }}
         className="h-10 w-full rounded-lg border border-[#c8c8c8] bg-white px-2 text-sm text-[#171717]"
       >
@@ -76,6 +84,7 @@ export default function DeskPlateChoice({
         {options.map(({ vehicle, clashes: c }) => (
           <option key={vehicle.id} value={vehicle.id}>
             {vehicle.plate}
+            {vehicle.model ? " " + vehicle.model : ""}
             {vehicle.id === currentId ? " (current)" : ""}
             {c.length ? " · booked on " + c.map((b) => b.reference).join(", ") + " (overlap)" : vehicle.id === currentId ? "" : " (free)"}
           </option>
@@ -89,8 +98,36 @@ export default function DeskPlateChoice({
               {b.reference} · {b.customerName} · {b.pickup} {b.pickTime} to {b.returnOn} {b.retTime}
             </span>
           ))}
+          {swap && (
+            <label className="mt-2 flex items-start gap-2 font-bold">
+              <input
+                type="checkbox"
+                checked={swapChosen}
+                onChange={(e) => {
+                  onSwapChosen?.(e.target.checked);
+                  if (e.target.checked) onApprove(false);
+                }}
+                className="mt-0.5 h-5 w-5 flex-none"
+              />
+              <span>
+                Swap plates: {swap.other.reference} ({swap.other.customerName}) moves to {swap.toPlate}.
+                <span className="block font-normal">Nothing overlaps; each booking keeps its own dates and price.</span>
+              </span>
+            </label>
+          )}
+          {clashes.length > 1 && !swap && (
+            <span className="mt-1 block">A swap isn&apos;t possible: there is more than one booking on this plate for these dates.</span>
+          )}
           <label className="mt-2 flex items-start gap-2 font-bold">
-            <input type="checkbox" checked={approve} onChange={(e) => onApprove(e.target.checked)} className="mt-0.5 h-5 w-5 flex-none" />
+            <input
+              type="checkbox"
+              checked={approve}
+              onChange={(e) => {
+                onApprove(e.target.checked);
+                if (e.target.checked) onSwapChosen?.(false);
+              }}
+              className="mt-0.5 h-5 w-5 flex-none"
+            />
             Approve this overlap: both bookings will use this vehicle.
           </label>
           {approve && (

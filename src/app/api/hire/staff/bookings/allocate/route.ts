@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   if (!databaseConfigured()) {
     return NextResponse.json({ error: "Bookings are not connected yet." }, { status: 503 });
   }
-  let body: { id?: unknown; vehicleId?: unknown; approveOverlap?: unknown; overlapNote?: unknown };
+  let body: { id?: unknown; vehicleId?: unknown; approveOverlap?: unknown; overlapNote?: unknown; swapWith?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     const result = await allocateVehicle(String(body.id ?? ""), body.vehicleId, staff.username, {
       approve: body.approveOverlap,
       note: body.overlapNote,
-    });
+    }, body.swapWith);
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return NextResponse.json({ error: publicError(error) }, { status: httpStatus(error) });

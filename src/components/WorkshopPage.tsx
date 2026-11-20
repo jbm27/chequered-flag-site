@@ -104,6 +104,8 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
   const [error, setError] = useState("");
   const [sent, setSent] = useState(false);
   const [choosingEmail, setChoosingEmail] = useState(false);
+  // "Prefer to write yourself?": the same email choice, with a blank email to reception.
+  const [writingEmail, setWritingEmail] = useState(false);
   const [via, setVia] = useState<"whatsapp" | "email">("whatsapp");
   const [service, setService] = useState(SERVICES[0].id);
 
@@ -164,6 +166,7 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
     setError("");
     if (channel === "email") {
       // The customer chooses which email to use first; see EmailChooser.
+      setWritingEmail(false);
       setChoosingEmail(true);
       window.setTimeout(() => document.getElementById("emailChooser")?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 60);
       return;
@@ -411,10 +414,27 @@ export default function WorkshopPage({ years, fleetSize }: { years: number; flee
                 </p>
                 <p className="mt-2 text-center text-[13px] text-[#3f3f3f]">
                   Prefer to write yourself? Email{" "}
-                  <a href={"mailto:" + CONTACT.email + "?subject=Workshop%20enquiry"} className="font-semibold text-[#171717] underline">
+                  <button
+                    type="button"
+                    aria-expanded={writingEmail}
+                    onClick={() => {
+                      setChoosingEmail(false);
+                      setWritingEmail((open) => !open);
+                      window.setTimeout(() => document.getElementById("writeEmailChooser")?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 60);
+                    }}
+                    className="cursor-pointer border-0 bg-transparent p-0 font-semibold text-[#171717] underline"
+                  >
                     {CONTACT.email}
-                  </a>
+                  </button>
                 </p>
+                {writingEmail && (
+                  <EmailChooser
+                    id="writeEmailChooser"
+                    mail={{ to: CONTACT.email, subject: "Workshop enquiry", body: "" }}
+                    onOpened={() => setWritingEmail(false)}
+                    onCancel={() => setWritingEmail(false)}
+                  />
+                )}
               </div>
             ) : (
               <div className="px-1.5 py-5 text-center">

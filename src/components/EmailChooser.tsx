@@ -10,7 +10,19 @@ import { PROVIDERS, deviceOf, openInProvider, openMailApp, type Device, type Mai
 const choice =
   "flex min-h-[52px] w-full cursor-pointer flex-col items-start justify-center rounded-lg border border-[#c8c8c8] bg-white px-3.5 py-2 text-left hover:border-[#171717] hover:bg-[#fafaf8]";
 
-export default function EmailChooser({ mail, onOpened, onCancel }: { mail: Mail; onOpened: () => void; onCancel?: () => void }) {
+export default function EmailChooser({
+  mail,
+  onOpened,
+  onCancel,
+  id = "emailChooser",
+}: {
+  mail: Mail;
+  onOpened: () => void;
+  onCancel?: () => void;
+  id?: string;
+}) {
+  // A blank email (just the address, for people who want to write their own) copies only the address.
+  const blank = !mail.body.trim();
   const [device, setDevice] = useState<Device>("desktop");
   const [noApp, setNoApp] = useState(false);
   const [waiting, setWaiting] = useState(false);
@@ -45,7 +57,7 @@ export default function EmailChooser({ mail, onOpened, onCancel }: { mail: Mail;
   }
 
   async function copy() {
-    const text = "To: " + mail.to + "\nSubject: " + mail.subject + "\n\n" + mail.body;
+    const text = blank ? mail.to : "To: " + mail.to + "\nSubject: " + mail.subject + "\n\n" + mail.body;
     try {
       await navigator.clipboard.writeText(text);
     } catch {
@@ -61,12 +73,12 @@ export default function EmailChooser({ mail, onOpened, onCancel }: { mail: Mail;
   }
 
   return (
-    <div id="emailChooser" className="mt-3.5 rounded-xl border border-[#e5e5e5] bg-[#f5f5f3] p-4 text-left">
+    <div id={id} className="mt-3.5 rounded-xl border border-[#e5e5e5] bg-[#f5f5f3] p-4 text-left">
       <strong className="block text-[15px]">Which email do you use?</strong>
       <p className="mt-0.5 text-[13px] text-[#595959]">
-        {phone
-          ? "We'll open your email app with your message ready. If the app isn't on your phone, its website opens instead."
-          : "We'll open your email in a new tab with your message ready. Press send there to reach us."}
+        {(phone ? "We'll open your email app" : "We'll open your email in a new tab") +
+          (blank ? " with a new email to " + mail.to + ". Write your message and press send." : " with your message ready.") +
+          (phone ? " If the app isn't on your phone, its website opens instead." : blank ? "" : " Press send there to reach us.")}
       </p>
 
       {noApp && (
@@ -90,8 +102,8 @@ export default function EmailChooser({ mail, onOpened, onCancel }: { mail: Mail;
           <span className="text-xs text-[#595959]">{phone ? "Mail, Samsung Email or another app" : "For example Outlook, Apple Mail or Thunderbird"}</span>
         </button>
         <button type="button" onClick={copy} className={choice}>
-          <span className="text-sm font-bold text-[#171717]">{copied ? "Copied ✓" : "Copy the message"}</span>
-          <span className="text-xs text-[#595959]">Paste it into any email to {mail.to}</span>
+          <span className="text-sm font-bold text-[#171717]">{copied ? "Copied ✓" : blank ? "Copy the address" : "Copy the message"}</span>
+          <span className="text-xs text-[#595959]">{blank ? mail.to : "Paste it into any email to " + mail.to}</span>
         </button>
       </div>
       {onCancel && (

@@ -103,13 +103,15 @@ export default function DeskEditBooking({
   const freeCount = useMemo(() => {
     if (!model || !validDates) return null;
     const end = exclusiveEnd(pickup, returnOn);
-    return model.ids.filter(
-      (id) =>
-        !holds.some(
-          (b) => b.id !== booking.id && b.vehicleId === id && b.pickup < end && pickup < exclusiveEnd(b.pickup, b.returnOn),
-        ),
-    ).length;
-  }, [model, holds, pickup, returnOn, validDates, booking.id]);
+    return model.ids.filter((id) => {
+      const clashes = holds.filter(
+        (b) => b.id !== booking.id && b.vehicleId === id && b.pickup < end && pickup < exclusiveEnd(b.pickup, b.returnOn),
+      );
+      if (!clashes.length) return true;
+      // Both bookings in an approved overlap keep their shared vehicle (the server checks the same).
+      return id === booking.vehicleId && clashes.every((b) => b.overlapApproved || booking.overlapApproved);
+    }).length;
+  }, [model, holds, pickup, returnOn, validDates, booking.id, booking.vehicleId, booking.overlapApproved]);
 
   const hireTotal = model ? days * model.rate : 0;
   const coverTotal = model && insure ? days * model.addon : 0;

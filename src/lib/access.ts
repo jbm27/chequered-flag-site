@@ -7,3 +7,11 @@ export const PERFORMANCE_USERS = ["homer.johnstone", "james.boyd.moss"];
 export function canSeePerformance(username: string | null | undefined) {
   return Boolean(username) && PERFORMANCE_USERS.includes(String(username).trim().toLowerCase());
 }
+
+// Calendar link (subscribe to the bookings from Google Calendar): only Homer for now (Nov 2026).
+// Checked on the server when the link is made and every time the calendar is read.
+export const CALENDAR_LINK_USERS = ["homer.johnstone"];
+
+export function canUseCalendarLink(username: string | null | undefined) {
+  return Boolean(username) && CALENDAR_LINK_USERS.includes(String(username).trim().toLowerCase());
+}

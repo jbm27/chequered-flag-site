@@ -5,11 +5,12 @@ import { MAX_IMAGE_BYTES, type DocImage } from "../lib/documents";
 
 // Pieces of the booking checkout for the security update: licence photo upload and the signature box.
 
-// Licence files customers can choose: JPG/JPEG, PNG, WebP and HEIC/HEIF (iPhone photos).
+// Licence files customers can choose: JPG/JPEG, PNG, WebP, HEIC/HEIF (iPhone photos) and PDF (scans).
 // Some computers give HEIC files no type, so the file name's ending is checked too.
-export const LICENCE_ACCEPT = "image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif";
+export const LICENCE_ACCEPT =
+  "image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.pdf";
 const MAX_UPLOAD_BYTES = 25_000_000; // before shrinking
-const ENDINGS: Record<string, string> = { jpg: "jpeg", jpeg: "jpeg", png: "png", webp: "webp", heic: "heic", heif: "heic" };
+const ENDINGS: Record<string, string> = { jpg: "jpeg", jpeg: "jpeg", png: "png", webp: "webp", heic: "heic", heif: "heic", pdf: "pdf" };
 
 export function licenceFileKind(file: File) {
   const type = file.type.toLowerCase();
@@ -17,43 +18,122 @@ export function licenceFileKind(file: File) {
   if (type === "image/png") return "png";
   if (type === "image/webp") return "webp";
   if (type === "image/heic" || type === "image/heif" || type === "image/heic-sequence" || type === "image/heif-sequence") return "heic";
+  if (type === "application/pdf") return "pdf";
   const ending = (file.name.split(".").pop() || "").toLowerCase();
   return ENDINGS[ending] || "";
 }
 
-// Shrinks a photo in the browser to a JPEG no wider or taller than 1400px, so uploads stay small.
-// Everything is saved as JPEG, so the desk and the booking PDF work the same whatever was uploaded.
+type Picture = { source: CanvasImageSource; width: number; height: number; done: () => void };
+
+function loadImage(blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  return new Promise<Picture>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve({ source: el, width: el.naturalWidth, height: el.naturalHeight, done: () => URL.revokeObjectURL(url) });
+    el.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("unreadable"));
+    };
+    el.src = url;
+  });
+}
+
+// HEIC: Safari (iPhone, iPad, Mac) opens it directly. Other browsers convert it with heic2any, which is
+// only downloaded when someone picks a HEIC file.
+async function loadHeic(file: File) {
+  try {
+    return await loadImage(file);
+  } catch {
+    const heic2any = (await import("heic2any")).default;
+    const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
+    return loadImage(Array.isArray(converted) ? converted[0] : converted);
+  }
+}
+
+// PDF: the first page is drawn as a picture with Mozilla's pdf.js, only downloaded when someone picks a PDF.
+// Scripts inside the PDF never run (pdf.js doesn't run them, and eval is switched off).
+async function loadPdf(file: File): Promise<Picture> {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  // The worker is copied into public/ when the site is built (scripts/copy-pdf-worker.js).
+  pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false, enableXfa: false }).promise;
+  try {
+    const page = await doc.getPage(1);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: Math.min(4, 2400 / Math.max(base.width, base.height)) });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return trimWhite(canvas);
+  } finally {
+    doc.destroy();
+  }
+}
+
+// A licence scanned on an A4 page is small with a lot of white around it: cut the white margins off
+// (keeping a little border) so the licence fills the picture the desk sees.
+function trimWhite(canvas: HTMLCanvasElement): Picture {
+  const { width, height } = canvas;
+  const pixels = canvas.getContext("2d")!.getImageData(0, 0, width, height).data;
+  let top = height, left = width, bottom = -1, right = -1;
+  for (let y = 0; y < height; y += 2) {
+    for (let x = 0; x < width; x += 2) {
+      const i = (y * width + x) * 4;
+      if (pixels[i] < 232 || pixels[i + 1] < 232 || pixels[i + 2] < 232) {
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
+        if (x < left) left = x;
+        if (x > right) right = x;
+      }
+    }
+  }
+  const whole = { source: canvas, width, height, done: () => undefined };
+  if (bottom < 0) return whole; // a blank page
+  const pad = Math.round(Math.max(width, height) * 0.02);
+  const x = Math.max(0, left - pad), y = Math.max(0, top - pad);
+  const w = Math.min(width, right + pad) - x, h = Math.min(height, bottom + pad) - y;
+  if (w * h > width * height * 0.8) return whole; // already fills the page
+  const out = document.createElement("canvas");
+  out.width = w;
+  out.height = h;
+  out.getContext("2d")!.drawImage(canvas, x, y, w, h, 0, 0, w, h);
+  return { source: out, width: w, height: h, done: () => undefined };
+}
+
+const UNREADABLE: Record<string, string> = {
+  heic: "That HEIC photo could not be opened. Please use “Take a photo”, or save the photo as a JPG and upload that.",
+  pdf: "That PDF could not be opened. Please upload a photo of your licence instead.",
+};
+
+// Shrinks a photo in the browser to a JPEG no wider or taller than 1400px (2000px for a PDF page), so uploads
+// stay small. Everything is saved as JPEG, so the desk and the booking PDF work the same whatever was uploaded.
 export async function compressPhoto(file: File): Promise<DocImage> {
   const kind = licenceFileKind(file);
-  if (!kind) throw new Error("Please choose a JPG, PNG, HEIC or WebP photo of your licence.");
-  if (file.size > MAX_UPLOAD_BYTES) throw new Error("That file is over 25 MB. Please choose a smaller photo.");
-  const url = URL.createObjectURL(file);
+  if (!kind) throw new Error("Please choose a JPG, PNG, HEIC, WebP or PDF file of your licence.");
+  if (file.size > MAX_UPLOAD_BYTES) throw new Error("That file is over 25 MB. Please choose a smaller one.");
+  let picture: Picture;
   try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image();
-      el.onload = () => resolve(el);
-      el.onerror = () =>
-        reject(
-          new Error(
-            kind === "heic"
-              ? "This browser can't open HEIC photos. Please use “Take a photo”, or save the photo as a JPG and upload that."
-              : "That photo could not be opened. Please try another JPG or PNG.",
-          ),
-        );
-      el.src = url;
-    });
-    let maxSide = 1400;
+    picture = kind === "pdf" ? await loadPdf(file) : kind === "heic" ? await loadHeic(file) : await loadImage(file);
+  } catch {
+    throw new Error(UNREADABLE[kind] || "That photo could not be opened. Please try another JPG or PNG.");
+  }
+  try {
+    let maxSide = kind === "pdf" ? 2000 : 1400;
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
-      const w = Math.max(1, Math.round(img.naturalWidth * scale));
-      const h = Math.max(1, Math.round(img.naturalHeight * scale));
+      const scale = Math.min(1, maxSide / Math.max(picture.width, picture.height));
+      const w = Math.max(1, Math.round(picture.width * scale));
+      const h = Math.max(1, Math.round(picture.height * scale));
       const canvas = document.createElement("canvas");
       canvas.width = w;
       canvas.height = h;
       const ctx = canvas.getContext("2d")!;
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, w, h);
-      ctx.drawImage(img, 0, 0, w, h);
+      ctx.drawImage(picture.source, 0, 0, w, h);
       const data = canvas.toDataURL("image/jpeg", attempt < 2 ? 0.72 : 0.6);
       const bytes = Math.floor(((data.length - data.indexOf(",") - 1) * 3) / 4);
       if (bytes <= MAX_IMAGE_BYTES * 0.9) return { data, w, h };
@@ -61,7 +141,7 @@ export async function compressPhoto(file: File): Promise<DocImage> {
     }
     throw new Error("That photo is too large. Please try another photo.");
   } finally {
-    URL.revokeObjectURL(url);
+    picture.done();
   }
 }
 
@@ -223,7 +303,7 @@ export function LicencePicker({
                   {value ? "Retake photo" : "Take a photo"}
                 </button>
                 <label htmlFor={id} className={btn}>
-                  {value ? "Upload another" : "Upload a photo"}
+                  {value ? "Upload another" : "Upload a file"}
                 </label>
               </div>
               {/* Upload from the gallery or files */}
@@ -254,7 +334,7 @@ export function LicencePicker({
                 }}
               />
               <p className="mt-1.5 text-xs text-[#595959]">
-                {busy ? "Preparing photo…" : value ? "Photo added." : "Use your camera or upload a clear photo of the front, with all four corners showing. JPG, PNG, HEIC or WebP."}
+                {busy ? "Preparing your licence…" : value ? "Photo added." : "Use your camera or upload a clear photo of the front, with all four corners showing. JPG, PNG, HEIC, WebP or PDF."}
               </p>
               {error && <p className="mt-1 text-xs font-bold text-[#9b1c1c]">{error}</p>}
             </div>

@@ -4,3 +4,6 @@ node_modules
 .env
 .env.local
 .env*.local
+
+# Copied from node_modules at build time (scripts/copy-pdf-worker.js)
+/public/pdf.worker.min.mjs

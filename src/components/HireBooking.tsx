@@ -311,6 +311,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
         (deliveryQuote.manual ? " + delivery (to be quoted)" : pricedDelivery ? " + delivery " + ksh(pricedDelivery) : "") +
         " = " + ksh(total) + " (VAT included)",
       damageLimit: selectedLimit,
+      category: selected?.category,
       waiver: insuranceTotal ? ksh(insuranceTotal) + " for " + plural(days) : "",
       mileage: mileageFor(selected?.category),
     };
@@ -1264,8 +1265,8 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                                 ? "Without it, you pay for damage to this vehicle up to " + ksh(selectedLimit) + " for the whole hire. "
                                 : ""}
                               With it, you don&apos;t pay for accident or collision damage. Fines, and damage to the
-                              suspension, tyres, transmission or underbody from bad driving or off-road use, are not
-                              covered.
+                              suspension, tyres or transmission from bad driving, are not covered. Undercarriage damage
+                              is always paid in full.
                             </span>
                           </label>
                         </div>

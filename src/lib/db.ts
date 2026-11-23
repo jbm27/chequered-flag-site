@@ -648,6 +648,7 @@ export async function createBooking(
                 (booking.manual ? " + delivery (to be quoted)" : booking.delivery.fee ? " + delivery " + ksh(booking.delivery.fee) : "") +
                 " = " + ksh(booking.total) + " (VAT included)",
               damageLimit: damageLimitFor(booking.model.name, booking.model.category),
+              category: booking.model.category,
               waiver: booking.insuranceTotal
                 ? ksh(booking.insuranceTotal) + " for " + booking.days + (booking.days === 1 ? " day" : " days")
                 : "",

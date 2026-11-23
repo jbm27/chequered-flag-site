@@ -22,7 +22,9 @@ export const MAX_IMAGE_SIDE = 4000;
 // at KES 200,000, the same as the Prado (Homer, 16 Nov 2026), in the class mapping and clause 7.2;
 // -c adds clause 1.4: every booking is subject to review and may be cancelled with a full refund (Homer).
 // -d adds clause 7.7, the optional collision damage waiver, and shows the waiver and this vehicle's limit in the Booking Schedule (Homer).
-export const AGREEMENT_VERSION = "online-hire-agreement-2026-11-revised-d";
+// -e (Homer, 23 Nov 2026): off-road motorsport prohibited (6.4), no saloon cars or X-Trail in game parks (6.5),
+// undercarriage damage paid in full (7.8, out of 7.1 and the waiver), and no 59-minute late-return grace (3.2).
+export const AGREEMENT_VERSION = "online-hire-agreement-2026-11-revised-e";
 export const AGREEMENT_TITLE = "Self-drive vehicle hire agreement";
 export const AGREEMENT_TEXT: string[] = [
   "Contracting company: The Chequered Flag Ltd. (“Company”, “we”, “us”). Registered address: " + COMPANY.postal + ". Booking enquiries and incident contact: " + CONTACT.phoneDisplay + ", " + CONTACT.email + ".",
@@ -41,7 +43,7 @@ export const AGREEMENT_TEXT: string[] = [
   "2.3 The Hirer confirms that information supplied is accurate and shall promptly disclose relevant restrictions, disqualifications or circumstances that legally prevent any proposed driver from operating the vehicle. The Company will not routinely request sensitive medical details unless necessary and lawfully justified.",
   "# 3. Payments, rental periods and deposits",
   "3.1 The Total Booking Price is due in full when the booking is placed. The booking platform shall show whether stated prices include VAT and any other mandatory charges; no mandatory booking charges may be added after payment without express agreement.",
-  "3.2 Rental periods are measured in consecutive 24-hour blocks beginning at the agreed collection time. A late-return grace period of 59 minutes applies; thereafter an additional rental day may be charged at the rate disclosed in the Booking Schedule, unless otherwise agreed. A late return must be reported promptly and does not extend insurance or permission to drive automatically.",
+  "3.2 Rental periods are measured in consecutive 24-hour blocks beginning at the agreed collection time. If the vehicle is returned after the agreed return time, an additional rental day may be charged at the rate disclosed in the Booking Schedule, unless otherwise agreed. A late return must be reported promptly and does not extend insurance or permission to drive automatically.",
   "3.3 A security deposit, where expressly specified, is separate from the rental payment and from the damage liability limit. The Company may deduct only documented sums properly owed under this agreement, with an itemised explanation. The undisputed balance shall be released or refunded within 7 business days after vehicle return, except where a documented pending claim reasonably requires a longer hold, which must be explained to the Hirer. Bank or card processing times may vary.",
   "3.4 Parking charges, traffic fines, tolls, fuel shortfalls, excess mileage and agreed optional extras may be payable separately where applicable and supported by records; they do not increase the cap for vehicle damage in clause 7.",
   "# 4. Cancellations and refunds",
@@ -57,16 +59,19 @@ export const AGREEMENT_TEXT: string[] = [
   "5.4 The Company may take its own timestamped inspection photographs and shall provide the Hirer access to the agreed condition record. The Hirer must not drive away if the vehicle appears unsafe; the Company shall address the safety issue or apply clause 8.",
   "# 6. Permitted and prohibited use",
   "6.1 The vehicle may be used only within Kenya, on roads or tracks reasonably suitable for that vehicle and consistent with applicable insurance terms. No travel outside Kenya without advance written Company consent and confirmed insurance cover.",
-  "6.2 The vehicle shall not be used by an unauthorised or unlicensed driver; for racing, rallies or speed trials; for hire/reward or towing without permission; while a driver is impaired by alcohol or drugs; while overloaded; or in a reckless, unlawful or deliberately damaging manner. The Hirer must secure the vehicle and keys reasonably when unattended.",
+  "6.2 The vehicle shall not be used by an unauthorised or unlicensed driver; for racing or speed trials (see also clause 6.4); for hire/reward or towing without permission; while a driver is impaired by alcohol or drugs; while overloaded; or in a reckless, unlawful or deliberately damaging manner. The Hirer must secure the vehicle and keys reasonably when unattended.",
   "6.3 The Hirer must not sell, pledge, sub-hire or materially modify the vehicle; tamper with the odometer or telematics; or authorise non-emergency repairs without the Company’s consent. The Hirer shall immediately notify the Company if the vehicle cannot safely continue.",
+  "6.4 OFF-ROAD MOTORSPORT IS PROHIBITED. No vehicle may be used for rallies or any other off-road motorsport (for example the Rhino Charge), racing, speed trials, or any timed or competitive event, or for practice for any of them. This applies to every vehicle in the fleet, including the 4x4s.",
+  "6.5 NO SALOON CARS OR NISSAN X-TRAIL IN GAME PARKS. Saloon cars and the Nissan X-Trail must not be taken into national parks, game parks or game reserves.",
   "# 7. Vehicle damage, theft, insurance and the liability cap",
-  "7.1 For accidental loss or damage to the hired vehicle during the rental, including collision, tyre blowout, wheel, suspension, windscreen or underbody damage, and customer-attributable breakdowns caused by misuse, impact, negligent driving or a road hazard, the Hirer is responsible for the Company’s reasonable, evidenced vehicle repair/replacement and related recovery costs, UP TO the single aggregate Damage Liability Limit stated in the Booking Schedule for that hire.",
+  "7.1 For accidental loss or damage to the hired vehicle during the rental, including collision, tyre blowout, wheel, suspension or windscreen damage (but not undercarriage damage, see clause 7.8), and customer-attributable breakdowns caused by misuse, impact, negligent driving or a road hazard, the Hirer is responsible for the Company’s reasonable, evidenced vehicle repair/replacement and related recovery costs, UP TO the single aggregate Damage Liability Limit stated in the Booking Schedule for that hire.",
   "7.2 The Damage Liability Limit is KES 90,000 for a saloon, KES 150,000 for an X-Trail and KES 200,000 for a Prado or a Land Cruiser. It applies in total across all customer-attributable vehicle-damage incidents during the same hire, not separately per incident or per component. Recovery/towing attributable to that vehicle damage counts within, not on top of, the cap. The cap is not an upfront fee, deductible automatically due, or authorisation to charge without evidence of loss.",
   "7.3 The Hirer does not pay for genuine mechanical/electrical breakdown, latent defects or ordinary wear and tear not caused or materially contributed to by the Hirer or an authorised driver. In a mixed-cause case, charges shall reflect reasonably evidenced customer-attributable loss and remain subject to the cap.",
   "7.4 The Company shall maintain motor insurance as required by Kenyan law and ensure that any represented self-drive and vehicle-damage protections are consistent with the actual policy. Nothing in this agreement purports to limit third-party legal rights or compulsory insurance protections. The Company must disclose material insurance restrictions relevant to the intended hire before payment.",
   "7.5 The vehicle-damage cap does not limit properly due rental charges, refuelling, tolls, fines or other independent debts. It does not limit liability for proven fraud, deliberate damage or other liability that cannot lawfully be limited, but no exclusion of the cap may be asserted merely because an accident occurred or on the basis of an undisclosed insurance term. Any proposed exceptions to the cap must be clearly disclosed before booking and checked against the insurer’s policy.",
   "7.6 The Company shall provide a written, itemised statement and supporting evidence for any damage claim, account for salvage/insurance recoveries where relevant so there is no double recovery, and allow the Hirer a reasonable opportunity to dispute it.",
-  "7.7 Collision damage waiver. Where the Booking Schedule shows that the Hirer has taken the optional collision damage waiver and paid for it, the Hirer shall not pay for damage to the hired vehicle caused by an accident or collision during the rental, and the Damage Liability Limit in clause 7.2 does not apply to that damage. The waiver does not cover: (a) traffic, speeding and parking fines, tolls and other charges under clause 11; (b) damage to the suspension, tyres, wheels, transmission, clutch or underbody caused by negligent, reckless or abusive driving, or by use the vehicle is not suitable for under clause 6.1, such as off-road events, rallies or competitions; or (c) proven fraud or deliberate damage. Damage under (b) is charged as though the waiver had not been taken, up to the Damage Liability Limit, and clauses 7.3 and 7.6 still apply. If the waiver is not taken, clauses 7.1 and 7.2 apply in full.",
+  "7.7 Collision damage waiver. Where the Booking Schedule shows that the Hirer has taken the optional collision damage waiver and paid for it, the Hirer shall not pay for damage to the hired vehicle caused by an accident or collision during the rental, and the Damage Liability Limit in clause 7.2 does not apply to that damage. The waiver does not cover: (a) traffic, speeding and parking fines, tolls and other charges under clause 11; (b) damage to the suspension, tyres, wheels, transmission or clutch caused by negligent, reckless or abusive driving, or by use the vehicle is not suitable for or that is prohibited under clause 6, such as off-road motorsport; (c) damage to the undercarriage, which is paid in full under clause 7.8; or (d) proven fraud or deliberate damage. Damage under (b) is charged as though the waiver had not been taken, up to the Damage Liability Limit, and clauses 7.3 and 7.6 still apply. If the waiver is not taken, clauses 7.1 and 7.2 apply in full.",
+  "7.8 UNDERCARRIAGE DAMAGE IS PAID IN FULL. Damage to the undercarriage (the underside of the vehicle and the parts fitted there) during the rental is not limited by the Damage Liability Limit in clause 7.2 and is not covered by the collision damage waiver in clause 7.7. The Hirer pays the Company's reasonable, evidenced repair and related recovery costs for it in full. Clauses 7.3 and 7.6 still apply.",
   "# 8. Breakdowns, roadside assistance and unavailability",
   "8.1 If the vehicle becomes unsafe, fails or breaks down, the Hirer must stop safely, contact the Company promptly, follow reasonable safety instructions and not arrange non-emergency repairs or recovery without approval. Emergency measures to protect people or prevent immediate further loss are permitted.",
   "8.2 Where breakdown or loss of use results from customer-attributable accident, impact, tyre blowout, misuse or negligent driving, the Hirer bears reasonable evidenced repair and recovery costs subject to clause 7. The Company will assist with arranging recovery; a replacement vehicle is not guaranteed and any further hire will require agreement.",
@@ -149,6 +154,7 @@ export type ScheduleValues = {
   ret: string;
   price: string;
   damageLimit: number | null;
+  category?: string; // saloon, suv or 4x4: saloon cars and the X-Trail can't go into game parks (clause 6.5)
   waiver: string; // the waiver charge, e.g. "KSh 4,500 for 3 days", or "" when not taken
   mileage: string;
 };
@@ -175,9 +181,14 @@ export function bookingSchedule(v: ScheduleValues): [string, string][] {
     [
       "Collision damage waiver",
       v.waiver
-        ? "Taken, " + v.waiver + ". Covers accident and collision damage to the vehicle. Fines, and damage to suspension, tyres, wheels, transmission or underbody from bad driving or unsuitable use, are not covered (clause 7.7)"
+        ? "Taken, " + v.waiver + ". Covers accident and collision damage to the vehicle. Fines, undercarriage damage, and damage to suspension, tyres, wheels or transmission from bad driving or unsuitable use, are not covered (clause 7.7)"
         : "Not taken. Damage is charged up to the damage liability limit (clauses 7.1 and 7.2)",
     ],
+    ["Undercarriage damage", "Paid in full: not limited by the damage liability limit or covered by the waiver (clause 7.8)"],
+    ["Off-road motorsport", "Prohibited, including rallies such as the Rhino Charge (clause 6.4)"],
+    ...(v.category === "saloon" || v.category === "suv"
+      ? ([["Game parks", "Not allowed: this vehicle must not be taken into national parks, game parks or game reserves (clause 6.5)"]] as [string, string][])
+      : []),
     ["Mileage", v.mileage],
     ["Security deposit, if applicable", "None"],
     ["Fuel / special restrictions", FUEL_POLICY],

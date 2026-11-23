@@ -42,7 +42,7 @@ const KNOW = [
   },
   {
     title: "Damage liability limit",
-    body: "If the vehicle is damaged during your hire, you pay the evidenced repair cost up to a limit for the whole hire: KSh 90,000 for a saloon, KSh 150,000 for the X-Trail, and KSh 200,000 for a Prado or Land Cruiser. You don't pay for genuine mechanical faults or normal wear and tear. Add the optional collision damage waiver (KSh 1,500 a day for saloons, KSh 2,000 for SUVs and 4x4s) and you don't pay for accident or collision damage. Your agreement shows the limit for the vehicle you book.",
+    body: "If the vehicle is damaged during your hire, you pay the evidenced repair cost up to a limit for the whole hire: KSh 90,000 for a saloon, KSh 150,000 for the X-Trail, and KSh 200,000 for a Prado or Land Cruiser. Damage to the undercarriage is paid in full, with no limit. You don't pay for genuine mechanical faults or normal wear and tear. Add the optional collision damage waiver (KSh 1,500 a day for saloons, KSh 2,000 for SUVs and 4x4s) and you don't pay for accident or collision damage. Your agreement shows the limit for the vehicle you book.",
   },
   {
     title: "Fuel",
@@ -50,7 +50,7 @@ const KNOW = [
   },
   {
     title: "Hire days and late returns",
-    body: "A hire day is 24 hours from your collection time. Returns up to 59 minutes late are free; after that, an extra day may be charged. Open Monday to Friday 08:00–17:00 and Saturday 08:00–13:00; pick-ups and returns outside these hours are by arrangement.",
+    body: "A hire day is 24 hours from your collection time. If you return after your agreed time, an extra day may be charged. Open Monday to Friday 08:00–17:00 and Saturday 08:00–13:00; pick-ups and returns outside these hours are by arrangement.",
   },
   {
     title: "Cancellations",
@@ -81,11 +81,11 @@ const FAQ = [
   },
   {
     q: "What happens if the vehicle is damaged?",
-    a: "Every vehicle is insured as the law requires. If the vehicle is damaged during your hire, for example in a collision, by a tyre blowout or to the windscreen, wheels or underbody, you pay the evidenced repair and recovery cost up to the damage liability limit: KSh 90,000 for a saloon, KSh 150,000 for the X-Trail, and KSh 200,000 for a Prado or Land Cruiser. The limit applies once to the whole hire, not to each incident, and it is not a fee taken in advance. We give you an itemised statement with evidence for any claim. You don't pay for genuine mechanical or electrical faults or normal wear and tear. Your booking agreement shows the limit for the vehicle you book.",
+    a: "Every vehicle is insured as the law requires. If the vehicle is damaged during your hire, for example in a collision, by a tyre blowout or to the windscreen or wheels, you pay the evidenced repair and recovery cost up to the damage liability limit: KSh 90,000 for a saloon, KSh 150,000 for the X-Trail, and KSh 200,000 for a Prado or Land Cruiser. The limit applies once to the whole hire, not to each incident, and it is not a fee taken in advance. We give you an itemised statement with evidence for any claim. Damage to the undercarriage (the underside of the vehicle) is different: it is paid in full, with no limit, and the collision damage waiver doesn't cover it. You don't pay for genuine mechanical or electrical faults or normal wear and tear. Your booking agreement shows the limit for the vehicle you book.",
   },
   {
     q: "What does the collision damage waiver cover?",
-    a: "It's optional: KSh 1,500 a day for saloons and KSh 2,000 a day for SUVs and 4x4s, added when you book. With it, you don't pay for damage to the vehicle caused by an accident or collision, and the damage liability limit doesn't apply to that damage. It doesn't cover traffic, speeding or parking fines and tolls, or damage to the suspension, tyres, wheels, transmission, clutch or underbody caused by bad driving or by using the vehicle somewhere it isn't suited to, such as off-road events or rallies. That damage is charged up to the damage liability limit, as it would be without the waiver. Deliberate damage and fraud are never covered.",
+    a: "It's optional: KSh 1,500 a day for saloons and KSh 2,000 a day for SUVs and 4x4s, added when you book. With it, you don't pay for damage to the vehicle caused by an accident or collision, and the damage liability limit doesn't apply to that damage. It doesn't cover traffic, speeding or parking fines and tolls, or damage to the suspension, tyres, wheels, transmission or clutch caused by bad driving or by using the vehicle somewhere it isn't suited to; that damage is charged up to the damage liability limit, as it would be without the waiver. Damage to the undercarriage isn't covered either and is paid in full. Off-road motorsport and rallies are prohibited. Deliberate damage and fraud are never covered.",
   },
   {
     q: "What should I check when I collect the vehicle?",
@@ -109,7 +109,7 @@ const FAQ = [
   },
   {
     q: "What if I return the vehicle late?",
-    a: "A hire day is 24 hours from your collection time. Up to 59 minutes late is free. After that, an extra day may be charged. Call or WhatsApp us as soon as you know you'll be late: a late return doesn't automatically extend your insurance or permission to drive.",
+    a: "A hire day is 24 hours from your collection time. If you return after your agreed time, an extra day may be charged. Call or WhatsApp us as soon as you know you'll be late: a late return doesn't automatically extend your insurance or permission to drive.",
   },
   {
     q: "Can someone else drive?",
@@ -117,7 +117,7 @@ const FAQ = [
   },
   {
     q: "Where can I take the vehicle?",
-    a: "Anywhere in Kenya, on roads and tracks suitable for the vehicle. Travel outside Kenya needs our written consent and confirmed insurance first. The vehicle must not be used for racing, towing, carrying passengers or goods for payment, or driven under the influence of alcohol or drugs.",
+    a: "Anywhere in Kenya, on roads and tracks suitable for the vehicle. Off-road motorsport is strictly prohibited: no rallies (such as the Rhino Charge), racing, speed trials or competitive events, in any of our vehicles, including the 4x4s. Saloon cars and the Nissan X-Trail must not be taken into national parks, game parks or game reserves. Travel outside Kenya needs our written consent and confirmed insurance first. The vehicle must not be used for towing, carrying passengers or goods for payment, or driven under the influence of alcohol or drugs.",
   },
   {
     q: "What happens if the vehicle breaks down or I have an accident?",

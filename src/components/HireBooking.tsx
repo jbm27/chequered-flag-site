@@ -1557,14 +1557,8 @@ function VehicleCard({
         </div>
         <div className="text-[13px] text-[#595959]">{model.mileage}</div>
 
-        {days > 0 && (
-          <div className="rounded-md bg-[#f5f5f3] px-2.5 py-1.5 text-[13px] leading-normal">
-            <strong className="block">{ksh(model.hireTotal)}</strong>
-            <div className="flex justify-between gap-2 text-[13px] text-[#595959]">
-              <span>Paid in full when you book</span>
-            </div>
-          </div>
-        )}
+        {/* No total for the chosen dates here (Homer, Nov 2026): customers found it confusing next to the daily
+            price, and many hires are one day. The total shows at checkout. */}
 
         {damageLimitFor(model.name, model.category) === null ? (
           // No damage liability limit in the hire agreement yet, so this vehicle is booked by phone.

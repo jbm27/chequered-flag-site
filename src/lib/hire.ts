@@ -558,7 +558,7 @@ export function assessBooking(
   };
 }
 
-export function bookingMessage(input: { manual: boolean; reference: string; total: number; model: string }) {
+export function bookingMessage(input: { manual: boolean; reference: string; total: number; model: string; mpesa?: boolean }) {
   if (input.manual) {
     return (
       "Request " +
@@ -573,7 +573,9 @@ export function bookingMessage(input: { manual: boolean; reference: string; tota
     input.model +
     " is held for you. Pay " +
     ksh(input.total) +
-    " in full by M-Pesa or bank transfer and quote this reference. We confirm the booking once we have checked the payment. Nothing is taken on this page."
+    (input.mpesa
+      ? " in full. Tap Pay with M-Pesa below and your booking is confirmed straight away, or pay by till or bank transfer quoting this reference and we'll confirm it once we've checked the payment."
+      : " in full by M-Pesa or bank transfer and quote this reference. We confirm the booking once we have checked the payment. Nothing is taken on this page.")
   );
 }
 
@@ -658,6 +660,11 @@ export type StaffBooking = {
   ooh: boolean;
   oohNote: string;
   mpesaCode: string;
+  // "Pay with M-Pesa" on the website: '' when no request was sent. Paid ones show "Paid by M-Pesa" and the receipt.
+  mpesaStatus?: "" | "pending" | "paid" | "failed" | "cancelled";
+  mpesaReceipt?: string;
+  mpesaPaidAt?: string;
+  mpesaTest?: boolean; // paid with the Preview-only test amount
   staffNote: string;
   hasDocuments?: boolean;
   licenceOnFile?: boolean; // the main driver's licence was reused from one on file: check it at handover

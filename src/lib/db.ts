@@ -15,6 +15,7 @@ import {
 } from "./documents";
 import { VEHICLE_RECORDS } from "./vehicleRecords";
 import type { CalendarBooking } from "./ics";
+import { displayPhone, mpesaConfigured, mpesaPhone, mpesaTestAmount, paymentForReference, sendPaymentPrompt, type MpesaResult } from "./mpesa";
 import { canUseCalendarLink } from "./access";
 import {
   addDays,
@@ -198,6 +199,17 @@ async function setup() {
     );
     -- Payments recorded on the desk (code, amount, who, when), used to spot a code used twice.
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_log jsonb NOT NULL DEFAULT '[]'::jsonb;
+    -- M-Pesa payment requests sent from the website (the "Pay with M-Pesa" button), through the payment service.
+    -- mpesa_status: '' (none sent), 'pending', 'paid', 'failed' or 'cancelled'. mpesa_receipt: Safaricom's receipt
+    -- number once paid. mpesa_test: sent with the Preview-only test amount (MPESA_TEST_AMOUNT).
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS mpesa_status text NOT NULL DEFAULT '';
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS mpesa_receipt text NOT NULL DEFAULT '';
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS mpesa_checkout_id text NOT NULL DEFAULT '';
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS mpesa_phone text NOT NULL DEFAULT '';
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS mpesa_amount integer;
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS mpesa_test boolean NOT NULL DEFAULT false;
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS mpesa_requested_at timestamptz;
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS mpesa_paid_at timestamptz;
     CREATE INDEX IF NOT EXISTS bookings_vehicle_status_idx ON bookings (vehicle_id, status);
     CREATE INDEX IF NOT EXISTS bookings_created_idx ON bookings (created_at DESC);
     -- Licence photos, extra drivers and the signed hire agreement for a website booking (one row per booking).
@@ -866,6 +878,7 @@ export async function createBooking(
         reference,
         total,
         model: booking.model.name,
+        mpesa: mpesaConfigured(),
       }),
     };
   } catch (error) {
@@ -874,6 +887,227 @@ export async function createBooking(
   } finally {
     client.release();
   }
+}
+
+// ---------- M-Pesa payments from the website ("Pay with M-Pesa") ----------
+// The browser only sends the booking reference and email (and a phone number when the booking has no Kenyan
+// mobile number). The amount always comes from the booking here, never from the browser.
+
+const MPESA_RESEND_SECONDS = 45;
+
+function customerError(message: string, status: number, extra?: Record<string, unknown>) {
+  return Object.assign(new Error(message), { status }, extra ? { extra } : {});
+}
+
+type MpesaRow = {
+  id: string;
+  reference: string;
+  status: string;
+  total_due: number;
+  amount_paid: number;
+  phone: string;
+  mpesa_status: string;
+  mpesa_receipt: string;
+  mpesa_phone: string;
+  recent: boolean;
+};
+
+async function mpesaBooking(client: Pool | PoolClient, referenceRaw: string, emailRaw: string, lock: boolean) {
+  const reference = String(referenceRaw || "").trim().toUpperCase();
+  const email = String(emailRaw || "").trim();
+  if (!/^CF-\d{6}$/.test(reference) || !email) throw customerError("We could not match that booking. Check the reference and email.", 404);
+  const result = await client.query<MpesaRow>(
+    `SELECT id::text, reference, status, total_due, amount_paid, phone, mpesa_status, mpesa_receipt, mpesa_phone,
+            COALESCE(now() - mpesa_requested_at < $3::int * interval '1 second', false) AS recent
+     FROM bookings WHERE reference = $1 AND lower(email) = lower($2)` + (lock ? " FOR UPDATE" : ""),
+    [reference, email, MPESA_RESEND_SECONDS],
+  );
+  const row = result.rows[0];
+  if (!row) throw customerError("We could not match that booking. Check the reference and email.", 404);
+  return row;
+}
+
+function balanceDue(row: { status: string; total_due: number; amount_paid: number }) {
+  const total = Number(row.total_due);
+  const paid = row.status === "confirmed" && !Number(row.amount_paid) ? total : Number(row.amount_paid);
+  return { total, paid, balance: Math.max(0, total - paid) };
+}
+
+// What the confirmation page needs before showing the button: whether M-Pesa is set up, the amount, and the
+// phone the prompt would go to (or that the customer needs to give one).
+export async function mpesaPaymentInfo(reference: string, email: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const row = await mpesaBooking(db, reference, email, false);
+  const { balance } = balanceDue(row);
+  const phone = mpesaPhone(row.phone);
+  const test = mpesaTestAmount();
+  return {
+    ready: mpesaConfigured() && row.status === "pending" && balance > 0 && row.mpesa_status !== "paid",
+    status: row.status,
+    mpesaStatus: row.mpesa_status || "",
+    receipt: row.mpesa_receipt || "",
+    amount: balance,
+    testAmount: test,
+    phone: phone ? displayPhone(phone) : "",
+  };
+}
+
+// "Pay with M-Pesa": sends the PIN prompt for the booking's balance to the booking's phone.
+export async function startMpesaPayment(reference: string, email: string, phoneRaw: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  if (!mpesaConfigured()) throw customerError("M-Pesa payments are not set up yet. Please pay by till or bank.", 503);
+  const client = await db.connect();
+  let phone: string;
+  let amount: number;
+  let test: boolean;
+  let row: MpesaRow;
+  try {
+    await client.query("BEGIN");
+    row = await mpesaBooking(client, reference, email, true);
+    const due = balanceDue(row);
+    if (row.mpesa_status === "paid" || row.status === "confirmed" || due.balance === 0) {
+      throw customerError("This booking is already paid.", 409);
+    }
+    if (row.status !== "pending") throw customerError("This booking can't be paid online. Please contact us.", 409);
+    if (row.recent && row.mpesa_status === "pending") {
+      throw customerError("A payment request was sent less than a minute ago. Check your phone, or try again in a moment.", 429);
+    }
+    const fromBooking = mpesaPhone(row.phone);
+    const chosen = fromBooking || mpesaPhone(phoneRaw);
+    if (!chosen) {
+      throw customerError(
+        phoneRaw ? "Enter a Kenyan M-Pesa number, for example 0712 345 678." : "Enter the M-Pesa number to send the payment request to.",
+        400,
+        { needPhone: true },
+      );
+    }
+    phone = chosen;
+    const testAmount = mpesaTestAmount();
+    test = testAmount !== null;
+    amount = testAmount ?? due.balance;
+    await client.query(
+      `UPDATE bookings
+       SET mpesa_status = 'pending', mpesa_phone = $2, mpesa_amount = $3, mpesa_test = $4,
+           mpesa_requested_at = now(), mpesa_checkout_id = ''
+       WHERE id = $1`,
+      [row.id, phone, amount, test],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+  try {
+    const checkoutId = await sendPaymentPrompt(phone, amount, row.reference);
+    await db.query(`UPDATE bookings SET mpesa_checkout_id = $2 WHERE id = $1`, [row.id, checkoutId]);
+  } catch (error) {
+    await db.query(`UPDATE bookings SET mpesa_status = 'failed' WHERE id = $1 AND mpesa_status = 'pending'`, [row.id]);
+    throw error;
+  }
+  return { ok: true, phone: displayPhone(phone), amount, test };
+}
+
+// Saves what the payment service reports. Paid: the receipt is saved, the amount added to what has been paid,
+// and a held booking that is now paid in full is confirmed (no "Confirm payment received" needed).
+// A payment with the Preview-only test amount counts as the full balance.
+async function applyMpesaResult(db: Pool, bookingId: string, result: MpesaResult | null) {
+  if (!result) return null;
+  if (result.status !== "paid") {
+    await db.query(`UPDATE bookings SET mpesa_status = $2 WHERE id = $1 AND mpesa_status IN ('pending', 'failed', 'cancelled')`, [
+      bookingId,
+      result.status,
+    ]);
+    return result.status;
+  }
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query<{
+      status: string; total_due: number; amount_paid: number; mpesa_status: string; mpesa_amount: number | null;
+      mpesa_test: boolean; payment_log: unknown[];
+    }>(
+      `SELECT status, total_due, amount_paid, mpesa_status, mpesa_amount, mpesa_test, payment_log FROM bookings WHERE id = $1 FOR UPDATE`,
+      [bookingId],
+    );
+    const row = current.rows[0];
+    if (!row || row.mpesa_status === "paid") {
+      await client.query("COMMIT");
+      return "paid";
+    }
+    const receipt = result.receipt;
+    const log = Array.isArray(row.payment_log) ? (row.payment_log as { code?: string }[]) : [];
+    const already = receipt !== "" && log.some((entry) => entry.code === receipt);
+    const due = balanceDue(row);
+    const sent = result.amount ?? Number(row.mpesa_amount || 0);
+    const credited = already ? 0 : row.mpesa_test ? due.balance : sent;
+    const paid = due.paid + credited;
+    const entry = {
+      code: receipt,
+      amount: credited,
+      by: "M-Pesa (paid online" + (row.mpesa_test ? ", test amount KSh " + sent : "") + ")",
+      at: new Date().toISOString(),
+    };
+    await client.query(
+      `UPDATE bookings
+       SET mpesa_status = 'paid', mpesa_receipt = $2, mpesa_paid_at = now(),
+           amount_paid = $3,
+           payment_log = CASE WHEN $5 THEN payment_log ELSE payment_log || jsonb_build_array($4::jsonb) END,
+           mpesa_code = CASE WHEN mpesa_code = '' THEN $2 ELSE mpesa_code END,
+           status = CASE WHEN status = 'pending' AND $3 >= total_due THEN 'confirmed' ELSE status END,
+           confirmed_at = CASE WHEN status = 'pending' AND $3 >= total_due THEN now() ELSE confirmed_at END
+       WHERE id = $1`,
+      [bookingId, receipt, paid, JSON.stringify(entry), already],
+    );
+    await client.query("COMMIT");
+    return "paid";
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// The confirmation page checks every few seconds after sending the prompt.
+export async function checkMpesaPayment(reference: string, email: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const row = await mpesaBooking(db, reference, email, false);
+  if (row.mpesa_status === "paid") return { mpesaStatus: "paid", receipt: row.mpesa_receipt, status: row.status };
+  if (row.mpesa_status !== "pending") return { mpesaStatus: row.mpesa_status || "", receipt: "", status: row.status };
+  const result = await paymentForReference(row.reference);
+  await applyMpesaResult(db, row.id, result);
+  const after = await mpesaBooking(db, reference, email, false);
+  return { mpesaStatus: after.mpesa_status || "pending", receipt: after.mpesa_receipt, status: after.status };
+}
+
+// When the desk loads: check every booking still waiting on an M-Pesa request (the customer may have paid and
+// closed the page). Quick: at most 30 bookings, all at once, and the desk loads anyway after 8 seconds.
+export async function reconcileMpesaPayments() {
+  if (!mpesaConfigured()) return;
+  await ensureReady();
+  const db = pool();
+  if (!db) return;
+  const waiting = await db.query<{ id: string; reference: string }>(
+    `SELECT id::text, reference FROM bookings
+     WHERE mpesa_status = 'pending' AND mpesa_requested_at > now() - interval '14 days'
+     ORDER BY mpesa_requested_at DESC LIMIT 30`,
+  );
+  if (!waiting.rows.length) return;
+  const work = Promise.allSettled(
+    waiting.rows.map(async (row) => applyMpesaResult(db, row.id, await paymentForReference(row.reference))),
+  ).then((results) => {
+    const failed = results.filter((r) => r.status === "rejected").length;
+    if (failed) console.error("M-Pesa: " + failed + " payment check(s) failed when the desk loaded.");
+  });
+  await Promise.race([work, new Promise((resolve) => setTimeout(resolve, 8000))]);
 }
 
 export async function attachPaymentCode(reference: string, email: string, mpesaCode: string) {
@@ -941,6 +1175,10 @@ function mapStaff(row: Record<string, unknown>): StaffBooking {
     ooh: Boolean(row.ooh),
     oohNote: String(row.ooh_note || ""),
     mpesaCode: String(row.mpesa_code || ""),
+    mpesaStatus: (String(row.mpesa_status || "") as StaffBooking["mpesaStatus"]) || "",
+    mpesaReceipt: String(row.mpesa_receipt || ""),
+    mpesaPaidAt: row.mpesa_paid_at ? new Date(String(row.mpesa_paid_at)).toISOString() : "",
+    mpesaTest: Boolean(row.mpesa_test),
     staffNote: String(row.staff_note || ""),
     // Bookings confirmed before part payments existed have 0 stored; confirmed means paid in full.
     amountPaid:
@@ -959,7 +1197,7 @@ export async function listBookings() {
             days, daily_rate, hire_total, insurance_total, delivery_fee, total_due,
             ooh, ooh_note, mpesa_code, status, staff_note, created_at, amount_paid, payment_log,
             source, COALESCE(held_at, created_at) AS held_at, discount, discount_note, discount_by, discount_at,
-            overlap_approved, overlap_note, overlap_by,
+            overlap_approved, overlap_note, overlap_by, mpesa_status, mpesa_receipt, mpesa_paid_at, mpesa_test,
             EXISTS (SELECT 1 FROM booking_documents d WHERE d.booking_id = bookings.id) AS has_documents,
             COALESCE((SELECT d.drivers->0->>'fromFile' = 'true' FROM booking_documents d WHERE d.booking_id = bookings.id), false)
               AS licence_on_file

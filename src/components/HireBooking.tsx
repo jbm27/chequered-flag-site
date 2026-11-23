@@ -5,6 +5,7 @@ import { COMPANY, CONTACT } from "../lib/contact";
 import { type LatLng } from "./PinMap";
 import PinPicker from "./PinPicker";
 import PaymentDetails from "./PaymentDetails";
+import MpesaPay from "./MpesaPay";
 import ReviewPrompt, { rememberForReview, reviewUrl, skipReview } from "./ReviewPrompt";
 import { mpesaCodeHint } from "../lib/payments";
 import { LicencePicker, SignatureBox } from "./CheckoutDocuments";
@@ -48,8 +49,9 @@ import {
 } from "../lib/hire";
 
 // Layout and wording follow Homer's vehicle hire design (V1.5).
-// Payment rules follow the booking system: the full amount is due, nothing is charged on this page,
-// and staff confirm once they have checked the M-Pesa or bank payment.
+// Payment rules follow the booking system: the full amount is due and nothing is charged while booking.
+// After the booking is held, the customer can pay with an M-Pesa request to their phone ("Pay with M-Pesa",
+// confirmed automatically) when M-Pesa payments are set up, or by till or bank, which staff confirm by hand.
 
 const STORED = "cfHireRequest";
 
@@ -142,6 +144,14 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const [phone, setPhone] = useState("");
   const [insure, setInsure] = useState(false);
   const [mpesaCode, setMpesaCode] = useState("");
+  const [mpesaReady, setMpesaReady] = useState(false);
+  const [paidOnline, setPaidOnline] = useState(false);
+  useEffect(() => {
+    fetch("/api/hire/bookings/mpesa", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "ready" }) })
+      .then((response) => response.json())
+      .then((data) => setMpesaReady(Boolean(data.ready)))
+      .catch(() => undefined);
+  }, []);
   // Discount code at checkout
   const [codeInput, setCodeInput] = useState("");
   const [codeApplied, setCodeApplied] = useState<{ code: string; amount: number; label: string } | null>(null);
@@ -994,10 +1004,11 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                     </>
                   )}
                 </div>
-                {!result.manual && (
+                {!result.manual && <MpesaPay reference={result.reference} email={result.email} onPaid={() => setPaidOnline(true)} />}
+                {!result.manual && !paidOnline && (
                   <div className="mx-auto mb-[18px] max-w-[620px] text-left">
                     <div className="mb-2 text-center text-sm font-bold">
-                      How to pay {ksh(result.total)}
+                      {mpesaReady ? "Or pay by till or bank" : "How to pay " + ksh(result.total)}
                     </div>
                     <PaymentDetails reference={result.reference} />
                   </div>
@@ -1027,7 +1038,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                     Your booking PDF is kept on our booking desk. Contact us if you need a copy.
                   </p>
                 )}
-                {!result.manual && (
+                {!result.manual && !paidOnline && (
                   <form
                     onSubmit={sendCode}
                     className="mx-auto mb-[18px] flex max-w-[520px] flex-col gap-3 text-left sm:flex-row sm:items-end"
@@ -1334,8 +1345,20 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                           </div>
                           <ol className="mb-2.5 list-decimal pl-5 text-sm leading-[1.7] text-[#3f3f3f]">
                             <li>Submit the booking. We hold the vehicle and give you a booking reference.</li>
-                            <li>Pay the full amount by M-Pesa or bank transfer, and quote the booking reference.</li>
-                            <li>We check the payment and confirm your booking.</li>
+                            {mpesaReady ? (
+                              <>
+                                <li>
+                                  Pay the full amount: tap <strong>Pay with M-Pesa</strong> and enter your PIN on your phone,
+                                  or pay by till or bank transfer quoting the booking reference.
+                                </li>
+                                <li>M-Pesa payments confirm your booking straight away. We confirm till and bank payments once we&apos;ve checked them.</li>
+                              </>
+                            ) : (
+                              <>
+                                <li>Pay the full amount by M-Pesa or bank transfer, and quote the booking reference.</li>
+                                <li>We check the payment and confirm your booking.</li>
+                              </>
+                            )}
                           </ol>
                           <div className="mb-3">
                             <PaymentDetails />
@@ -1356,7 +1379,11 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                               <dd className="inline">{selected ? mileageFor(selected.category) : ""}</dd>
                             </div>
                           </dl>
-                          <p className="text-[13px] text-[#595959]">Nothing is taken on this page.</p>
+                          <p className="text-[13px] text-[#595959]">
+                            {mpesaReady
+                              ? "Nothing is taken until you submit the booking. Then you can pay straight away with an M-Pesa request to your phone."
+                              : "Nothing is taken on this page."}
+                          </p>
                           <label htmlFor="mpesa" className={label + " mt-3"}>
                             M-Pesa code (optional, if you have already paid)
                           </label>
@@ -1561,7 +1588,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                       <span>{manual ? "Hire so far" : "Due in full"}</span>
                       <span>{ksh(total)}</span>
                     </div>
-                    <div className="text-[13px] text-[#595959]">Nothing is taken on this page.</div>
+                    <div className="text-[13px] text-[#595959]">{mpesaReady ? "Nothing is taken while you book." : "Nothing is taken on this page."}</div>
                     {!codeApplied && (
                       <form
                         className="mt-2.5 border-t border-[#e5e5e5] pt-2.5"

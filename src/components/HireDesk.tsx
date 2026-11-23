@@ -175,13 +175,18 @@ function holdInfo(booking: StaffBooking) {
 
 function chipFor(booking: StaffBooking, today: string): Chip {
   const part = booking.amountPaid > 0 && balanceOf(booking) > 0;
-  if (booking.status === "confirmed") return part ? { ...CHIP_PART, label: "Balance owed" } : CHIP_PAID;
+  const mpesaPaid = booking.mpesaStatus === "paid";
+  if (booking.status === "confirmed") {
+    return part ? { ...CHIP_PART, label: "Balance owed" } : mpesaPaid ? { ...CHIP_PAID, label: "Paid by M-Pesa" } : CHIP_PAID;
+  }
   if (booking.status === "quote") return CHIP_QUOTE;
-  if (booking.status === "cancelled") return CHIP_CLOSED;
+  // Paid with "Pay with M-Pesa" after the hold was released: the customer needs a refund or the booking re-held.
+  if (booking.status === "cancelled") return mpesaPaid ? { ...CHIP_LATE, label: "Released, but paid by M-Pesa" } : CHIP_CLOSED;
   if (booking.pickup <= today) return part ? { ...CHIP_PART, label: "Balance owed, pick-up reached" } : CHIP_LATE;
   const hold = holdInfo(booking);
   if (hold.flagged) return { ...CHIP_LATE, label: "Unpaid for " + (hold.hours >= 48 ? Math.floor(hold.hours / 24) + " days" : "24h+") };
-  if (part) return CHIP_PART;
+  if (part) return mpesaPaid ? { ...CHIP_PART, label: "Part paid by M-Pesa" } : CHIP_PART;
+  if (booking.mpesaStatus === "pending") return { ...CHIP_CODE, label: "M-Pesa request sent" };
   if (booking.mpesaCode) return CHIP_CODE;
   return CHIP_AWAIT;
 }
@@ -888,8 +893,9 @@ export default function HireDesk() {
 
       <main className="mx-auto box-border max-w-[1280px] px-[5.5%] pb-14 pt-7">
         <p className="mb-[18px] rounded-lg bg-[#e8f0fe] px-3.5 py-2.5 text-sm text-[#174ea6]">
-          Confirm a booking only after the full amount is on the M-Pesa or bank statement. Prep and cleaning days are a
-          planning guide; only the hire dates hold a vehicle.
+          Bookings paid with the website&apos;s Pay with M-Pesa button confirm themselves. Confirm any other booking only
+          after the full amount is on the M-Pesa or bank statement. Prep and cleaning days are a planning guide; only the
+          hire dates hold a vehicle.
         </p>
 
         {message && (
@@ -1235,7 +1241,7 @@ export default function HireDesk() {
                                 >
                                   {booking.overlapApproved ? "⇄ " : ""}
                                   {booking.customerName}
-                                  {fullyPaid ? "" : partPaid ? " · part paid" : " · unpaid"}
+                                  {fullyPaid ? (booking.mpesaStatus === "paid" ? " · M-Pesa ✓" : "") : partPaid ? " · part paid" : " · unpaid"}
                                 </button>
                               </div>,
                             );
@@ -1622,6 +1628,30 @@ export default function HireDesk() {
                       </span>
                     </Row>
                   )}
+                  {selected.mpesaStatus === "paid" ? (
+                    <Row label="Paid by M-Pesa">
+                      <strong className="text-[#0d5a2a]">✓ Receipt {selected.mpesaReceipt || "(no receipt number)"}</strong>
+                      <span className="block text-xs text-[#595959]">
+                        Paid online with the Pay with M-Pesa button
+                        {selected.mpesaPaidAt
+                          ? ", " + new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Nairobi", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(selected.mpesaPaidAt))
+                          : ""}
+                        . Confirmed automatically.
+                      </span>
+                      {selected.mpesaTest && <span className="block text-xs font-bold text-[#7a3e00]">Test payment (test amount, Preview only)</span>}
+                      {selected.status === "cancelled" && (
+                        <span className="block text-xs font-bold text-[#a50e0e]">The hold was released before this payment arrived: refund the customer or re-book.</span>
+                      )}
+                    </Row>
+                  ) : selected.mpesaStatus ? (
+                    <Row label="M-Pesa request">
+                      {selected.mpesaStatus === "pending"
+                        ? "Sent to the customer's phone, not paid yet"
+                        : selected.mpesaStatus === "cancelled"
+                          ? "Cancelled on the customer's phone"
+                          : "Didn't go through"}
+                    </Row>
+                  ) : null}
                   <Row label="M-Pesa code">
                     {selected.mpesaCode || "None sent yet"}
                     {selected.mpesaCode && !looksLikeMpesaCode(selected.mpesaCode) && (
@@ -1868,7 +1898,10 @@ export default function HireDesk() {
                             </span>
                           )}
                         </td>
-                        <td className="px-2 py-2.5">{booking.mpesaCode || <span className="text-[#595959]">—</span>}</td>
+                        <td className="px-2 py-2.5">
+                          {booking.mpesaCode || <span className="text-[#595959]">—</span>}
+                          {booking.mpesaStatus === "paid" && <span className="block text-xs font-bold text-[#0d5a2a]">Paid by M-Pesa ✓</span>}
+                        </td>
                         <td className="px-2 py-2.5">
                           <ChipView chip={chipFor(booking, today)} />
                         </td>
@@ -2418,6 +2451,9 @@ function HoverCard({
           <span className="block">
             <strong>Balance:</strong> {ksh(balanceOf(booking))} (paid {ksh(booking.amountPaid)})
           </span>
+        )}
+        {booking.mpesaStatus === "paid" && (
+          <span className="block font-bold text-[#0d5a2a]">Paid by M-Pesa · receipt {booking.mpesaReceipt || "–"}</span>
         )}
       </div>
     </div>

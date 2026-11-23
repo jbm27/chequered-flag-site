@@ -8,6 +8,7 @@ import {
   listLicencesOnFile,
   listVehicleRecords,
   publicError,
+  reconcileMpesaPayments,
   staffFromToken,
   updateBooking,
 } from "../../../../../lib/db";
@@ -33,6 +34,8 @@ export async function GET() {
   }
   try {
     await requireStaff();
+    // Customers who paid with M-Pesa and closed the page: pick up the payment now (confirms the booking).
+    await reconcileMpesaPayments().catch((error) => console.error("M-Pesa check on desk load failed", String(error).slice(0, 200)));
     const bookings = await listBookings();
     const records = await listVehicleRecords();
     const licences = await listLicencesOnFile();

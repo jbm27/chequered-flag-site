@@ -142,6 +142,11 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const [phone, setPhone] = useState("");
   const [insure, setInsure] = useState(false);
   const [mpesaCode, setMpesaCode] = useState("");
+  // Discount code at checkout
+  const [codeInput, setCodeInput] = useState("");
+  const [codeApplied, setCodeApplied] = useState<{ code: string; amount: number; label: string } | null>(null);
+  const [codeError, setCodeError] = useState("");
+  const [codeBusy, setCodeBusy] = useState(false);
   const [terms, setTerms] = useState(false);
   // Security update: licence photos for every driver, extra drivers, and the signed hire agreement.
   const [mainLicence, setMainLicence] = useState<DocImage | null>(null);
@@ -257,7 +262,9 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const hireTotal = selected ? days * selected.rate : 0;
   const insuranceTotal = selected && insure ? days * selected.addon : 0;
   const pricedDelivery = deliveryQuote.manual ? 0 : deliveryQuote.fee || 0;
-  const total = hireTotal + insuranceTotal + pricedDelivery;
+  // A discount code (issued by staff) comes off the hire charge only; the server checks it again when booking.
+  const codeOff = codeApplied ? Math.min(codeApplied.amount, hireTotal) : 0;
+  const total = hireTotal + insuranceTotal + pricedDelivery - codeOff;
 
   function bookingInput(acceptTerms: boolean): Partial<BookingInput> {
     return {
@@ -284,7 +291,36 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       oohNote,
       mpesaCode: deliveryQuote.manual ? "" : mpesaCode,
       terms: acceptTerms,
+      discountCode: codeApplied ? codeApplied.code : "",
     };
+  }
+
+  // The code's discount depends on the vehicle and dates, so it is checked again when they change.
+  useEffect(() => {
+    setCodeApplied(null);
+    setCodeError("");
+  }, [selectedId, pickup, returnOn]);
+
+  async function applyCode() {
+    const code = codeInput.trim();
+    setCodeError("");
+    if (!code) return setCodeError("Enter your discount code.");
+    setCodeBusy(true);
+    try {
+      const response = await fetch("/api/hire/discount", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, modelId: selectedId, pickup, returnOn }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "That discount code couldn't be checked.");
+      setCodeApplied(body);
+    } catch (error) {
+      setCodeApplied(null);
+      setCodeError(error instanceof Error ? error.message : "That discount code couldn't be checked.");
+    } finally {
+      setCodeBusy(false);
+    }
   }
 
   const selectedLimit = selected ? damageLimitFor(selected.name, selected.category) : null;
@@ -309,6 +345,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
         "Hire " + ksh(hireTotal) +
         (insuranceTotal ? " + collision damage waiver " + ksh(insuranceTotal) : "") +
         (deliveryQuote.manual ? " + delivery (to be quoted)" : pricedDelivery ? " + delivery " + ksh(pricedDelivery) : "") +
+        (codeOff ? " − discount " + ksh(codeOff) + " (code " + (codeApplied?.code || "") + ")" : "") +
         " = " + ksh(total) + " (VAT included)",
       damageLimit: selectedLimit,
       category: selected?.category,
@@ -419,6 +456,8 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       setStep(1);
       setTerms(false);
       setMpesaCode("");
+      setCodeInput("");
+      setCodeApplied(null);
       setRefreshToken((value) => value + 1);
       scrollToId("checkout");
     } catch (error) {
@@ -455,6 +494,9 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
         sub: !booking.manual ? deliveryQuote.breakdown : "",
         amount: booking.manual ? "Quoted before you pay" : booking.deliveryFee ? ksh(booking.deliveryFee) : "Free",
       });
+    }
+    if (booking.discount) {
+      costs.push({ label: "Discount", sub: codeApplied ? "Code " + codeApplied.code : "", qty: "1", amount: "- " + ksh(booking.discount) });
     }
     return {
       reference: booking.reference,
@@ -1497,11 +1539,68 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                         <span>{ksh(insuranceTotal)}</span>
                       </div>
                     )}
+                    {codeOff > 0 && codeApplied && (
+                      <div className="text-[#0d5a2a]">
+                        <div className="flex justify-between gap-2">
+                          <span>Discount ({codeApplied.code})</span>
+                          <span className="whitespace-nowrap">− {ksh(codeOff)}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCodeApplied(null);
+                            setCodeInput("");
+                          }}
+                          className="-mt-1 block text-[12px] font-semibold text-[#595959] underline"
+                        >
+                          Remove code
+                        </button>
+                      </div>
+                    )}
                     <div className="flex justify-between gap-2 font-bold">
                       <span>{manual ? "Hire so far" : "Due in full"}</span>
                       <span>{ksh(total)}</span>
                     </div>
                     <div className="text-[13px] text-[#595959]">Nothing is taken on this page.</div>
+                    {!codeApplied && (
+                      <form
+                        className="mt-2.5 border-t border-[#e5e5e5] pt-2.5"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          applyCode();
+                        }}
+                      >
+                        <label htmlFor="discountCode" className="mb-1 block text-[13px] text-[#595959]">
+                          Have a discount code?
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            id="discountCode"
+                            value={codeInput}
+                            onChange={(e) => {
+                              setCodeInput(e.target.value.toUpperCase());
+                              setCodeError("");
+                            }}
+                            autoComplete="off"
+                            placeholder="Enter code"
+                            className="h-10 min-w-0 flex-1 rounded-lg border border-[#c8c8c8] bg-white px-3 text-sm uppercase text-[#171717]"
+                          />
+                          <button
+                            type="submit"
+                            disabled={codeBusy}
+                            className="h-10 flex-none rounded-lg bg-[#171717] px-4 text-[13px] font-bold uppercase tracking-[1px] text-white disabled:opacity-50"
+                          >
+                            {codeBusy ? "Checking…" : "Apply"}
+                          </button>
+                        </div>
+                        {codeError && (
+                          <p role="alert" className="mt-1.5 text-[13px] font-bold text-[#a50e0e]">
+                            {codeError}
+                          </p>
+                        )}
+                      </form>
+                    )}
+                    {codeApplied && <div className="text-[13px] text-[#0d5a2a]">Code {codeApplied.code}: {codeApplied.label}</div>}
                   </div>
                 </aside>
               </div>

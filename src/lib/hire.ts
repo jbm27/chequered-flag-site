@@ -102,6 +102,7 @@ export type BookingInput = {
   oohNote: string;
   mpesaCode: string;
   terms: boolean;
+  discountCode?: string; // a code issued by staff, typed in at checkout (website bookings only)
 };
 
 export type DeliveryAssessment = {
@@ -623,6 +624,7 @@ export type PublicBookingResult = {
   insuranceTotal: number;
   deliveryFee: number | null;
   total: number;
+  discount?: number; // KSh taken off by a discount code
   email: string;
   phone: string;
   message: string;

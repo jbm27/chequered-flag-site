@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { mpesaCodeHint } from "../lib/payments";
+import DeskDrivers, { driversPayload, driversProblem, type DriverRow } from "./DeskDrivers";
 import {
   dayNumber,
   exclusiveEnd,
@@ -42,10 +43,12 @@ function plural(n: number, word: string) {
 
 // Notes added by the desk end with "Edited by … on …." or start with "Added on the desk by …";
 // those stamps are added again by the server, so they are not shown in the box.
+// The note staff can edit: without the "Added on the desk by …" line (kept by the server) and the
+// "Edited by … on …" stamps. Usernames can contain dots (homer.johnstone), so they're matched in full.
 function editableNote(note: string) {
   return note
-    .replace(/\s*·?\s*Edited by [^.]+ on \d{4}-\d{2}-\d{2}\.\s*$/g, "")
-    .replace(/^Added on the desk by [^.]+\.\s*/, "")
+    .replace(/(\s*·?\s*Edited by [a-z0-9._-]+ on \d{4}-\d{2}-\d{2}\.)+\s*$/gi, "")
+    .replace(/^Added on the desk by [a-z0-9._-]+?\.(\s|$)\s*/i, "")
     .trim();
 }
 
@@ -123,8 +126,16 @@ export default function DeskEditBooking({
   const unpricedDelivery = booking.deliveryManual || (delivered && booking.deliveryFee === null);
   const balance = Math.max(0, total - paidAmount);
 
+  // Drivers and licences: only sent when changed here.
+  const [drivers, setDrivers] = useState<DriverRow[] | null>(null);
+  const [driversTouched, setDriversTouched] = useState(false);
+
   async function save() {
     setError("");
+    if (driversTouched && drivers) {
+      const problem = driversProblem(drivers);
+      if (problem) return setError(problem);
+    }
     if (paidText && !/^\d+$/.test(paidText)) return setError("Enter the amount paid so far as a whole number of shillings.");
     if (!unpricedDelivery && paidAmount > total) {
       return setError("The amount paid so far cannot be more than the total of " + ksh(total) + ".");
@@ -134,6 +145,16 @@ export default function DeskEditBooking({
     if (holdsVehicle && freeCount === 0) return setError("No " + model.name + " is free for those dates.");
     setSaving(true);
     try {
+      if (driversTouched && drivers) {
+        const saved = await fetch("/api/hire/staff/bookings/drivers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: booking.id, drivers: driversPayload(drivers) }),
+        });
+        const savedBody = await saved.json();
+        if (!saved.ok) throw new Error(savedBody.error || "The drivers could not be saved.");
+        setDriversTouched(false);
+      }
       const response = await fetch("/api/hire/staff/bookings/edit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -311,6 +332,17 @@ export default function DeskEditBooking({
           <input type="checkbox" checked={insure} onChange={(e) => setInsure(e.target.checked)} className="h-5 w-5" />
           Collision damage waiver ({ksh(model.addon)}/day)
         </label>
+      )}
+
+      {booking.status !== "cancelled" && (
+        <DeskDrivers
+          booking={booking}
+          rows={drivers}
+          onChange={(rows, touched) => {
+            setDrivers(rows);
+            if (touched) setDriversTouched(true);
+          }}
+        />
       )}
 
       <div className="mt-3.5 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[#f5f5f3] px-4 py-3 text-sm">

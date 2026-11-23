@@ -21,7 +21,8 @@ export type BookingPdfData = {
   customer: { name: string; phone: string; email: string };
   // licenceNote replaces the photo when the licence is on file and the photo is not available (customer's copy).
   drivers: { name: string; phone: string; licence?: DocImage; licenceNote?: string }[];
-  signature: { kind: "drawn" | "typed"; name: string; image?: DocImage };
+  // kind "none": a desk booking with no agreement signed online (it is signed at handover).
+  signature: { kind: "drawn" | "typed" | "none"; name: string; image?: DocImage };
   signedAt: string;
   agreementTitle: string;
   agreementVersion: string;
@@ -369,14 +370,19 @@ export function buildBookingPdf(data: BookingPdfData): Uint8Array {
 
   heading("Drivers");
   data.drivers.forEach((driver, index) => {
-    row(index === 0 ? "Main driver" : "Driver " + (index + 1), driver.name + " · " + driver.phone, index === 0);
+    row(index === 0 ? "Main driver" : "Driver " + (index + 1), driver.name + (driver.phone ? " · " + driver.phone : ""), index === 0);
     if (driver.licenceNote) row("", driver.licenceNote);
   });
 
-  heading("Signed hire agreement");
+  const unsigned = data.signature.kind === "none";
+  heading(unsigned ? "Hire agreement" : "Signed hire agreement");
   row("Agreement", data.agreementTitle + " (version " + data.agreementVersion + ")");
-  row("Signed by", data.signature.name + (data.signature.kind === "typed" ? " (typed name)" : " (drawn signature)"));
-  row("Signed at", data.signedAt);
+  if (unsigned) {
+    row("Signature", "Not signed online: booked on the desk. To be signed at handover.");
+  } else {
+    row("Signed by", data.signature.name + (data.signature.kind === "typed" ? " (typed name)" : " (drawn signature)"));
+    row("Signed at", data.signedAt);
+  }
   if (data.signature.kind === "drawn" && data.signature.image) {
     gap(4);
     image(data.signature.image, 220, 90);
@@ -395,14 +401,24 @@ export function buildBookingPdf(data: BookingPdfData): Uint8Array {
       y -= 14 * 1.45;
       text(part, MARGIN, 14, true);
     }
-    for (const part of wrap("Version " + data.agreementVersion + " · signed by " + data.signature.name + " on " + data.signedAt, 9, textW, false)) {
+    const versionLine = unsigned
+      ? "Version " + data.agreementVersion + " · to be signed at handover"
+      : "Version " + data.agreementVersion + " · signed by " + data.signature.name + " on " + data.signedAt;
+    for (const part of wrap(versionLine, 9, textW, false)) {
       y -= 9 * 1.45;
       text(part, MARGIN, 9, false, true);
     }
     y = Math.min(y, agreementTop - lh + 2);
   } else {
     para(data.agreementTitle, 14, true);
-    para("Version " + data.agreementVersion + " · signed by " + data.signature.name + " on " + data.signedAt, 9, false, true);
+    para(
+      unsigned
+        ? "Version " + data.agreementVersion + " · to be signed at handover"
+        : "Version " + data.agreementVersion + " · signed by " + data.signature.name + " on " + data.signedAt,
+      9,
+      false,
+      true,
+    );
   }
   rule();
   for (const paragraph of data.agreementText) {
@@ -443,7 +459,7 @@ export function buildBookingPdf(data: BookingPdfData): Uint8Array {
     if (!driver.licence) return; // a licence on file without its photo is noted on page 1 instead
     newPage();
     para((index === 0 ? "Main driver" : "Driver " + (index + 1)) + ": driving licence (front)", 14, true);
-    para(driver.name + " · " + driver.phone, 10, false, true);
+    para(driver.name + (driver.phone ? " · " + driver.phone : ""), 10, false, true);
     if (driver.licenceNote) para(driver.licenceNote, 10);
     rule();
     gap(6);

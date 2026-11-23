@@ -3,10 +3,13 @@ import { Pool, type PoolClient } from "pg";
 import { FLEET, SALOON_MAKES, SALOON_MODEL, fleetModels, modelById, vehicleById } from "./fleet";
 import {
   LICENCE_ON_FILE_MONTHS,
+  MAX_DRIVERS,
+  cleanImage,
   bookingSchedule,
   damageLimitFor,
   mileageFor,
   type BookingDocuments,
+  type DriverDoc,
   type LicenceOnFile,
   type StoredDocuments,
 } from "./documents";
@@ -1053,7 +1056,11 @@ export async function editBooking(id: string, raw: Partial<BookingEdit>, editedB
       }
     }
     const stamp = "Edited by " + editedBy + " on " + today + ".";
-    const staffNote = (note ? note + " · " + stamp : stamp).slice(0, 500);
+    // Keep the "Added on the desk by …" line at the front (the bell and booking source rely on it).
+    const added = /^Added on the desk by [a-z0-9._-]+?\.(\s|$)/i.exec(row.staff_note || "");
+    const prefix = added ? added[0].trim() + " " : "";
+    const body = note.replace(/^Added on the desk by [a-z0-9._-]+?\.(\s|$)\s*/i, "");
+    const staffNote = (prefix + (body ? body + " · " + stamp : stamp)).slice(0, 500);
 
     await client.query(
       `UPDATE bookings
@@ -1261,7 +1268,7 @@ export async function bookingNotices(username: string) {
   );
   const notices: NewBookingNotice[] = result.rows.map((row) => {
     const createdAt = new Date(String(row.created_at));
-    const desk = /^Added on the desk by ([^.]+)/.exec(String(row.staff_note || ""));
+    const desk = /^Added on the desk by ([a-z0-9._-]+?)\.(\s|$)/i.exec(String(row.staff_note || ""));
     return {
       id: String(row.id),
       reference: String(row.reference),
@@ -1949,6 +1956,66 @@ export async function updateVehicleRecord(id: string, raw: { year?: unknown; km?
 }
 
 // Staff only: the licence photos, drivers and signature saved with a booking.
+// Staff add or change drivers and licence photos on the desk ("Drivers and licences" in Edit).
+// raw.drivers: up to MAX_DRIVERS of { name, phone, photo?: DocImage, keep?: index of a driver already saved
+// whose photo stays }. Every driver needs a photo. drivers[0] is the main driver. A booking with no documents
+// yet (made on the desk) gets a record marked "not signed online".
+export async function saveDeskDrivers(id: string, raw: { drivers?: unknown }, by: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw staffError("That booking was not found.", 404);
+  const list = Array.isArray(raw.drivers) ? raw.drivers : [];
+  if (!list.length) throw staffError("Keep at least the main driver.", 400);
+  if (list.length > MAX_DRIVERS) throw staffError("A booking can have up to " + MAX_DRIVERS + " drivers.", 400);
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const booking = await client.query<{ status: string; reference: string }>(
+      `SELECT status, reference FROM bookings WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    if (!booking.rows[0]) throw staffError("That booking was not found.", 404);
+    if (booking.rows[0].status === "cancelled") throw staffError("Closed bookings can't be changed.", 409);
+    const existing = await client.query<{ drivers: DriverDoc[] }>(`SELECT drivers FROM booking_documents WHERE booking_id = $1`, [id]);
+    const saved: DriverDoc[] = existing.rows[0]?.drivers || [];
+    const now = new Date().toISOString();
+    const drivers: DriverDoc[] = list.map((item, index) => {
+      const entry = (item || {}) as { name?: unknown; phone?: unknown; photo?: unknown; keep?: unknown };
+      const label = index === 0 ? "the main driver" : "driver " + (index + 1);
+      const name = String(entry.name ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+      const phone = String(entry.phone ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+      if (name.length < 2) throw staffError("Enter the name of " + label + ".", 400);
+      if (phone && phone.replace(/\D/g, "").length < 9) throw staffError("Enter a mobile number with at least 9 digits for " + label + ", or leave it blank.", 400);
+      if (entry.photo) {
+        const image = cleanImage(entry.photo, label + "'s licence");
+        if (typeof image === "string") throw staffError(image, 400);
+        return { name, phone, licence: image, addedBy: by.slice(0, 60), addedAt: now };
+      }
+      const keep = Number(entry.keep);
+      const old = Number.isInteger(keep) ? saved[keep] : undefined;
+      if (!old) throw staffError("Add a licence photo for " + label + ".", 400);
+      return { ...old, name, phone };
+    });
+    if (existing.rows[0]) {
+      await client.query(`UPDATE booking_documents SET drivers = $2::jsonb WHERE booking_id = $1`, [id, JSON.stringify(drivers)]);
+    } else {
+      await client.query(
+        `INSERT INTO booking_documents (booking_id, drivers, signature, agreement_version, schedule)
+         VALUES ($1, $2::jsonb, $3::jsonb, '', NULL)`,
+        [id, JSON.stringify(drivers), JSON.stringify({ kind: "none", name: by.slice(0, 60) })],
+      );
+    }
+    await client.query("COMMIT");
+    return { ok: true, reference: booking.rows[0].reference, drivers: drivers.length };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function loadDocuments(id: string): Promise<StoredDocuments | null> {
   await ensureReady();
   const db = pool();

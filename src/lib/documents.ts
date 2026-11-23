@@ -189,16 +189,28 @@ export function bookingSchedule(v: ScheduleValues): [string, string][] {
 export type DocImage = { data: string; w: number; h: number }; // JPEG data URL and its size in pixels
 
 // fromFile: the main driver's licence was reused from one kept on file (staff check it at handover).
-export type DriverDoc = { name: string; phone: string; licence: DocImage; fromFile?: boolean; onFileSince?: string };
+// addedBy/addedAt: the licence or driver was added on the desk by staff (for example for a phone booking).
+export type DriverDoc = {
+  name: string;
+  phone: string;
+  licence: DocImage;
+  fromFile?: boolean;
+  onFileSince?: string;
+  addedBy?: string;
+  addedAt?: string;
+};
 
 // A returning customer can reuse their licence for this long after it was uploaded.
 export const LICENCE_ON_FILE_MONTHS = 12;
 
 export type LicenceOnFile = { licence: DocImage; savedAt: string; reference: string };
 
+// kind "none": no agreement was signed online (a booking made on the desk); name is the staff member who
+// added the licences.
 export type SignatureDoc =
   | { kind: "drawn"; name: string; image: DocImage }
-  | { kind: "typed"; name: string };
+  | { kind: "typed"; name: string }
+  | { kind: "none"; name: string };
 
 export type BookingDocuments = {
   drivers: DriverDoc[]; // drivers[0] is the main driver (the person booking)
@@ -214,7 +226,7 @@ function cleanText(value: unknown, max: number) {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
-function cleanImage(value: unknown, what: string): DocImage | string {
+export function cleanImage(value: unknown, what: string): DocImage | string {
   const raw = (value || {}) as Partial<DocImage>;
   const data = String(raw.data || "");
   const prefix = "data:image/jpeg;base64,";

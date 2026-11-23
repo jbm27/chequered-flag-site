@@ -523,15 +523,22 @@ export async function previewDiscountCode(raw: { code?: unknown; modelId?: unkno
   return { code, amount: result.amount, label: result.label };
 }
 
+// The active codes: made, not removed and not used yet. A used code drops off the list.
 export async function listDiscountCodes(): Promise<DiscountCode[]> {
   await ensureReady();
   const db = pool();
   if (!db) throw new Error("DATABASE_URL is not set");
-  const result = await db.query(`SELECT * FROM discount_codes ORDER BY active DESC, created_at DESC LIMIT 200`);
+  const result = await db.query(
+    `SELECT * FROM discount_codes
+     WHERE active = true AND (max_uses IS NULL OR uses < max_uses)
+       AND (expires_on IS NULL OR expires_on >= (now() AT TIME ZONE 'Africa/Nairobi')::date)
+     ORDER BY created_at DESC LIMIT 200`,
+  );
   return result.rows.map(discountCodeRow);
 }
 
-// Staff create a code on the desk. raw: { code, kind, value, note, maxUses, expiresOn }.
+// Homer or James make a code on the desk. raw: { code, kind, value, note }. Every code works once (Homer, Nov 2026):
+// after one booking uses it, it can't be used again. expiresOn is optional and not offered on the desk for now.
 export async function createDiscountCode(
   raw: { code?: unknown; kind?: unknown; value?: unknown; note?: unknown; maxUses?: unknown; expiresOn?: unknown },
   by: string,
@@ -546,9 +553,7 @@ export async function createDiscountCode(
   if (!value || value <= 0) throw staffError(kind === "percent" ? "Enter the percentage off, for example 10." : "Enter the KSh off, for example 2000.", 400);
   if (kind === "percent" && value > 100) throw staffError("A percentage can't be more than 100.", 400);
   const note = String(raw.note ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
-  const maxText = String(raw.maxUses ?? "").trim();
-  const maxUses = maxText === "" ? null : wholeShillings(maxText);
-  if (maxText !== "" && (!maxUses || maxUses < 1)) throw staffError("Enter how many times the code can be used, or leave it blank for no limit.", 400);
+  const maxUses = 1;
   const expiresOn = String(raw.expiresOn ?? "").trim();
   if (expiresOn && dayNumber(expiresOn) === null) throw staffError("Choose a valid expiry date, or leave it blank.", 400);
   if (expiresOn && expiresOn < todayNairobi()) throw staffError("The expiry date is in the past.", 400);

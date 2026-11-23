@@ -4,15 +4,11 @@ import { useEffect, useState } from "react";
 import { ksh } from "../lib/hire";
 import type { DiscountCode } from "../lib/db";
 
-// "Discount codes" on the desk: staff make a code to give a customer (a percentage or KSh off the hire charge),
-// optionally limited to a number of uses or an expiry date. The customer types it in at checkout on the hire
-// page. Turning a code off stops it working at once. Bookings that used a code show it in their Discount row.
+// "Discount codes" on the desk, for Homer and James only (lib/access.ts; the server checks too).
+// Write a code, choose % or KSh off the hire charge, and share it with the customer, who types it in at checkout.
+// Every code works once: as soon as a booking uses it, it can't be used again and it drops off the list below.
 
-const input = "h-10 w-full min-w-0 rounded-lg border border-[#c8c8c8] bg-white px-3 text-sm text-[#171717]";
-
-function day(value: string) {
-  return value ? new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" }).format(new Date(value + "T00:00:00Z")) : "";
-}
+const input = "h-10 min-w-0 rounded-lg border border-[#c8c8c8] bg-white px-3 text-sm text-[#171717]";
 
 export default function DeskDiscountCodes() {
   const [codes, setCodes] = useState<DiscountCode[] | null>(null);
@@ -22,9 +18,6 @@ export default function DeskDiscountCodes() {
   const [code, setCode] = useState("");
   const [kind, setKind] = useState<"percent" | "amount">("percent");
   const [value, setValue] = useState("");
-  const [note, setNote] = useState("");
-  const [maxUses, setMaxUses] = useState("1");
-  const [expiresOn, setExpiresOn] = useState("");
 
   async function load() {
     try {
@@ -64,30 +57,34 @@ export default function DeskDiscountCodes() {
   }
 
   async function create() {
-    const saved = await post({ code, kind, value, note, maxUses, expiresOn });
+    const saved = await post({ code, kind, value });
     if (saved) {
-      setNotice("Code " + saved.code + " is ready. Give it to the customer to type in at checkout.");
+      setNotice("Code " + saved.code + " is ready to share. It works once.");
       setCode("");
       setValue("");
-      setNote("");
-      setMaxUses("1");
-      setExpiresOn("");
     }
   }
 
   return (
     <div>
-      <div className="rounded-[10px] border border-[#e5e5e5] bg-[#fafaf8] p-4">
-        <strong className="block text-[15px]">Make a discount code</strong>
-        <p className="mt-0.5 text-[13px] text-[#595959]">
-          The customer types the code in at checkout on the hire page. It comes off the hire charge (not the damage waiver
-          or delivery).
-        </p>
-        <div role="group" aria-label="Discount as" className="mt-2.5 flex gap-1.5">
+      <form
+        className="flex flex-wrap items-end gap-2.5 rounded-[10px] border border-[#e5e5e5] bg-[#fafaf8] p-3.5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          create();
+        }}
+      >
+        <div className="min-w-[160px] flex-[2_1_180px]">
+          <label htmlFor="dcCode" className="mb-1 block text-[13px] text-[#595959]">
+            Code
+          </label>
+          <input id="dcCode" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="e.g. JAMES10" className={input + " w-full uppercase"} />
+        </div>
+        <div role="group" aria-label="Discount as" className="flex gap-1">
           {(
             [
-              { id: "percent", label: "Percentage" },
-              { id: "amount", label: "KSh amount" },
+              { id: "percent", label: "%" },
+              { id: "amount", label: "KSh" },
             ] as const
           ).map((item) => (
             <button
@@ -96,7 +93,7 @@ export default function DeskDiscountCodes() {
               aria-pressed={kind === item.id}
               onClick={() => setKind(item.id)}
               className={
-                "min-h-[34px] rounded-full border px-3 text-[13px] font-semibold " +
+                "h-10 min-w-[48px] rounded-lg border px-3 text-[13px] font-bold " +
                 (kind === item.id ? "border-[#171717] bg-[#171717] text-white" : "border-[#c8c8c8] bg-white text-[#171717]")
               }
             >
@@ -104,109 +101,58 @@ export default function DeskDiscountCodes() {
             </button>
           ))}
         </div>
-        <div className="mt-2.5 grid gap-2.5 [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
-          <div>
-            <label htmlFor="dcCode" className="mb-1 block text-[13px] text-[#595959]">
-              Code
-            </label>
-            <input id="dcCode" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="e.g. JAMES10" className={input + " uppercase"} />
-          </div>
-          <div>
-            <label htmlFor="dcValue" className="mb-1 block text-[13px] text-[#595959]">
-              {kind === "percent" ? "Percent off" : "KSh off"}
-            </label>
-            <input id="dcValue" inputMode="numeric" value={value} onChange={(e) => setValue(e.target.value)} placeholder={kind === "percent" ? "e.g. 10" : "e.g. 2000"} className={input} />
-          </div>
-          <div>
-            <label htmlFor="dcUses" className="mb-1 block text-[13px] text-[#595959]">
-              Times it can be used (blank = no limit)
-            </label>
-            <input id="dcUses" inputMode="numeric" value={maxUses} onChange={(e) => setMaxUses(e.target.value)} className={input} />
-          </div>
-          <div>
-            <label htmlFor="dcExpiry" className="mb-1 block text-[13px] text-[#595959]">
-              Last day it works (optional)
-            </label>
-            <input id="dcExpiry" type="date" value={expiresOn} onChange={(e) => setExpiresOn(e.target.value)} className={input} />
-          </div>
-          <div>
-            <label htmlFor="dcNote" className="mb-1 block text-[13px] text-[#595959]">
-              Note (who it's for, optional)
-            </label>
-            <input id="dcNote" value={note} maxLength={120} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Returning customer" className={input} />
-          </div>
+        <div className="w-[130px]">
+          <label htmlFor="dcValue" className="mb-1 block text-[13px] text-[#595959]">
+            {kind === "percent" ? "Percent off" : "KSh off"}
+          </label>
+          <input id="dcValue" inputMode="numeric" value={value} onChange={(e) => setValue(e.target.value)} placeholder={kind === "percent" ? "10" : "2000"} className={input + " w-full"} />
         </div>
-        {error && (
-          <p role="alert" className="mt-2 text-sm font-bold text-[#a50e0e]">
-            {error}
-          </p>
-        )}
-        {notice && (
-          <p role="status" className="mt-2 text-sm font-bold text-[#0d5a2a]">
-            {notice}
-          </p>
-        )}
-        <button
-          type="button"
-          disabled={busy}
-          onClick={create}
-          className="mt-3 inline-flex min-h-[38px] items-center rounded-lg bg-[#171717] px-4 text-[13px] font-bold text-white disabled:opacity-50"
-        >
-          {busy ? "Saving…" : "Make code"}
+        <button type="submit" disabled={busy} className="h-10 rounded-lg bg-[#171717] px-4 text-[13px] font-bold text-white disabled:opacity-50">
+          {busy ? "Saving…" : "Create code"}
         </button>
-      </div>
+      </form>
+      <p className="mt-1.5 text-[13px] text-[#595959]">
+        Comes off the hire charge (not the damage waiver or delivery). Each code works once, then it disappears from the list.
+      </p>
+      {error && (
+        <p role="alert" className="mt-2 text-sm font-bold text-[#a50e0e]">
+          {error}
+        </p>
+      )}
+      {notice && (
+        <p role="status" className="mt-2 text-sm font-bold text-[#0d5a2a]">
+          {notice}
+        </p>
+      )}
 
-      <div className="mt-4">
-        {!codes && !error && <p className="text-sm text-[#595959]">Loading codes…</p>}
-        {codes && codes.length === 0 && <p className="text-sm text-[#595959]">No discount codes yet.</p>}
+      <div className="mt-3.5">
+        <strong className="block text-sm">Active codes</strong>
+        {!codes && !error && <p className="mt-1 text-sm text-[#595959]">Loading codes…</p>}
+        {codes && codes.length === 0 && <p className="mt-1 text-sm text-[#595959]">No active codes. Used codes drop off this list.</p>}
         {codes && codes.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] border-collapse text-left text-sm">
-              <thead>
-                <tr className="border-b border-[#e5e5e5] text-[13px] text-[#595959]">
-                  <th className="py-2 pr-3 font-semibold">Code</th>
-                  <th className="py-2 pr-3 font-semibold">Discount</th>
-                  <th className="py-2 pr-3 font-semibold">Used</th>
-                  <th className="py-2 pr-3 font-semibold">Last day</th>
-                  <th className="py-2 pr-3 font-semibold">Note</th>
-                  <th className="py-2 font-semibold">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {codes.map((c) => {
-                  const expired = Boolean(c.expiresOn) && c.expiresOn < new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Nairobi" }).format(new Date());
-                  const usedUp = c.maxUses !== null && c.uses >= c.maxUses;
-                  const status = !c.active ? "Turned off" : expired ? "Expired" : usedUp ? "Used up" : "Working";
-                  return (
-                    <tr key={c.code} className="border-b border-[#f0f0f0] align-top">
-                      <td className="py-2 pr-3 font-bold tracking-[1px]">{c.code}</td>
-                      <td className="py-2 pr-3">{c.kind === "percent" ? c.value + "% off" : ksh(c.value) + " off"}</td>
-                      <td className="py-2 pr-3">
-                        {c.uses}
-                        {c.maxUses !== null ? " of " + c.maxUses : ""}
-                      </td>
-                      <td className="py-2 pr-3">{c.expiresOn ? day(c.expiresOn) : "No expiry"}</td>
-                      <td className="py-2 pr-3 text-[#595959]">
-                        {c.note}
-                        <span className="block text-xs">by {c.createdBy}</span>
-                      </td>
-                      <td className="py-2">
-                        <span className={"font-bold " + (status === "Working" ? "text-[#0d5a2a]" : "text-[#595959]")}>{status}</span>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => post({ code: c.code, active: !c.active })}
-                          className="ml-2 text-[13px] font-semibold underline"
-                        >
-                          {c.active ? "Turn off" : "Turn on"}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <ul className="mt-1.5 grid list-none gap-1.5 p-0">
+            {codes.map((c) => (
+              <li key={c.code} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm">
+                <span>
+                  <strong className="tracking-[1px]">{c.code}</strong>
+                  <span className="text-[#595959]">
+                    {" · "}
+                    {c.kind === "percent" ? c.value + "% off" : ksh(c.value) + " off"} · made by {c.createdBy}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    if (window.confirm("Remove " + c.code + "? It will stop working.")) post({ code: c.code, active: false });
+                  }}
+                  className="text-[13px] font-semibold text-[#a50e0e] underline disabled:opacity-50"
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
     </div>

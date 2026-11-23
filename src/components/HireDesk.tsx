@@ -16,7 +16,7 @@ import DeskDiscountCodes from "./DeskDiscountCodes";
 import { bookingCodes, duplicateCodes, looksLikeMpesaCode, normaliseCode } from "../lib/payments";
 import DeskCustomers, { type LicenceOnFileRow } from "./DeskCustomers";
 import DeskPerformance from "./DeskPerformance";
-import { canSeePerformance, canUseCalendarLink } from "../lib/access";
+import { canManageDiscountCodes, canSeePerformance, canUseCalendarLink } from "../lib/access";
 import DeskDocuments from "./DeskDocuments";
 
 // Staff desk laid out like Homer's fleet dashboard design (V1.5).
@@ -2341,15 +2341,16 @@ export default function HireDesk() {
           </div>
         </section>
 
-        {/* Discount codes */}
-        <section className={card + " mt-[22px] p-[22px]"}>
-          {sectionHead("codes", "Discount codes")}
-          <p className="mb-3.5 mt-1 max-w-[760px] text-sm text-[#595959]">
-            Make a code to give a customer. They type it in at checkout on the hire page, and the booking shows the discount
-            like one given on the desk.
-          </p>
-          {open.codes && <DeskDiscountCodes />}
-        </section>
+        {/* Discount codes: Homer and James only */}
+        {canManageDiscountCodes(signedIn) && (
+          <section className={card + " mt-[22px] p-[22px]"}>
+            {sectionHead("codes", "Discount codes")}
+            <p className="mb-3.5 mt-1 max-w-[760px] text-sm text-[#595959]">
+              Write a code to share with a customer. They type it in at checkout on the hire page. Each code works once.
+            </p>
+            {open.codes && <DeskDiscountCodes />}
+          </section>
+        )}
 
         {/* Customer reviews */}
         <section className={card + " mt-[22px] p-[22px]"}>

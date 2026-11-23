@@ -27,6 +27,7 @@ type FleetRow = {
   id: string;
   model: string;
   plate?: string;
+  make?: string;
   modelId?: string;
   category: "saloon" | "suv" | "4x4";
   rate?: number;
@@ -252,7 +253,7 @@ export default function DeskAddBooking({
           <DeskPlateChoice
             idPrefix="nb"
             label="Number plate (optional)"
-            vehicles={fleet.filter((v) => model.ids.includes(v.id)).map((v) => ({ id: v.id, plate: v.plate || v.id }))}
+            vehicles={fleet.filter((v) => model.ids.includes(v.id)).map((v) => ({ id: v.id, plate: v.plate || v.id, model: v.make }))}
             pickup={pickup}
             returnOn={returnOn}
             holds={holds}

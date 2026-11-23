@@ -586,6 +586,7 @@ export type PublicModelCard = {
   gear: string;
   fuel: string;
   mileage: string;
+  similar?: string; // e.g. "Toyota Axio or similar" for the shared saloon card
   count: number;
   rate: number;
   addon: number;

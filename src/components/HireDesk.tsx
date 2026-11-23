@@ -25,7 +25,8 @@ import DeskDocuments from "./DeskDocuments";
 
 export type DeskVehicle = {
   id: string;
-  model: string;
+  model: string; // the model customers book ("Saloon car" for every saloon)
+  make?: string; // the actual car, for showing with the plate
   plate: string;
   category: "saloon" | "suv" | "4x4";
   modelId?: string;
@@ -579,7 +580,7 @@ export default function HireDesk() {
         const end = num(lastHireDay(booking.pickup, booking.returnOn));
         return start - before <= lastCol && end + after >= first;
       });
-      const hit = matches(calQuery, [vehicle.model, vehicle.plate, ...mine.map((b) => b.customerName + " " + b.reference)]);
+      const hit = matches(calQuery, [vehicle.model, vehicle.make, vehicle.plate, ...mine.map((b) => b.customerName + " " + b.reference)]);
       // Approved overlaps go on a second line in the vehicle's row so both bookings stay visible.
       const lane: Record<string, number> = {};
       const laneEnds: number[] = [];
@@ -703,7 +704,7 @@ export default function HireDesk() {
   const schedule = holds
     .flatMap((booking) => {
       const vehicle = booking.vehicleId ? fleetById[booking.vehicleId] : null;
-      const name = vehicle ? vehicle.plate + " " + vehicle.model : booking.model;
+      const name = vehicle ? vehicle.plate + " " + (vehicle.make || vehicle.model) : booking.model;
       const start = num(booking.pickup);
       const end = num(lastHireDay(booking.pickup, booking.returnOn));
       const items: { name: string; kind: string; s: number; len: number; detail: string }[] = [];
@@ -720,7 +721,7 @@ export default function HireDesk() {
   const vehCards = fleet
     .filter((vehicle) => vehType === "all" || vehicle.category === vehType)
     .filter((vehicle) => !vehFlagOnly || backFromHire.has(vehicle.id))
-    .filter((vehicle) => matches(vehQuery, [vehicle.model, vehicle.plate, vehicle.year ? String(vehicle.year) : ""]))
+    .filter((vehicle) => matches(vehQuery, [vehicle.model, vehicle.make, vehicle.plate, vehicle.year ? String(vehicle.year) : ""]))
     .map((vehicle) => {
       const mine = holds
         .filter((booking) => booking.vehicleId === vehicle.id)
@@ -1012,7 +1013,7 @@ export default function HireDesk() {
                               <strong className="text-sm">{booking.customerName}</strong>
                               <strong>{group.time(booking)}</strong>
                             </span>
-                            <span className="block">{vehicle ? vehicle.plate + " " + vehicle.model : booking.model}</span>
+                            <span className="block">{vehicle ? vehicle.plate + " " + (vehicle.make || vehicle.model) : booking.model}</span>
                             <span className="block text-[#595959]">
                               {booking.phone || "No phone"} · {booking.location} · {ksh(booking.total)}
                             </span>
@@ -1178,7 +1179,7 @@ export default function HireDesk() {
                       style={{ gridTemplateColumns: "200px minmax(0, 1fr)" }}
                     >
                       <div className="flex flex-col justify-center border-r border-[#dadce0] px-2.5 py-1.5 text-sm leading-tight">
-                        <strong>{vehicle.model}</strong>
+                        <strong>{vehicle.make || vehicle.model}</strong>
                         <span className="text-xs text-[#595959]">{vehicle.plate}</span>
                       </div>
                       <div
@@ -1492,7 +1493,11 @@ export default function HireDesk() {
 
                 <DetailBox title="Hire">
                   <Row label="Vehicle">
-                    <strong>{selected.plate ? selected.plate + " " + selected.model : selected.model + " (not assigned yet)"}</strong>
+                    <strong>
+                      {selected.plate
+                        ? selected.plate + " " + (fleet.find((v) => v.id === selected.vehicleId)?.make || selected.model)
+                        : selected.model + " (not assigned yet)"}
+                    </strong>
                     {(selected.overlapApproved || clashesFor(selected.vehicleId || "", selected.pickup, selected.returnOn, holds, selected.id).length > 0) && (
                       <span className="mt-1 block rounded-lg border border-[#f1a9a3] bg-[#fce8e6] px-2 py-1 text-xs text-[#5c0b0b]">
                         <strong>⇄ {selected.overlapApproved ? "Approved overlap" : "Shares this vehicle"}</strong>
@@ -2126,7 +2131,7 @@ export default function HireDesk() {
                   const status: Chip = now
                     ? { label: "On hire now", bg: "#e8f0fe", fg: "#174ea6", bd: "#aecbfa" }
                     : { label: "Free today", bg: "#ceead6", fg: "#0d5a2a", bd: "#81c995" };
-                  const [make, ...rest] = vehicle.model.split(" ");
+                  const [make, ...rest] = (vehicle.make || vehicle.model).split(" ");
                   const back = backFromHire.get(vehicle.id);
                   const backNote = back
                     ? "Back from " +
@@ -2154,7 +2159,7 @@ export default function HireDesk() {
                         className="flex w-full cursor-pointer items-center justify-between gap-3 bg-white px-3.5 py-3 text-left hover:bg-[#fafafa]"
                       >
                         <span className="min-w-0">
-                          <strong className="block">{vehicle.model}</strong>
+                          <strong className="block">{vehicle.make || vehicle.model}</strong>
                           <span className="text-[13px] text-[#595959]">Number plate {vehicle.plate}</span>
                           {back && (
                             <span className="mt-1 block">
@@ -2380,7 +2385,7 @@ function HoverCard({
         <ChipView chip={chipFor(booking, today)} />
       </div>
       <div className="text-[#595959]">
-        {vehicle ? vehicle.plate + " " + vehicle.model : booking.model} · {booking.reference}
+        {vehicle ? vehicle.plate + " " + (vehicle.make || vehicle.model) : booking.model} · {booking.reference}
       </div>
       <div className="mt-1.5">
         <strong>Collection:</strong> {short(booking.pickup)}, {booking.pickTime}

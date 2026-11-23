@@ -35,7 +35,7 @@ export default function DeskAllocate({
   const current = fleet.find((v) => v.id === booking.vehicleId) || fleet.find((v) => v.model === booking.model);
   const vehicles = fleet
     .filter((v) => current && v.category === current.category)
-    .map((v) => ({ id: v.id, plate: v.plate, model: v.model }));
+    .map((v) => ({ id: v.id, plate: v.plate, model: v.make || v.model }));
   const clashes = clashesFor(choice, booking.pickup, booking.returnOn, holds, booking.id);
   // A swap works when exactly one booking is on the chosen plate and it fits on this booking's vehicle.
   const swapOther = clashes.length === 1 && booking.vehicleId ? clashes[0] : null;

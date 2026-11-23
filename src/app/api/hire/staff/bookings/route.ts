@@ -39,6 +39,7 @@ export async function GET() {
     const fleet = FLEET.map((vehicle) => ({
       id: vehicle.id,
       model: vehicle.model,
+      make: vehicle.make, // the actual car, shown with the plate on the desk
       plate: vehicle.plate,
       category: vehicle.category,
       modelId: modelSlug(vehicle.model),

@@ -38,7 +38,7 @@ const KNOW = [
   },
   {
     title: "Mileage",
-    body: "Saloon cars: 100 km a day included, then KSh 15 per extra km. Nissan X-Trail, Toyota Prado and Land Cruiser: unlimited mileage, with no extra km charge.",
+    body: "Every vehicle includes 100 km a day, then KSh 15 per extra km. This applies to saloon cars, the Nissan X-Trail, Toyota Prados and the Land Cruiser.",
   },
   {
     title: "Damage liability limit",
@@ -93,7 +93,7 @@ const FAQ = [
   },
   {
     q: "Is there a mileage limit?",
-    a: "Saloon cars include 100 km a day, then KSh 15 per extra km. The Nissan X-Trail, Toyota Prados and Land Cruiser have unlimited mileage.",
+    a: "Every vehicle includes 100 km a day, then KSh 15 per extra km, whichever vehicle you hire.",
   },
   {
     q: "What is the fuel policy?",

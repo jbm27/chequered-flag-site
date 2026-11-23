@@ -126,8 +126,10 @@ export function damageLimitFor(model: string, category?: string): number | null 
 }
 
 // Mileage, as on the hire page.
+// Every vehicle has the same mileage terms (Homer, Nov 2026; 4x4s were unlimited before).
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function mileageFor(category?: string) {
-  return category === "saloon" ? "100 km a day included, then KSh 15 per extra km" : "Unlimited";
+  return "100 km a day included, then KSh 15 per extra km";
 }
 
 // Cancellation terms (clause 4), shown before payment.

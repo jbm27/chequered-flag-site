@@ -3,7 +3,8 @@
 
 export type FleetVehicle = {
   id: string;
-  model: string;
+  model: string; // the model customers book: every saloon is "Saloon car" (see SALOON_MODEL)
+  make: string; // the actual car, shown on the desk with the plate (for example "Nissan Bluebird")
   plate: string;
   category: "saloon" | "suv" | "4x4";
   seats: number;
@@ -21,12 +22,20 @@ export type FleetModel = {
   gear: string;
   fuel: string;
   mileage: string;
+  similar: string; // shown under the name on the hire page, e.g. "Toyota Axio or similar"
   rate: number;
   addon: number;
   vehicleIds: string[];
 };
 
-export const FLEET: FleetVehicle[] = [
+// All saloons are booked as one model (Homer, Nov 2026): they share the price, and the desk gives the customer
+// any free saloon. The real make stays on each vehicle for the desk.
+export const SALOON_MODEL = "Saloon car";
+
+// Every vehicle: 100 km a day included, then KSh 15 per extra km (Homer, Nov 2026; was unlimited for 4x4s).
+export const MILEAGE_SHORT = "100 km/day, then KSh 15/km";
+
+const FLEET_LIST: Omit<FleetVehicle, "make">[] = [
   { id: "v1", model: "Toyota Axio", plate: "KCF 426V", category: "saloon", seats: 5, rate: 3500, addon: 1500 },
   { id: "v2", model: "Toyota Axio", plate: "KCH 310S", category: "saloon", seats: 5, rate: 3500, addon: 1500 },
   { id: "v3", model: "Toyota Axio", plate: "KCJ 416Z", category: "saloon", seats: 5, rate: 3500, addon: 1500 },
@@ -59,6 +68,15 @@ export const FLEET: FleetVehicle[] = [
   { id: "v33", model: "Toyota Land Cruiser", plate: "KAU 675F", category: "4x4", seats: 5, rate: 18000, addon: 2000 },
 ];
 
+export const FLEET: FleetVehicle[] = FLEET_LIST.map((vehicle) => ({
+  ...vehicle,
+  make: vehicle.model,
+  model: vehicle.category === "saloon" ? SALOON_MODEL : vehicle.model,
+}));
+
+// The makes that are booked as "Saloon car" (older bookings may still name them).
+export const SALOON_MAKES = Array.from(new Set(FLEET_LIST.filter((v) => v.category === "saloon").map((v) => v.model)));
+
 export function modelSlug(model: string) {
   return model
     .toLowerCase()
@@ -84,7 +102,8 @@ function describe(vehicle: FleetVehicle, vehicleIds: string[]): FleetModel {
     seatsText: vehicle.seats + " seats" + seatNote,
     gear: manual ? "Manual" : "Automatic",
     fuel: "Petrol", // every vehicle in the hire fleet runs on petrol (confirmed by Homer)
-    mileage: vehicle.category === "saloon" ? "100 km/day, then KSh 15/km" : "Unlimited mileage",
+    mileage: MILEAGE_SHORT,
+    similar: vehicle.category === "saloon" ? "Toyota Axio or similar" : "",
     rate: vehicle.rate,
     addon: vehicle.addon,
     vehicleIds,

@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { Pool, type PoolClient } from "pg";
-import { FLEET, fleetModels, modelById, vehicleById } from "./fleet";
+import { FLEET, SALOON_MAKES, SALOON_MODEL, fleetModels, modelById, vehicleById } from "./fleet";
 import {
   LICENCE_ON_FILE_MONTHS,
   bookingSchedule,
@@ -248,6 +248,9 @@ async function setup() {
     );
   }
   await db.query(`UPDATE vehicles SET active = false WHERE NOT (id = ANY($1::text[]))`, [FLEET.map((vehicle) => vehicle.id)]);
+  // All saloons are booked as one model now (lib/fleet.ts). Bookings made before name the make (for example
+  // "Toyota Axio"); point them at the shared model so they still match their vehicles when edited or moved.
+  await db.query(`UPDATE bookings SET model_name = $1 WHERE model_name = ANY($2::text[])`, [SALOON_MODEL, SALOON_MAKES]);
 
   // First run only: start each vehicle record from the fleet list. Existing records are never overwritten.
   for (const vehicle of FLEET) {
@@ -367,6 +370,7 @@ export async function loadAvailability(pickup: string, returnOn: string, from: s
       gear: model.gear,
       fuel: model.fuel,
       mileage: model.mileage,
+      similar: model.similar,
       count: model.vehicleIds.length,
       rate: model.rate,
       addon: model.addon,
@@ -1867,7 +1871,7 @@ export async function performanceYear(year: number): Promise<PerformanceYear> {
     vehicles: FLEET.map((vehicle) => ({
       id: vehicle.id,
       plate: vehicle.plate,
-      model: vehicle.model,
+      model: vehicle.make,
       category: vehicle.category,
       km: records[vehicle.id]?.km ?? null,
     })),

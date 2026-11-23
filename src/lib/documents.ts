@@ -24,7 +24,8 @@ export const MAX_IMAGE_SIDE = 4000;
 // -d adds clause 7.7, the optional collision damage waiver, and shows the waiver and this vehicle's limit in the Booking Schedule (Homer).
 // -e (Homer, 23 Nov 2026): off-road motorsport prohibited (6.4), no saloon cars or X-Trail in game parks (6.5),
 // undercarriage damage paid in full (7.8, out of 7.1 and the waiver), no 59-minute late-return grace (3.2), and
-// fuel made explicit (10.1): less fuel is charged, extra fuel is at the hirer's cost with no refund or credit.
+// fuel made explicit (10.1): less fuel is charged, extra fuel is at the hirer's cost with no refund or credit,
+// and a police abstract is required after any accident, theft or vandalism (9.4).
 export const AGREEMENT_VERSION = "online-hire-agreement-2026-11-revised-e";
 export const AGREEMENT_TITLE = "Self-drive vehicle hire agreement";
 export const AGREEMENT_TEXT: string[] = [
@@ -80,9 +81,10 @@ export const AGREEMENT_TEXT: string[] = [
   "8.4 If a Company-attributable fault makes the car unusable and no suitable replacement is supplied within a reasonable period, the Hirer is entitled to a pro-rata refund for the unusable rental period, including the remaining booking period if the hire must end. The Company is not liable for indirect or consequential losses such as missed flights, accommodation or lost earnings, except to the extent such liability cannot lawfully be excluded or the loss results from proven negligence or misconduct for which exclusion would be unlawful.",
   "8.5 The parties shall preserve relevant evidence (photographs, incident details, diagnostic findings and repair records). The Company will not assume driver fault solely because the defect arose during the hire.",
   "# 9. Accidents, theft and incident reporting",
-  "9.1 For any accident, theft, vandalism or serious damage, the Hirer must first attend to personal safety and seek emergency help. The Hirer must notify the Company as soon as reasonably practicable, report to police where required, take reasonable photographs and obtain third-party details where safe and lawful.",
+  "9.1 For any accident, theft, vandalism or serious damage, the Hirer must first attend to personal safety and seek emergency help. The Hirer must notify the Company as soon as reasonably practicable, report it to the police and obtain a police abstract (clause 9.4), take reasonable photographs and obtain third-party details where safe and lawful.",
   "9.2 The Hirer shall cooperate reasonably with insurers, police and the Company, provide truthful information, and shall not admit legal liability or settle a claim on the Company’s behalf without authorisation. This does not prevent accurate factual statements or necessary emergency action.",
   "9.3 The Hirer must take reasonable steps to safeguard the vehicle and keys and minimise further loss. Costs and liabilities remain subject to clause 7 where they concern damage to the hired vehicle.",
+  "9.4 POLICE ABSTRACT. After any accident, theft or vandalism involving the vehicle, the Hirer must report it at the nearest police station as soon as reasonably practicable, obtain a police abstract, and give the Company a copy (a photo of it is enough at first, with the original handed over when the vehicle is returned). The Company's insurer needs the police abstract to handle any claim.",
   "# 10. Fuel, mileage, accessories and return",
   "10.1 The fuel level and odometer reading at collection shall be recorded in the handover record. The Hirer shall return the vehicle with at least the fuel level recorded at collection. IF THE FUEL LEVEL IS LOWER ON RETURN, the Company shall charge the Hirer for the shortfall at the disclosed refuelling rate, supported by the collection and return records. IF THE FUEL LEVEL IS HIGHER ON RETURN, the extra fuel is at the Hirer's own cost: no refund, credit or payment is given for it.",
   "10.2 Mileage limits and excess rates, if any, must appear in the Booking Schedule. Unexplained odometer anomalies shall be investigated using reliable evidence; no arbitrary mileage penalty applies merely because a device fails.",
@@ -187,6 +189,7 @@ export function bookingSchedule(v: ScheduleValues): [string, string][] {
         : "Not taken. Damage is charged up to the damage liability limit (clauses 7.1 and 7.2)",
     ],
     ["Undercarriage damage", "Paid in full: not limited by the damage liability limit or covered by the waiver (clause 7.8)"],
+    ["Accident, theft or vandalism", "Report it to the police, obtain a police abstract and give us a copy (clause 9.4)"],
     ["Off-road motorsport", "Prohibited, including rallies such as the Rhino Charge (clause 6.4)"],
     ...(v.category === "saloon" || v.category === "suv"
       ? ([["Game parks", "Not allowed: this vehicle must not be taken into national parks, game parks or game reserves (clause 6.5)"]] as [string, string][])

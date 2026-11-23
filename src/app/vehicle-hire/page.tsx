@@ -121,7 +121,11 @@ const FAQ = [
   },
   {
     q: "What happens if the vehicle breaks down or I have an accident?",
-    a: "Stop safely and call us straight away on " + CONTACT.phoneDisplay + ". For an accident or theft, report it to the police where required and take photos if it is safe. Please don't arrange repairs or recovery yourself unless it's an emergency. If the fault is mechanical and not caused by you, we pay for recovery and repairs and try to give you a replacement at no extra cost; if we can't, you get a refund for the days you couldn't use the vehicle.",
+    a: "Stop safely and call us straight away on " + CONTACT.phoneDisplay + ". For an accident or theft, report it at the nearest police station, get a police abstract and send us a copy, and take photos if it is safe. Please don't arrange repairs or recovery yourself unless it's an emergency. If the fault is mechanical and not caused by you, we pay for recovery and repairs and try to give you a replacement at no extra cost; if we can't, you get a refund for the days you couldn't use the vehicle.",
+  },
+  {
+    q: "Do I need a police abstract after an accident?",
+    a: "Yes. After any accident, theft or vandalism involving the vehicle, you must report it at the nearest police station as soon as you reasonably can and get a police abstract. Send us a photo of it straight away and hand over the original when you return the vehicle. Our insurer needs the police abstract to handle any claim.",
   },
   {
     q: "Who pays traffic fines, parking and tolls?",

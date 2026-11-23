@@ -23,7 +23,8 @@ export const MAX_IMAGE_SIDE = 4000;
 // -c adds clause 1.4: every booking is subject to review and may be cancelled with a full refund (Homer).
 // -d adds clause 7.7, the optional collision damage waiver, and shows the waiver and this vehicle's limit in the Booking Schedule (Homer).
 // -e (Homer, 23 Nov 2026): off-road motorsport prohibited (6.4), no saloon cars or X-Trail in game parks (6.5),
-// undercarriage damage paid in full (7.8, out of 7.1 and the waiver), and no 59-minute late-return grace (3.2).
+// undercarriage damage paid in full (7.8, out of 7.1 and the waiver), no 59-minute late-return grace (3.2), and
+// fuel made explicit (10.1): less fuel is charged, extra fuel is at the hirer's cost with no refund or credit.
 export const AGREEMENT_VERSION = "online-hire-agreement-2026-11-revised-e";
 export const AGREEMENT_TITLE = "Self-drive vehicle hire agreement";
 export const AGREEMENT_TEXT: string[] = [
@@ -83,7 +84,7 @@ export const AGREEMENT_TEXT: string[] = [
   "9.2 The Hirer shall cooperate reasonably with insurers, police and the Company, provide truthful information, and shall not admit legal liability or settle a claim on the Company’s behalf without authorisation. This does not prevent accurate factual statements or necessary emergency action.",
   "9.3 The Hirer must take reasonable steps to safeguard the vehicle and keys and minimise further loss. Costs and liabilities remain subject to clause 7 where they concern damage to the hired vehicle.",
   "# 10. Fuel, mileage, accessories and return",
-  "10.1 The fuel level and odometer reading at collection shall be recorded in the handover record. The Hirer shall return the vehicle with the fuel level specified in the Booking Schedule; evidenced shortfalls may be charged at the disclosed refuelling rate. No credit for extra fuel unless agreed in writing.",
+  "10.1 The fuel level and odometer reading at collection shall be recorded in the handover record. The Hirer shall return the vehicle with at least the fuel level recorded at collection. IF THE FUEL LEVEL IS LOWER ON RETURN, the Company shall charge the Hirer for the shortfall at the disclosed refuelling rate, supported by the collection and return records. IF THE FUEL LEVEL IS HIGHER ON RETURN, the extra fuel is at the Hirer's own cost: no refund, credit or payment is given for it.",
   "10.2 Mileage limits and excess rates, if any, must appear in the Booking Schedule. Unexplained odometer anomalies shall be investigated using reliable evidence; no arbitrary mileage penalty applies merely because a device fails.",
   "10.3 The Hirer shall return supplied keys, tools and accessories listed in the handover report. Reasonable evidenced replacement costs for lost items may be charged, subject to any applicable legal restrictions; damage to accessories arising from an accident is included in the clause 7 cap.",
   "10.4 Return condition, fuel, mileage and accessories shall be documented promptly using timestamped photographs. The Company shall notify the Hirer of any proposed damage charges with supporting evidence within a reasonable period, normally within 5 business days after return, without prejudice to later-discovered concealed damage evidenced as rental-related.",
@@ -141,7 +142,8 @@ export function mileageFor(category?: string) {
 export const CANCELLATION_SUMMARY =
   "Cancel at least 14 days (14 × 24 hours) before collection for a full refund. Cancellations after that, and no-shows, keep 20% of the total booking price as a cancellation fee and refund 80%.";
 
-export const FUEL_POLICY = "Return the vehicle with the fuel level it had at collection. No credit for extra fuel unless agreed in writing.";
+export const FUEL_POLICY =
+  "Return the vehicle with at least the fuel level it had at collection. Less fuel: the shortfall is charged. More fuel: the extra is at your own cost, with no refund or credit (clause 10.1).";
 
 // The values a customer saw and agreed to, kept with the booking (clause 14.1).
 export type ScheduleValues = {

@@ -46,7 +46,7 @@ const KNOW = [
   },
   {
     title: "Fuel",
-    body: "All our hire vehicles run on petrol. Return the vehicle with the fuel level it had at collection, which we record at handover. A shortfall may be charged, and extra fuel is not credited unless agreed in writing.",
+    body: "All our hire vehicles run on petrol. Return the vehicle with at least the fuel level it had at collection, which we record at handover. If it comes back with less fuel, we charge for the shortfall. If it comes back with more, the extra fuel is at your own cost: we don't refund or credit it.",
   },
   {
     title: "Hire days and late returns",
@@ -97,7 +97,7 @@ const FAQ = [
   },
   {
     q: "What is the fuel policy?",
-    a: "All our hire vehicles run on petrol. Return the vehicle with the fuel level it had at collection. A shortfall may be charged at our refuelling rate, and extra fuel is not credited unless agreed in writing.",
+    a: "All our hire vehicles run on petrol. Return the vehicle with at least the fuel level it had at collection; we record it at handover. Less fuel than at collection: we charge for the shortfall at our refuelling rate. More fuel than at collection: the extra fuel is at your own cost, and we don't refund or credit it.",
   },
   {
     q: "Can you deliver the vehicle to me?",

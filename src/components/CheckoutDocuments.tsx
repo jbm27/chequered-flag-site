@@ -5,15 +5,41 @@ import { MAX_IMAGE_BYTES, type DocImage } from "../lib/documents";
 
 // Pieces of the booking checkout for the security update: licence photo upload and the signature box.
 
+// Licence files customers can choose: JPG/JPEG, PNG, WebP and HEIC/HEIF (iPhone photos).
+// Some computers give HEIC files no type, so the file name's ending is checked too.
+export const LICENCE_ACCEPT = "image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif";
+const MAX_UPLOAD_BYTES = 25_000_000; // before shrinking
+const ENDINGS: Record<string, string> = { jpg: "jpeg", jpeg: "jpeg", png: "png", webp: "webp", heic: "heic", heif: "heic" };
+
+export function licenceFileKind(file: File) {
+  const type = file.type.toLowerCase();
+  if (type === "image/jpeg" || type === "image/jpg" || type === "image/pjpeg") return "jpeg";
+  if (type === "image/png") return "png";
+  if (type === "image/webp") return "webp";
+  if (type === "image/heic" || type === "image/heif" || type === "image/heic-sequence" || type === "image/heif-sequence") return "heic";
+  const ending = (file.name.split(".").pop() || "").toLowerCase();
+  return ENDINGS[ending] || "";
+}
+
 // Shrinks a photo in the browser to a JPEG no wider or taller than 1400px, so uploads stay small.
+// Everything is saved as JPEG, so the desk and the booking PDF work the same whatever was uploaded.
 export async function compressPhoto(file: File): Promise<DocImage> {
-  if (!file.type.startsWith("image/")) throw new Error("Please choose a photo (JPG, PNG or HEIC from your camera).");
+  const kind = licenceFileKind(file);
+  if (!kind) throw new Error("Please choose a JPG, PNG, HEIC or WebP photo of your licence.");
+  if (file.size > MAX_UPLOAD_BYTES) throw new Error("That file is over 25 MB. Please choose a smaller photo.");
   const url = URL.createObjectURL(file);
   try {
     const img = await new Promise<HTMLImageElement>((resolve, reject) => {
       const el = new Image();
       el.onload = () => resolve(el);
-      el.onerror = () => reject(new Error("That photo could not be opened. Please try a JPG or PNG."));
+      el.onerror = () =>
+        reject(
+          new Error(
+            kind === "heic"
+              ? "This browser can't open HEIC photos. Please use “Take a photo”, or save the photo as a JPG and upload that."
+              : "That photo could not be opened. Please try another JPG or PNG.",
+          ),
+        );
       el.src = url;
     });
     let maxSide = 1400;
@@ -204,7 +230,7 @@ export function LicencePicker({
               <input
                 id={id}
                 type="file"
-                accept="image/*"
+                accept={LICENCE_ACCEPT}
                 className="sr-only"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
@@ -228,7 +254,7 @@ export function LicencePicker({
                 }}
               />
               <p className="mt-1.5 text-xs text-[#595959]">
-                {busy ? "Preparing photo…" : value ? "Photo added." : "Use your camera or upload a clear photo of the front, with all four corners showing."}
+                {busy ? "Preparing photo…" : value ? "Photo added." : "Use your camera or upload a clear photo of the front, with all four corners showing. JPG, PNG, HEIC or WebP."}
               </p>
               {error && <p className="mt-1 text-xs font-bold text-[#9b1c1c]">{error}</p>}
             </div>

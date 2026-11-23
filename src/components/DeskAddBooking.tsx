@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { mpesaCodeHint } from "../lib/payments";
+import DeskPlateChoice, { clashesFor } from "./DeskPlateChoice";
 import {
   addDays,
   dateProblem,
@@ -25,6 +26,8 @@ import {
 type FleetRow = {
   id: string;
   model: string;
+  plate?: string;
+  make?: string;
   modelId?: string;
   category: "saloon" | "suv" | "4x4";
   rate?: number;
@@ -86,6 +89,10 @@ export default function DeskAddBooking({
   const [mpesaCode, setMpesaCode] = useState("");
   const [staffNote, setStaffNote] = useState("");
   const [terms, setTerms] = useState(false);
+  // Optional number plate; a booked plate needs the overlap approved with a reason.
+  const [plate, setPlate] = useState("");
+  const [approveOverlap, setApproveOverlap] = useState(false);
+  const [overlapNote, setOverlapNote] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -114,7 +121,12 @@ export default function DeskAddBooking({
     setError("");
     if (!model) return setError("Choose a vehicle model.");
     if (dateError) return setError(dateError);
-    if (!quote && freeCount === 0) return setError("No " + model.name + " is free for those dates. Choose other dates or another model.");
+    const plateClashes = !quote && plate ? clashesFor(plate, pickup, returnOn, holds) : [];
+    if (!quote && freeCount === 0 && !plate) {
+      return setError("No " + model.name + " is free for those dates. Choose other dates or another model, or choose a number plate and approve the overlap.");
+    }
+    if (plateClashes.length && !approveOverlap) return setError("Tick 'Approve this overlap' to use a plate that is already booked.");
+    if (plateClashes.length && overlapNote.trim().length < 3) return setError("Add a short reason for the overlap.");
     if (paid && quote) return setError("A delivery booking is saved as a quote first. Untick 'paid' and set the delivery charge on the booking.");
     if (!(paid && !quote) && paidText && !/^\d+$/.test(paidText)) {
       return setError("Enter the amount paid so far as a whole number of shillings, or leave it blank.");
@@ -148,6 +160,9 @@ export default function DeskAddBooking({
           amountPaid: paid && !quote ? "" : paidText,
           staffNote,
           terms,
+          vehicleId: quote ? "" : plate,
+          approveOverlap: !quote && plate !== "" && clashesFor(plate, pickup, returnOn, holds).length > 0 && approveOverlap,
+          overlapNote,
         }),
       });
       const body = await response.json();
@@ -180,7 +195,7 @@ export default function DeskAddBooking({
           <label htmlFor="nbModel" className={label}>
             Vehicle model
           </label>
-          <select id="nbModel" value={modelId} onChange={(e) => setModelId(e.target.value)} className={input}>
+          <select id="nbModel" value={modelId} onChange={(e) => { setModelId(e.target.value); setPlate(""); setApproveOverlap(false); }} className={input}>
             {models.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.name} ({ksh(item.rate)}/day)
@@ -234,6 +249,23 @@ export default function DeskAddBooking({
             </select>
           </div>
         </div>
+        {model && !quote && !dateError && (
+          <DeskPlateChoice
+            idPrefix="nb"
+            label="Number plate (optional)"
+            vehicles={fleet.filter((v) => model.ids.includes(v.id)).map((v) => ({ id: v.id, plate: v.plate || v.id, model: v.make }))}
+            pickup={pickup}
+            returnOn={returnOn}
+            holds={holds}
+            anyLabel={freeCount ? "Any free " + model.name : "Choose a plate (none free)"}
+            value={plate}
+            onChange={setPlate}
+            approve={approveOverlap}
+            onApprove={setApproveOverlap}
+            note={overlapNote}
+            onNote={setOverlapNote}
+          />
+        )}
         <div>
           <label htmlFor="nbDel" className={label}>
             Delivery

@@ -26,6 +26,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Sign in to the hire desk." }, { status: 401 });
     }
     const note = String(body.staffNote ?? "").replace(/\s+/g, " ").trim();
+    // A chosen number plate, and an approved overlap if that vehicle is already booked (desk only).
+    const vehicleId = String(body.vehicleId ?? "").trim();
+    const overlapNote = String(body.overlapNote ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+    if (body.approveOverlap === true && overlapNote.length < 3) {
+      return NextResponse.json({ error: "Add a short reason for the overlap." }, { status: 400 });
+    }
+    const overlap = body.approveOverlap === true ? { by: staff.username, note: overlapNote } : undefined;
     const staffNote = "Added on the desk by " + staff.username + (note ? ". " + note : ".");
     const result = await createBooking(
       {
@@ -48,7 +55,7 @@ export async function POST(request: Request) {
         mpesaCode: String(body.mpesaCode ?? ""),
         terms: Boolean(body.terms),
       },
-      { confirmed: Boolean(body.paid), staffNote, emailOptional: true, amountPaid: body.amountPaid },
+      { confirmed: Boolean(body.paid), staffNote, emailOptional: true, amountPaid: body.amountPaid, vehicleId: vehicleId || undefined, overlap },
     );
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

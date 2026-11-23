@@ -13,7 +13,7 @@ export default function DeskVehicleEdit({
   onClose,
   onSaved,
 }: {
-  vehicle: { id: string; model: string; plate: string; year?: number | null; km?: number | null; notes?: string };
+  vehicle: { id: string; model: string; make?: string; plate: string; year?: number | null; km?: number | null; notes?: string };
   returnNote?: string; // set when the vehicle is back from a hire and needs checking
   onClose: () => void;
   onSaved: () => void;
@@ -49,7 +49,7 @@ export default function DeskVehicleEdit({
   return (
     <div className="grid gap-3 border-t border-[#e5e5e5] bg-[#f5f5f3] px-3.5 py-3">
       <strong className="text-sm">
-        Edit record: {vehicle.plate} {vehicle.model}
+        Edit record: {vehicle.plate} {vehicle.make || vehicle.model}
       </strong>
       {returnNote && (
         <p className="rounded-md border border-[#f1a9a3] bg-[#fce8e6] px-3 py-2 text-[13px] text-[#a50e0e]">{returnNote}</p>

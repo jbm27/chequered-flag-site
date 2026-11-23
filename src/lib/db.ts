@@ -1,16 +1,21 @@
 import crypto from "crypto";
 import { Pool, type PoolClient } from "pg";
-import { FLEET, fleetModels, modelById, vehicleById } from "./fleet";
+import { FLEET, SALOON_MAKES, SALOON_MODEL, fleetModels, modelById, vehicleById } from "./fleet";
 import {
   LICENCE_ON_FILE_MONTHS,
+  MAX_DRIVERS,
+  cleanImage,
   bookingSchedule,
   damageLimitFor,
   mileageFor,
   type BookingDocuments,
+  type DriverDoc,
   type LicenceOnFile,
   type StoredDocuments,
 } from "./documents";
 import { VEHICLE_RECORDS } from "./vehicleRecords";
+import type { CalendarBooking } from "./ics";
+import { canUseCalendarLink } from "./access";
 import {
   addDays,
   assessBooking,
@@ -158,10 +163,23 @@ async function setup() {
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS discount_note text NOT NULL DEFAULT '';
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS discount_by text NOT NULL DEFAULT '';
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS discount_at timestamptz;
+    -- Overlapping bookings on one vehicle (Homer, Nov 2026): only staff on the desk can make one, by choosing the
+    -- number plate and approving the overlap with a reason (for example a friend collecting the day another
+    -- hire returns). Website bookings never overlap.
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS overlap_approved boolean NOT NULL DEFAULT false;
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS overlap_note text NOT NULL DEFAULT '';
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS overlap_by text NOT NULL DEFAULT '';
     -- When each staff member last opened the new-bookings bell on the desk.
     CREATE TABLE IF NOT EXISTS staff_seen (
       username text PRIMARY KEY,
       bookings_seen_at timestamptz NOT NULL DEFAULT now()
+    );
+    -- Private calendar links (Google Calendar, Apple Calendar, Outlook): one secret key per staff member,
+    -- removed with the staff member. Anyone with the link can read the bookings, so it can be reset.
+    CREATE TABLE IF NOT EXISTS staff_calendar_links (
+      staff_id integer PRIMARY KEY REFERENCES staff_users(id) ON DELETE CASCADE,
+      token text NOT NULL UNIQUE,
+      created_at timestamptz NOT NULL DEFAULT now()
     );
     -- Payments recorded on the desk (code, amount, who, when), used to spot a code used twice.
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_log jsonb NOT NULL DEFAULT '[]'::jsonb;
@@ -233,6 +251,9 @@ async function setup() {
     );
   }
   await db.query(`UPDATE vehicles SET active = false WHERE NOT (id = ANY($1::text[]))`, [FLEET.map((vehicle) => vehicle.id)]);
+  // All saloons are booked as one model now (lib/fleet.ts). Bookings made before name the make (for example
+  // "Toyota Axio"); point them at the shared model so they still match their vehicles when edited or moved.
+  await db.query(`UPDATE bookings SET model_name = $1 WHERE model_name = ANY($2::text[])`, [SALOON_MODEL, SALOON_MAKES]);
 
   // First run only: start each vehicle record from the fleet list. Existing records are never overwritten.
   for (const vehicle of FLEET) {
@@ -352,6 +373,7 @@ export async function loadAvailability(pickup: string, returnOn: string, from: s
       gear: model.gear,
       fuel: model.fuel,
       mileage: model.mileage,
+      similar: model.similar,
       count: model.vehicleIds.length,
       rate: model.rate,
       addon: model.addon,
@@ -422,9 +444,50 @@ function deliveryDetail(booking: {
 
 // Website bookings call this with no options. The staff desk passes options for bookings added by hand:
 // confirmed (payment already received), a staff note, and an optional email address.
+// A number plate chosen on the desk: an active vehicle of the booking's model (+ Add booking) or of the same
+// class, saloon, SUV or 4x4 (Change vehicle). Returns the references of held or paid bookings it already has on
+// those dates (other than `ignoreId`); none means it is free.
+async function pickVehicle(
+  client: PoolClient,
+  vehicleId: string,
+  want: { model?: string; category?: string },
+  pickup: string,
+  returnOn: string,
+  ignoreId: string,
+) {
+  const vehicle = await client.query<{ id: string; model: string; plate: string; category: string; active: boolean }>(
+    `SELECT id, model, plate, category, active FROM vehicles WHERE id = $1 FOR UPDATE`,
+    [vehicleId.slice(0, 40)],
+  );
+  const chosen = vehicle.rows[0];
+  if (!chosen || !chosen.active) throw staffError("Choose a vehicle from the list.", 400);
+  if (want.model && chosen.model !== want.model) throw staffError(chosen.plate + " is a " + chosen.model + ". To change the model, use Edit.", 400);
+  if (want.category && chosen.category !== want.category) {
+    throw staffError(chosen.plate + " is not in the same class (" + want.category + "). Choose a vehicle in the same class.", 400);
+  }
+  const clashes = await client.query<{ id: string; reference: string }>(
+    `SELECT id::text, reference FROM bookings
+     WHERE vehicle_id = $1 AND id::text <> $2 AND status IN ('pending', 'confirmed')
+       AND pickup_on < $4::date
+       AND $3::date < CASE WHEN return_on > pickup_on THEN return_on ELSE pickup_on + 1 END
+     ORDER BY pickup_on`,
+    [chosen.id, ignoreId, pickup, exclusiveEnd(pickup, returnOn)],
+  );
+  return { id: chosen.id, plate: chosen.plate, model: chosen.model, category: chosen.category, clash: clashes.rows[0]?.reference || "", clashes: clashes.rows };
+}
+
 export async function createBooking(
   raw: Partial<BookingInput>,
-  opts?: { confirmed?: boolean; staffNote?: string; emailOptional?: boolean; documents?: BookingDocuments; amountPaid?: unknown },
+  opts?: {
+    confirmed?: boolean;
+    staffNote?: string;
+    emailOptional?: boolean;
+    documents?: BookingDocuments;
+    amountPaid?: unknown;
+    // Desk only: a chosen number plate, and an approved overlap (who and why) if that vehicle is already booked.
+    vehicleId?: string;
+    overlap?: { by: string; note: string };
+  },
 ): Promise<PublicBookingResult> {
   await ensureReady();
   const db = pool();
@@ -453,7 +516,18 @@ export async function createBooking(
   try {
     await client.query("BEGIN");
     let vehicleId: string | null = null;
-    if (!booking.manual && model) {
+    let overlapping = false;
+    if (!booking.manual && model && opts?.vehicleId) {
+      const chosen = await pickVehicle(client, String(opts.vehicleId), { model: model.name }, booking.pickup, booking.returnOn, "");
+      if (chosen.clash && !opts.overlap) {
+        throw staffError(
+          chosen.plate + " is already booked on " + chosen.clash + " for those dates. Approve the overlap to book it anyway.",
+          409,
+        );
+      }
+      vehicleId = chosen.id;
+      overlapping = Boolean(chosen.clash);
+    } else if (!booking.manual && model) {
       const end = exclusiveEnd(booking.pickup, booking.returnOn);
       const locked = await client.query<{ id: string }>(
         `SELECT v.id
@@ -473,7 +547,11 @@ export async function createBooking(
       );
       vehicleId = locked.rows[0]?.id || null;
       if (!vehicleId) {
-        const error = new Error("That vehicle is no longer free for those dates. Please choose another.");
+        const error = new Error(
+          opts?.emailOptional
+            ? "No " + model.name + " is free for those dates. To book it anyway, choose a number plate and approve the overlap."
+            : "That vehicle is no longer free for those dates. Please choose another.",
+        );
         (error as Error & { status?: number }).status = 409;
         throw error;
       }
@@ -570,6 +648,7 @@ export async function createBooking(
                 (booking.manual ? " + delivery (to be quoted)" : booking.delivery.fee ? " + delivery " + ksh(booking.delivery.fee) : "") +
                 " = " + ksh(booking.total) + " (VAT included)",
               damageLimit: damageLimitFor(booking.model.name, booking.model.category),
+              category: booking.model.category,
               waiver: booking.insuranceTotal
                 ? ksh(booking.insuranceTotal) + " for " + booking.days + (booking.days === 1 ? " day" : " days")
                 : "",
@@ -597,6 +676,12 @@ export async function createBooking(
       }
     }
     const reviewToken = newReviewToken();
+    if (overlapping && opts?.overlap) {
+      await client.query(
+        `UPDATE bookings SET overlap_approved = true, overlap_note = $2, overlap_by = $3 WHERE id = $1`,
+        [bookingId, opts.overlap.note.slice(0, 200), opts.overlap.by.slice(0, 60)],
+      );
+    }
     await client.query(`INSERT INTO reviews (booking_id, token) VALUES ($1, $2)`, [bookingId, reviewToken]);
     await client.query("COMMIT");
     return {
@@ -689,6 +774,9 @@ function mapStaff(row: Record<string, unknown>): StaffBooking {
     deliveryFee: row.delivery_fee === null || row.delivery_fee === undefined ? null : Number(row.delivery_fee),
     total: Number(row.total_due),
     discount: Number(row.discount || 0),
+    overlapApproved: Boolean(row.overlap_approved),
+    overlapNote: String(row.overlap_note || ""),
+    overlapBy: String(row.overlap_by || ""),
     discountNote: String(row.discount_note || ""),
     discountBy: String(row.discount_by || ""),
     discountAt: row.discount_at ? new Date(String(row.discount_at)).toISOString() : "",
@@ -713,6 +801,7 @@ export async function listBookings() {
             days, daily_rate, hire_total, insurance_total, delivery_fee, total_due,
             ooh, ooh_note, mpesa_code, status, staff_note, created_at, amount_paid, payment_log,
             source, COALESCE(held_at, created_at) AS held_at, discount, discount_note, discount_by, discount_at,
+            overlap_approved, overlap_note, overlap_by,
             EXISTS (SELECT 1 FROM booking_documents d WHERE d.booking_id = bookings.id) AS has_documents,
             COALESCE((SELECT d.drivers->0->>'fromFile' = 'true' FROM booking_documents d WHERE d.booking_id = bookings.id), false)
               AS licence_on_file
@@ -889,8 +978,10 @@ export async function editBooking(id: string, raw: Partial<BookingEdit>, editedB
       delivery_manual: boolean;
       staff_note: string;
       discount: number;
+      overlap_approved: boolean;
     }>(
-      `SELECT status, vehicle_id, model_name, pickup_on::text, delivery_mode, delivery_fee, delivery_manual, staff_note, discount
+      `SELECT status, vehicle_id, model_name, pickup_on::text, delivery_mode, delivery_fee, delivery_manual, staff_note, discount,
+              overlap_approved
        FROM bookings WHERE id = $1 FOR UPDATE`,
       [id],
     );
@@ -929,6 +1020,18 @@ export async function editBooking(id: string, raw: Partial<BookingEdit>, editedB
         [model.name, pickup, end, id, row.vehicle_id || ""],
       );
       vehicleId = free.rows[0]?.id || null;
+      // Both bookings in an approved overlap keep their shared vehicle when edited (same model), as long as every
+      // booking it still clashes with is part of an approved overlap with this one.
+      if (!vehicleId && row.vehicle_id && model.name === row.model_name) {
+        const clashes = await client.query<{ overlap_approved: boolean }>(
+          `SELECT overlap_approved FROM bookings
+           WHERE vehicle_id = $1 AND id <> $2 AND status IN ('pending', 'confirmed')
+             AND pickup_on < $4::date
+             AND $3::date < CASE WHEN return_on > pickup_on THEN return_on ELSE pickup_on + 1 END`,
+          [row.vehicle_id, id, pickup, end],
+        );
+        if (clashes.rows.every((clash) => clash.overlap_approved || row.overlap_approved)) vehicleId = row.vehicle_id;
+      }
       if (!vehicleId) throw staffError("No " + model.name + " is free for those dates.", 409);
     }
 
@@ -954,7 +1057,11 @@ export async function editBooking(id: string, raw: Partial<BookingEdit>, editedB
       }
     }
     const stamp = "Edited by " + editedBy + " on " + today + ".";
-    const staffNote = (note ? note + " · " + stamp : stamp).slice(0, 500);
+    // Keep the "Added on the desk by …" line at the front (the bell and booking source rely on it).
+    const added = /^Added on the desk by [a-z0-9._-]+?\.(\s|$)/i.exec(row.staff_note || "");
+    const prefix = added ? added[0].trim() + " " : "";
+    const body = note.replace(/^Added on the desk by [a-z0-9._-]+?\.(\s|$)\s*/i, "");
+    const staffNote = (prefix + (body ? body + " · " + stamp : stamp)).slice(0, 500);
 
     await client.query(
       `UPDATE bookings
@@ -1162,7 +1269,7 @@ export async function bookingNotices(username: string) {
   );
   const notices: NewBookingNotice[] = result.rows.map((row) => {
     const createdAt = new Date(String(row.created_at));
-    const desk = /^Added on the desk by ([^.]+)/.exec(String(row.staff_note || ""));
+    const desk = /^Added on the desk by ([a-z0-9._-]+?)\.(\s|$)/i.exec(String(row.staff_note || ""));
     return {
       id: String(row.id),
       reference: String(row.reference),
@@ -1194,58 +1301,108 @@ export async function markBookingsSeen(username: string) {
   return { ok: true };
 }
 
-// Staff choose which vehicle (by number plate) a held or paid booking uses ("Vehicle" on the desk booking card).
-// It must be the same model, active, and free for the booking's dates. Change the model with Edit instead.
-export async function allocateVehicle(id: string, vehicleIdRaw: unknown, allocatedBy: string) {
+// Staff choose which vehicle (by number plate) a held or paid booking uses ("Change vehicle" on the desk card).
+// Any active vehicle in the same class (saloon, SUV or 4x4) can be chosen; the booking's model follows the
+// vehicle and its price stays the same. A plate already booked for the dates needs either:
+// - an approved overlap with a reason (both bookings then share the vehicle), or
+// - a swap (`swapWith`): the one booking on that plate moves to this booking's current vehicle, if it is free
+//   for that booking's dates. Both moves happen together.
+export async function allocateVehicle(
+  id: string,
+  vehicleIdRaw: unknown,
+  allocatedBy: string,
+  overlapRaw?: { approve?: unknown; note?: unknown },
+  swapWithRaw?: unknown,
+) {
   await ensureReady();
   const db = pool();
   if (!db) throw new Error("DATABASE_URL is not set");
   const vehicleId = String(vehicleIdRaw ?? "").trim().slice(0, 40);
+  const overlapNote = String(overlapRaw?.note ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  const approve = overlapRaw?.approve === true;
+  const swapWith = String(swapWithRaw ?? "").trim().slice(0, 40);
+  if (approve && overlapNote.length < 3) throw staffError("Add a short reason for the overlap.", 400);
+  const by = allocatedBy.slice(0, 60);
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-    const current = await client.query<{ status: string; reference: string; model_name: string; pickup_on: string; return_on: string; vehicle_id: string | null }>(
-      `SELECT status, reference, model_name, pickup_on::text, return_on::text, vehicle_id FROM bookings WHERE id = $1 FOR UPDATE`,
-      [id],
-    );
-    const row = current.rows[0];
+    type Row = { id: string; status: string; reference: string; customer_name: string; model_name: string; pickup_on: string; return_on: string; vehicle_id: string | null };
+    const load = async (bookingId: string) =>
+      (
+        await client.query<Row>(
+          `SELECT id::text, status, reference, customer_name, model_name, pickup_on::text, return_on::text, vehicle_id
+           FROM bookings WHERE id::text = $1 FOR UPDATE`,
+          [bookingId],
+        )
+      ).rows[0];
+    const row = await load(id);
     if (!row) throw staffError("That booking was not found.", 404);
     if (row.status !== "pending" && row.status !== "confirmed") {
       throw staffError("A vehicle can only be chosen for a held or paid booking.", 409);
     }
-    const vehicle = await client.query<{ id: string; model: string; plate: string; active: boolean }>(
-      `SELECT id, model, plate, active FROM vehicles WHERE id = $1 FOR UPDATE`,
-      [vehicleId],
+    const cls = await client.query<{ category: string }>(
+      `SELECT category FROM vehicles WHERE id = $1 OR model = $2 ORDER BY (id = $1) DESC LIMIT 1`,
+      [row.vehicle_id || "", row.model_name],
     );
-    const chosen = vehicle.rows[0];
-    if (!chosen || !chosen.active) throw staffError("Choose a vehicle from the list.", 400);
-    if (chosen.model !== row.model_name) {
-      throw staffError(chosen.plate + " is a " + chosen.model + ". To change the model, use Edit.", 400);
-    }
-    if (chosen.id === row.vehicle_id) {
+    const category = cls.rows[0]?.category || "";
+    const chosen = await pickVehicle(client, vehicleId, { category }, row.pickup_on, row.return_on, id);
+    const note = (text: string) =>
+      `staff_note = left(CASE WHEN staff_note = '' THEN ${text} ELSE staff_note || ' · ' || ${text} END, 500)`;
+
+    if (swapWith) {
+      // Swap plates with the one booking on the chosen vehicle.
+      if (!row.vehicle_id) throw staffError("This booking has no vehicle to swap. Choose a free plate instead.", 409);
+      const other = await load(swapWith);
+      if (!other || (other.status !== "pending" && other.status !== "confirmed") || other.vehicle_id !== chosen.id) {
+        throw staffError("That booking is no longer on " + chosen.plate + ". Refresh the desk and try again.", 409);
+      }
+      if (!chosen.clashes.some((c) => c.id === other.id)) {
+        throw staffError(other.reference + " isn't on " + chosen.plate + " during these dates, so there's nothing to swap.", 409);
+      }
+      if (chosen.clashes.some((c) => c.id !== other.id)) {
+        throw staffError(chosen.plate + " has more than one booking on these dates, so it can't be swapped.", 409);
+      }
+      const mine = await pickVehicle(client, row.vehicle_id, { category }, other.pickup_on, other.return_on, other.id);
+      const blocking = mine.clashes.filter((c) => c.id !== id);
+      if (blocking.length) {
+        throw staffError(
+          "Can't swap: " + mine.plate + " is booked on " + blocking.map((c) => c.reference).join(", ") + " during " + other.reference + "'s dates.",
+          409,
+        );
+      }
+      const today = todayNairobi();
+      await client.query(
+        `UPDATE bookings SET vehicle_id = $2, model_name = $3, ${note("$4")} WHERE id::text = $1`,
+        [id, chosen.id, chosen.model, "Swapped plates with " + other.reference + ": now " + chosen.plate + ", by " + by + " on " + today + "."],
+      );
+      await client.query(
+        `UPDATE bookings SET vehicle_id = $2, model_name = $3, ${note("$4")} WHERE id::text = $1`,
+        [other.id, mine.id, mine.model, "Swapped plates with " + row.reference + ": now " + mine.plate + ", by " + by + " on " + today + "."],
+      );
       await client.query("COMMIT");
-      return { ok: true, reference: row.reference, plate: chosen.plate };
+      return { ok: true, reference: row.reference, plate: chosen.plate, overlap: "", swapped: { reference: other.reference, plate: mine.plate } };
     }
-    const end = exclusiveEnd(row.pickup_on, row.return_on);
-    const clash = await client.query<{ reference: string }>(
-      `SELECT reference FROM bookings
-       WHERE vehicle_id = $1 AND id <> $2 AND status IN ('pending', 'confirmed')
-         AND pickup_on < $4::date
-         AND $3::date < CASE WHEN return_on > pickup_on THEN return_on ELSE pickup_on + 1 END
-       LIMIT 1`,
-      [chosen.id, id, row.pickup_on, end],
-    );
-    if (clash.rows[0]) throw staffError(chosen.plate + " is already booked on " + clash.rows[0].reference + " for those dates.", 409);
-    const stamp = chosen.plate + " allocated by " + allocatedBy.slice(0, 60) + " on " + todayNairobi() + ".";
+
+    if (chosen.clash && !approve) {
+      throw staffError(chosen.plate + " is already booked on " + chosen.clash + " for those dates. Swap plates or approve the overlap.", 409);
+    }
+    if (chosen.id === row.vehicle_id && !chosen.clash) {
+      await client.query("COMMIT");
+      return { ok: true, reference: row.reference, plate: chosen.plate, overlap: "", swapped: null };
+    }
+    const stamp =
+      chosen.plate + (chosen.model !== row.model_name ? " (" + chosen.model + ")" : "") + " allocated by " + by + " on " + todayNairobi() +
+      (chosen.clash ? ", overlapping " + chosen.clash + " (approved)" : "") + ".";
     await client.query(
       `UPDATE bookings
-       SET vehicle_id = $2,
-           staff_note = left(CASE WHEN staff_note = '' THEN $3 ELSE staff_note || ' · ' || $3 END, 500)
-       WHERE id = $1`,
-      [id, chosen.id, stamp],
+       SET vehicle_id = $2, model_name = $7,
+           overlap_approved = $4, overlap_note = $5, overlap_by = $6,
+           ${note("$3")}
+       WHERE id::text = $1`,
+      [id, chosen.id, stamp, Boolean(chosen.clash), chosen.clash ? overlapNote : "", chosen.clash ? by : "", chosen.model],
     );
     await client.query("COMMIT");
-    return { ok: true, reference: row.reference, plate: chosen.plate };
+    return { ok: true, reference: row.reference, plate: chosen.plate, overlap: chosen.clash, swapped: null };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -1302,6 +1459,79 @@ export async function reverseConfirmation(id: string, reversedBy: string) {
   } finally {
     client.release();
   }
+}
+
+// ---------- Calendar link (staff subscribe from Google Calendar) ----------
+
+// This staff member's private calendar key, made the first time it is asked for. reset makes a new one, so the
+// old link stops working (for example if it was shared by mistake).
+export async function calendarToken(username: string, reset = false) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const staff = await db.query<{ id: number }>(`SELECT id FROM staff_users WHERE username = $1`, [username]);
+  const staffId = staff.rows[0]?.id;
+  if (!staffId) throw staffError("Sign in to the hire desk.", 401);
+  if (!reset) {
+    const existing = await db.query<{ token: string }>(`SELECT token FROM staff_calendar_links WHERE staff_id = $1`, [staffId]);
+    if (existing.rows[0]) return existing.rows[0].token;
+  }
+  const token = crypto.randomBytes(24).toString("base64url");
+  await db.query(
+    `INSERT INTO staff_calendar_links (staff_id, token) VALUES ($1, $2)
+     ON CONFLICT (staff_id) DO UPDATE SET token = EXCLUDED.token, created_at = now()`,
+    [staffId, token],
+  );
+  return token;
+}
+
+// The bookings for a calendar link: every held, paid and quoted booking returning from 60 days ago onwards.
+// Returns null for an unknown key.
+export async function calendarBookings(token: string): Promise<CalendarBooking[] | null> {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return null;
+  const owner = await db.query<{ username: string }>(
+    `SELECT u.username FROM staff_calendar_links l JOIN staff_users u ON u.id = l.staff_id WHERE l.token = $1`,
+    [token],
+  );
+  // Only logins allowed a calendar link (lib/access.ts); a link stops working if that changes.
+  if (!owner.rows[0] || !canUseCalendarLink(owner.rows[0].username)) return null;
+  const result = await db.query(
+    `SELECT b.id::text, b.reference, b.status, b.customer_name, b.phone, b.email, b.model_name, COALESCE(v.plate, '') AS plate,
+            b.pickup_on::text, b.pickup_time, b.return_on::text, b.return_time, b.pickup_location, b.delivery_summary,
+            b.total_due, b.amount_paid, b.overlap_approved, b.overlap_note, b.staff_note,
+            GREATEST(b.created_at, COALESCE(b.confirmed_at, b.created_at), COALESCE(b.held_at, b.created_at),
+                     COALESCE(b.discount_at, b.created_at)) AS updated_at
+     FROM bookings b LEFT JOIN vehicles v ON v.id = b.vehicle_id
+     WHERE b.status IN ('pending', 'confirmed', 'quote')
+       AND b.return_on >= (now() AT TIME ZONE 'Africa/Nairobi')::date - 60
+     ORDER BY b.pickup_on`,
+  );
+  return result.rows.map((row) => ({
+    id: String(row.id),
+    reference: String(row.reference),
+    status: String(row.status),
+    customerName: String(row.customer_name),
+    phone: String(row.phone || ""),
+    email: String(row.email || ""),
+    model: String(row.model_name),
+    plate: String(row.plate || ""),
+    pickup: String(row.pickup_on),
+    pickTime: String(row.pickup_time),
+    returnOn: String(row.return_on),
+    retTime: String(row.return_time),
+    location: String(row.pickup_location),
+    deliverySummary: String(row.delivery_summary || ""),
+    total: Number(row.total_due),
+    // Bookings confirmed before part payments existed have 0 stored; confirmed means paid in full.
+    amountPaid: row.status === "confirmed" && !Number(row.amount_paid) ? Number(row.total_due) : Number(row.amount_paid || 0),
+    overlapApproved: Boolean(row.overlap_approved),
+    overlapNote: String(row.overlap_note || ""),
+    staffNote: String(row.staff_note || ""),
+    updatedAt: new Date(String(row.updated_at)).toISOString(),
+  }));
 }
 
 export async function updateBooking(id: string, action: string, note: string, deliveryFee?: unknown) {
@@ -1649,7 +1879,7 @@ export async function performanceYear(year: number): Promise<PerformanceYear> {
     vehicles: FLEET.map((vehicle) => ({
       id: vehicle.id,
       plate: vehicle.plate,
-      model: vehicle.model,
+      model: vehicle.make,
       category: vehicle.category,
       km: records[vehicle.id]?.km ?? null,
     })),
@@ -1727,6 +1957,66 @@ export async function updateVehicleRecord(id: string, raw: { year?: unknown; km?
 }
 
 // Staff only: the licence photos, drivers and signature saved with a booking.
+// Staff add or change drivers and licence photos on the desk ("Drivers and licences" in Edit).
+// raw.drivers: up to MAX_DRIVERS of { name, phone, photo?: DocImage, keep?: index of a driver already saved
+// whose photo stays }. Every driver needs a photo. drivers[0] is the main driver. A booking with no documents
+// yet (made on the desk) gets a record marked "not signed online".
+export async function saveDeskDrivers(id: string, raw: { drivers?: unknown }, by: string) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw staffError("That booking was not found.", 404);
+  const list = Array.isArray(raw.drivers) ? raw.drivers : [];
+  if (!list.length) throw staffError("Keep at least the main driver.", 400);
+  if (list.length > MAX_DRIVERS) throw staffError("A booking can have up to " + MAX_DRIVERS + " drivers.", 400);
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const booking = await client.query<{ status: string; reference: string }>(
+      `SELECT status, reference FROM bookings WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    if (!booking.rows[0]) throw staffError("That booking was not found.", 404);
+    if (booking.rows[0].status === "cancelled") throw staffError("Closed bookings can't be changed.", 409);
+    const existing = await client.query<{ drivers: DriverDoc[] }>(`SELECT drivers FROM booking_documents WHERE booking_id = $1`, [id]);
+    const saved: DriverDoc[] = existing.rows[0]?.drivers || [];
+    const now = new Date().toISOString();
+    const drivers: DriverDoc[] = list.map((item, index) => {
+      const entry = (item || {}) as { name?: unknown; phone?: unknown; photo?: unknown; keep?: unknown };
+      const label = index === 0 ? "the main driver" : "driver " + (index + 1);
+      const name = String(entry.name ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+      const phone = String(entry.phone ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+      if (name.length < 2) throw staffError("Enter the name of " + label + ".", 400);
+      if (phone && phone.replace(/\D/g, "").length < 9) throw staffError("Enter a mobile number with at least 9 digits for " + label + ", or leave it blank.", 400);
+      if (entry.photo) {
+        const image = cleanImage(entry.photo, label + "'s licence");
+        if (typeof image === "string") throw staffError(image, 400);
+        return { name, phone, licence: image, addedBy: by.slice(0, 60), addedAt: now };
+      }
+      const keep = Number(entry.keep);
+      const old = Number.isInteger(keep) ? saved[keep] : undefined;
+      if (!old) throw staffError("Add a licence photo for " + label + ".", 400);
+      return { ...old, name, phone };
+    });
+    if (existing.rows[0]) {
+      await client.query(`UPDATE booking_documents SET drivers = $2::jsonb WHERE booking_id = $1`, [id, JSON.stringify(drivers)]);
+    } else {
+      await client.query(
+        `INSERT INTO booking_documents (booking_id, drivers, signature, agreement_version, schedule)
+         VALUES ($1, $2::jsonb, $3::jsonb, '', NULL)`,
+        [id, JSON.stringify(drivers), JSON.stringify({ kind: "none", name: by.slice(0, 60) })],
+      );
+    }
+    await client.query("COMMIT");
+    return { ok: true, reference: booking.rows[0].reference, drivers: drivers.length };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function loadDocuments(id: string): Promise<StoredDocuments | null> {
   await ensureReady();
   const db = pool();

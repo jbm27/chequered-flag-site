@@ -55,6 +55,7 @@ const STORED = "cfHireRequest";
 
 // One photo per model (from Homer's design; the Land Cruiser is Homer's own photo, with the plate blanked).
 const PHOTOS: Record<string, string> = {
+  "saloon-car": "/images/vehicle-hire/models/toyota-axio.webp", // every saloon is one card; the Axio photo for now
   "toyota-axio": "/images/vehicle-hire/models/toyota-axio.webp",
   "toyota-fielder": "/images/vehicle-hire/models/toyota-fielder.webp",
   "toyota-premio": "/images/vehicle-hire/models/toyota-premio.webp",
@@ -310,6 +311,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
         (deliveryQuote.manual ? " + delivery (to be quoted)" : pricedDelivery ? " + delivery " + ksh(pricedDelivery) : "") +
         " = " + ksh(total) + " (VAT included)",
       damageLimit: selectedLimit,
+      category: selected?.category,
       waiver: insuranceTotal ? ksh(insuranceTotal) + " for " + plural(days) : "",
       mileage: mileageFor(selected?.category),
     };
@@ -1263,8 +1265,8 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                                 ? "Without it, you pay for damage to this vehicle up to " + ksh(selectedLimit) + " for the whole hire. "
                                 : ""}
                               With it, you don&apos;t pay for accident or collision damage. Fines, and damage to the
-                              suspension, tyres, transmission or underbody from bad driving or off-road use, are not
-                              covered.
+                              suspension, tyres or transmission from bad driving, are not covered. Undercarriage damage
+                              is always paid in full.
                             </span>
                           </label>
                         </div>
@@ -1543,6 +1545,7 @@ function VehicleCard({
       <div className="flex flex-1 flex-col gap-1.5 px-3.5 pb-3.5 pt-3">
         <div className="text-xs font-bold uppercase tracking-[1.5px] text-[#595959]">{model.tag}</div>
         <h3 className="text-lg font-bold tracking-[-0.02em]">{model.name}</h3>
+        {model.similar && <div className="-mt-1 text-[13px] text-[#595959]">{model.similar}</div>}
         <div className="flex flex-wrap gap-x-3.5 gap-y-1 border-b border-[#e5e5e5] pb-2 text-[13px] text-[#595959]">
           <span>{model.seatsText}</span>
           <span>{model.gear}</span>
@@ -1554,17 +1557,8 @@ function VehicleCard({
         </div>
         <div className="text-[13px] text-[#595959]">{model.mileage}</div>
 
-        {days > 0 && (
-          <div className="rounded-md bg-[#f5f5f3] px-2.5 py-1.5 text-[13px] leading-normal">
-            <div className="flex justify-between gap-2">
-              <span>{plural(days)}</span>
-              <strong>{ksh(model.hireTotal)}</strong>
-            </div>
-            <div className="flex justify-between gap-2 text-[13px] text-[#595959]">
-              <span>Paid in full when you book</span>
-            </div>
-          </div>
-        )}
+        {/* No total for the chosen dates here (Homer, Nov 2026): customers found it confusing next to the daily
+            price, and many hires are one day. The total shows at checkout. */}
 
         {damageLimitFor(model.name, model.category) === null ? (
           // No damage liability limit in the hire agreement yet, so this vehicle is booked by phone.

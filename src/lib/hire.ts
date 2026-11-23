@@ -586,6 +586,7 @@ export type PublicModelCard = {
   gear: string;
   fuel: string;
   mileage: string;
+  similar?: string; // e.g. "Toyota Axio or similar" for the shared saloon card
   count: number;
   rate: number;
   addon: number;
@@ -666,6 +667,9 @@ export type StaffBooking = {
   discountNote?: string;
   discountBy?: string;
   discountAt?: string;
+  overlapApproved?: boolean; // staff approved this booking overlapping another on the same vehicle
+  overlapNote?: string;
+  overlapBy?: string;
 };
 
 export type PaymentEntry = { code: string; amount: number; by: string; at: string };

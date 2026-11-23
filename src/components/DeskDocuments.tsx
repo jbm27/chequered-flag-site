@@ -51,7 +51,8 @@ function pdfData(booking: StaffBooking, docs: StoredDocuments): BookingPdfData {
     // Desk discount: shown as its own line so the normal price and the saving are both clear.
     costs.push({ label: "Discount", sub: booking.discountNote || undefined, qty: "1", amount: "- " + ksh(booking.discount) });
   }
-  const sameText = docs.agreementVersion === AGREEMENT_VERSION;
+  const unsigned = docs.signature.kind === "none";
+  const sameText = unsigned || docs.agreementVersion === AGREEMENT_VERSION;
   const plusDelivery = booking.deliveryManual ? " plus delivery" : "";
   return {
     reference: booking.reference,
@@ -82,7 +83,7 @@ function pdfData(booking: StaffBooking, docs: StoredDocuments): BookingPdfData {
     signature: docs.signature,
     signedAt: stamp(docs.signedAt),
     agreementTitle: AGREEMENT_TITLE,
-    agreementVersion: docs.agreementVersion,
+    agreementVersion: unsigned ? AGREEMENT_VERSION : docs.agreementVersion,
     schedule: docs.schedule || null,
     agreementText: sameText
       ? AGREEMENT_TEXT
@@ -129,7 +130,11 @@ export default function DeskDocuments({ booking }: { booking: StaffBooking }) {
               </a>
               <div className="min-w-0">
                 <strong className="block">{driver.name}</strong>
-                <span className="text-[#595959]">{index === 0 ? "Main driver" : "Driver " + (index + 1)} · {driver.phone}</span>
+                <span className="text-[#595959]">
+                  {index === 0 ? "Main driver" : "Driver " + (index + 1)}
+                  {driver.phone ? " · " + driver.phone : ""}
+                  {driver.addedBy ? " · added on the desk by " + driver.addedBy : ""}
+                </span>
                 {driver.fromFile && (
                   <span className="mt-1 block text-xs font-bold text-[#5f4400]">
                     Licence on file{driver.onFileSince ? " (saved " + dayOnly(driver.onFileSince) + ")" : ""}: check it at
@@ -140,8 +145,15 @@ export default function DeskDocuments({ booking }: { booking: StaffBooking }) {
             </div>
           ))}
           <div>
-            <span className="text-[#595959]">Signed {stamp(docs.signedAt)} · agreement {docs.agreementVersion}</span>
-            {docs.signature.kind === "drawn" && docs.signature.image ? (
+            {docs.signature.kind === "none" ? (
+              <span className="block text-[#595959]">
+                <strong className="text-[#171717]">Not signed online:</strong> booked on the desk, so the agreement is signed at
+                handover. Licences added by {docs.signature.name}.
+              </span>
+            ) : (
+              <span className="text-[#595959]">Signed {stamp(docs.signedAt)} · agreement {docs.agreementVersion}</span>
+            )}
+            {docs.signature.kind === "none" ? null : docs.signature.kind === "drawn" && docs.signature.image ? (
               <img src={docs.signature.image.data} alt="Customer's signature" className="mt-1 h-14 w-auto rounded border border-[#d0d0d0] bg-white" />
             ) : (
               <span className="mt-1 block text-lg italic" style={{ fontFamily: "'Brush Script MT', 'Segoe Script', cursive" }}>

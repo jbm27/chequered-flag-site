@@ -43,7 +43,7 @@ export default function DamageCoverChoice({
     (on ? "border-[#171717] bg-white shadow-[0_1px_0_rgba(0,0,0,0.04)]" : "border-[#e5e5e5] bg-[#f5f5f3] hover:border-[#9a9a9a]");
 
   return (
-    <fieldset className="mb-5">
+    <fieldset id="damageCover" className="mb-5 scroll-mt-24">
       <legend className="text-lg font-bold tracking-[-0.01em]">Choose your damage cover</legend>
       <p className="mb-3.5 mt-0.5 text-[13px] text-[#595959]">Pick one option to continue.</p>
       <div className="grid gap-3.5 sm:grid-cols-2">

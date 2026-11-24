@@ -1544,8 +1544,24 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                               ? "Send booking request"
                               : "Hold vehicle · " + ksh(total) + " due"}
                         </button>
+                        {/* Why the button is grey: the customer hasn't chosen waiver or no waiver yet. */}
+                        {coverMissing && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cards = document.getElementById("damageCover");
+                              cards?.scrollIntoView({ behavior: "smooth", block: "center" });
+                              (document.getElementById("coverWaiver") as HTMLInputElement | null)?.focus({ preventScroll: true });
+                            }}
+                            className="flex min-h-[46px] max-w-[340px] items-center gap-2 rounded-lg border border-[#e6c97a] bg-[#fff8e1] px-3 py-2 text-left text-[13px] font-semibold leading-snug text-[#5f4b00]"
+                          >
+                            <span aria-hidden="true" className="text-base">↑</span>
+                            <span>
+                              Tick <strong>Collision damage waiver</strong> or <strong>No waiver</strong> above to continue.
+                            </span>
+                          </button>
+                        )}
                       </div>
-                      {coverMissing && <p className="mt-2 text-[13px] text-[#595959]">Choose a damage cover option to continue.</p>}
                     </div>
                   )}
                 </div>

@@ -5,6 +5,7 @@ import { COMPANY, CONTACT } from "../lib/contact";
 import { type LatLng } from "./PinMap";
 import PinPicker from "./PinPicker";
 import PaymentDetails from "./PaymentDetails";
+import DamageCoverChoice from "./DamageCoverChoice";
 import ReviewPrompt, { rememberForReview, reviewUrl, skipReview } from "./ReviewPrompt";
 import { mpesaCodeHint } from "../lib/payments";
 import { LicencePicker, SignatureBox } from "./CheckoutDocuments";
@@ -140,7 +141,11 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [insure, setInsure] = useState(false);
+  // Damage cover: true (collision damage waiver), false (no waiver), null (not chosen yet; required to book).
+  const [insure, setInsure] = useState<boolean | null>(null);
+  useEffect(() => {
+    setInsure(null);
+  }, [selectedId]);
   const [mpesaCode, setMpesaCode] = useState("");
   // Discount code at checkout
   const [codeInput, setCodeInput] = useState("");
@@ -260,7 +265,8 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   });
   const days = availability?.days || 0;
   const hireTotal = selected ? days * selected.rate : 0;
-  const insuranceTotal = selected && insure ? days * selected.addon : 0;
+  const insuranceTotal = selected && insure === true ? days * selected.addon : 0;
+  const coverMissing = Boolean(selected && selected.addon > 0 && insure === null);
   const pricedDelivery = deliveryQuote.manual ? 0 : deliveryQuote.fee || 0;
   // A discount code (issued by staff) comes off the hire charge only; the server checks it again when booking.
   const codeOff = codeApplied ? Math.min(codeApplied.amount, hireTotal) : 0;
@@ -284,7 +290,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       address: delivery === "none" ? "" : address,
       directions: delivery === "none" ? "" : directions,
       note: delivery === "none" ? "" : note,
-      insure,
+      insure: insure === true,
       name,
       email,
       phone,
@@ -431,7 +437,12 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
 
   async function submit() {
     if (!selected) return;
-    const problem = check(true) || driversProblem() || signatureProblem() || (terms ? "" : "Tick the box to confirm you have read and signed the hire agreement.");
+    const problem =
+      (coverMissing ? "Choose your damage cover: the collision damage waiver or no waiver." : "") ||
+      check(true) ||
+      driversProblem() ||
+      signatureProblem() ||
+      (terms ? "" : "Tick the box to confirm you have read and signed the hire agreement.");
     if (problem) {
       setFormError(problem);
       return;
@@ -1291,27 +1302,16 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                         {manual ? "Send your request" : "Confirm and pay"}
                       </h2>
                       {selected.addon > 0 && (
-                        <div className="mb-5 flex items-start gap-2.5 rounded-lg border border-[#e5e5e5] bg-[#f5f5f3] px-4 py-3.5">
-                          <input
-                            id="insBox"
-                            type="checkbox"
-                            checked={insure}
-                            onChange={(event) => setInsure(event.target.checked)}
-                            className="mt-px h-[22px] w-[22px] flex-none"
-                          />
-                          <label htmlFor="insBox" className="text-sm leading-normal">
-                            <strong>Add the collision damage waiver for {ksh(selected.addon)} a day</strong>
-                            <br />
-                            <span className="text-[#595959]">
-                              {selectedLimit
-                                ? "Without it, you pay for damage to this vehicle up to " + ksh(selectedLimit) + " for the whole hire. "
-                                : ""}
-                              With it, you don&apos;t pay for accident or collision damage. Fines, and damage to the
-                              suspension, tyres or transmission from bad driving, are not covered. Undercarriage damage
-                              is always paid in full.
-                            </span>
-                          </label>
-                        </div>
+                        <DamageCoverChoice
+                          addon={selected.addon}
+                          limit={selectedLimit}
+                          days={days}
+                          choice={insure}
+                          onChoose={(value) => {
+                            setInsure(value);
+                            if (/damage cover/i.test(formError)) setFormError("");
+                          }}
+                        />
                       )}
 
                       {manual ? (
@@ -1322,6 +1322,32 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                         </div>
                       ) : (
                         <div className="rounded-xl border border-[#e5e5e5] bg-[#f5f5f3] p-4">
+                          <dl className="mb-3 grid gap-1 border-b border-[#dcdcd8] pb-3 text-sm">
+                            <div className="flex justify-between gap-3">
+                              <dt className="text-[#3f3f3f]">Rental ({days === 1 ? "1 day" : days + " days"})</dt>
+                              <dd>{ksh(hireTotal)}</dd>
+                            </div>
+                            {selected.addon > 0 && (
+                              <div className="flex justify-between gap-3">
+                                <dt className="text-[#3f3f3f]">Damage cover</dt>
+                                <dd className={insure === null ? "text-[#595959]" : ""}>
+                                  {insure === null ? "Not chosen yet" : insure ? ksh(insuranceTotal) : "No waiver"}
+                                </dd>
+                              </div>
+                            )}
+                            {pricedDelivery > 0 && (
+                              <div className="flex justify-between gap-3">
+                                <dt className="text-[#3f3f3f]">Delivery and collection</dt>
+                                <dd>{ksh(pricedDelivery)}</dd>
+                              </div>
+                            )}
+                            {codeOff > 0 && codeApplied && (
+                              <div className="flex justify-between gap-3">
+                                <dt className="text-[#3f3f3f]">Discount ({codeApplied.code})</dt>
+                                <dd>−{ksh(codeOff)}</dd>
+                              </div>
+                            )}
+                          </dl>
                           <div className="mb-3 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(170px,1fr))]">
                             <div>
                               <div className="text-[13px] text-[#595959]">Amount due in full</div>
@@ -1482,8 +1508,8 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                         <button
                           type="button"
                           onClick={submit}
-                          disabled={submitting || !selected.available}
-                          className={btnDark}
+                          disabled={submitting || !selected.available || coverMissing}
+                          className={btnDark + " disabled:cursor-not-allowed disabled:bg-[#d6d6d2] disabled:text-[#595959]"}
                         >
                           {submitting
                             ? "Sending…"
@@ -1492,6 +1518,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                               : "Hold vehicle · " + ksh(total) + " due"}
                         </button>
                       </div>
+                      {coverMissing && <p className="mt-2 text-[13px] text-[#595959]">Choose a damage cover option to continue.</p>}
                     </div>
                   )}
                 </div>

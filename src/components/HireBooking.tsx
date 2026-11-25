@@ -11,14 +11,18 @@ import ReviewPrompt, { rememberForReview, reviewUrl, skipReview } from "./Review
 import { mpesaCodeHint } from "../lib/payments";
 import { LicencePicker, SignatureBox } from "./CheckoutDocuments";
 import { buildBookingPdf, downloadPdf, loadPdfLogo, type BookingPdfData } from "../lib/bookingPdf";
+import Marked, { ReviewKey } from "./Marked";
+import { SHOW_REVIEW_CHANGES } from "../lib/review";
 import {
+  AGREEMENT_MARKED,
   AGREEMENT_TEXT,
   AGREEMENT_TITLE,
   AGREEMENT_VERSION,
   MAX_DRIVERS,
-  CANCELLATION_SUMMARY,
+  CANCELLATION_SUMMARY_MARKED,
   agreementLine,
   bookingSchedule,
+  bookingScheduleMarked,
   damageLimitFor,
   mileageFor,
   type DocImage,
@@ -351,8 +355,8 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       reference: "",
       hirer: { name: name.trim(), email: email.trim(), phone: phone.trim() },
       verification: usingOnFile
-        ? "Licence photo on file from an earlier booking; checked at handover"
-        : "Licence photo uploaded for each driver; checked at handover",
+        ? "Licence photo on file from an earlier booking; ⟦licence and a valid ID or passport to be presented at handover⟧⟪checked at handover⟫"
+        : "Licence photo uploaded for each driver; ⟦licence and a valid ID or passport to be presented at handover⟧⟪checked at handover⟫",
       drivers: [name.trim(), ...extraDrivers.map((driver) => driver.name.trim())],
       vehicle: selected ? selected.name : "",
       collect: collectWhere + ", " + when(pickup, pickTime),
@@ -1393,12 +1397,18 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                             <div>
                               <dt className="inline font-bold">Damage liability limit: </dt>
                               <dd className="inline">
-                                {selectedLimit ? ksh(selectedLimit) + " per hire, the most you pay for damage to the vehicle (clause 7)." : "Not set"}
+                                {selectedLimit ? (
+                                  <Marked text={ksh(selectedLimit) + "⟦ + VAT⟧ per hire, the most you pay for damage to the vehicle (clause 7)."} />
+                                ) : (
+                                  "Not set"
+                                )}
                               </dd>
                             </div>
                             <div>
                               <dt className="inline font-bold">Cancellation: </dt>
-                              <dd className="inline">{CANCELLATION_SUMMARY}</dd>
+                              <dd className="inline">
+                                <Marked text={CANCELLATION_SUMMARY_MARKED} />
+                              </dd>
                             </div>
                             <div>
                               <dt className="inline font-bold">Mileage: </dt>
@@ -1452,22 +1462,27 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                               className="h-auto w-[96px] flex-none"
                             />
                           </div>
-                          {AGREEMENT_TEXT.map((paragraph, index) => {
+                          <ReviewKey />
+                          {(SHOW_REVIEW_CHANGES ? AGREEMENT_MARKED : AGREEMENT_TEXT).map((paragraph, index) => {
                             const line = agreementLine(paragraph);
                             if (line.kind === "heading") {
                               return (
                                 <p key={index} className="mb-1.5 mt-4 font-bold text-[#171717]">
-                                  {line.text}
+                                  <Marked text={line.text} />
                                 </p>
                               );
                             }
                             if (line.kind === "schedule") {
                               return (
                                 <dl key={index} className="mb-3 grid gap-px overflow-hidden rounded-md border border-[#e5e5e5] bg-[#e5e5e5] text-[13px]">
-                                  {bookingSchedule(scheduleValues()).map(([label, value]) => (
+                                  {bookingScheduleMarked(scheduleValues()).map(([label, value]) => (
                                     <div key={label} className="grid gap-x-3 bg-white px-3 py-1.5 sm:grid-cols-[190px_minmax(0,1fr)]">
-                                      <dt className="text-[#595959]">{label}</dt>
-                                      <dd className="text-[#171717]">{value}</dd>
+                                      <dt className="text-[#595959]">
+                                        <Marked text={label} />
+                                      </dt>
+                                      <dd className="text-[#171717]">
+                                        <Marked text={value} />
+                                      </dd>
                                     </div>
                                   ))}
                                 </dl>
@@ -1475,7 +1490,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                             }
                             return (
                               <p key={index} className={line.level === 2 ? "mb-1 pl-8" : line.level === 1 ? "mb-2 pl-4" : "mb-2"}>
-                                {line.text}
+                                <Marked text={line.text} />
                               </p>
                             );
                           })}

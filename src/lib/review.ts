@@ -4,9 +4,10 @@
 // agreement and schedule, the desk) the markers are stripped by plain(), so customers only ever get clean text.
 //
 // BEFORE GOING LIVE: set SHOW_REVIEW_CHANGES to false (or run scripts/strip-review-marks.js to remove the markers
-// from the wording for good). The live site never shows them anyway: Vercel sets NEXT_PUBLIC_VERCEL_ENV to
-// "production" there.
-export const SHOW_REVIEW_CHANGES = true && process.env.NEXT_PUBLIC_VERCEL_ENV !== "production";
+// from the wording for good). The live site never shows them anyway: Vercel sets VERCEL_ENV (and
+// NEXT_PUBLIC_VERCEL_ENV) to "production" there, and next.config.js turns that into REVIEW_HIDE.
+export const SHOW_REVIEW_CHANGES =
+  true && process.env.NEXT_PUBLIC_VERCEL_ENV !== "production" && process.env.REVIEW_HIDE !== "1";
 
 // Clean text: removed wording dropped, new wording kept without its markers.
 export function plain(text: string) {

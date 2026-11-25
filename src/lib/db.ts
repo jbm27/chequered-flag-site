@@ -786,8 +786,8 @@ export async function createBooking(
               reference,
               hirer: { name: booking.customer.name, email: booking.customer.email, phone: booking.customer.phone },
               verification: opts.documents.drivers[0].fromFile
-                ? "Licence photo on file from an earlier booking; checked at handover"
-                : "Licence photo uploaded for each driver; checked at handover",
+                ? "Licence photo on file from an earlier booking; licence and a valid ID or passport to be presented at handover"
+                : "Licence photo uploaded for each driver; licence and a valid ID or passport to be presented at handover",
               drivers: opts.documents.drivers.map((driver) => driver.name),
               vehicle: booking.model.name,
               collect: scheduleWhere(booking, "collect") + ", " + formatDay(booking.pickup) + ", " + booking.pickTime + " EAT",

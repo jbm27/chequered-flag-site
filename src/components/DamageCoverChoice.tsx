@@ -1,6 +1,7 @@
 "use client";
 
 import { ksh } from "../lib/hire";
+import Marked from "./Marked";
 
 // "Choose your damage cover" in step 2 of the hire checkout (Homer's mock-up): two cards, the collision damage
 // waiver (recommended) or no waiver. The customer must pick one before they can hold the vehicle.
@@ -37,7 +38,8 @@ export default function DamageCoverChoice({
   choice: boolean | null; // true: waiver, false: no waiver, null: not chosen yet
   onChoose: (insure: boolean) => void;
 }) {
-  const limitText = limit ? ksh(limit) : "the damage liability limit";
+  // The damage limits are + VAT (agreement revision -f); "⟦…⟧" highlights the change for review (lib/review.ts).
+  const limitText = limit ? <Marked text={ksh(limit) + "⟦ + VAT⟧"} /> : "the damage liability limit";
   const card = (on: boolean) =>
     "relative block cursor-pointer rounded-xl border-2 p-4 pt-5 transition-colors " +
     (on ? "border-[#171717] bg-white shadow-[0_1px_0_rgba(0,0,0,0.04)]" : "border-[#e5e5e5] bg-[#f5f5f3] hover:border-[#9a9a9a]");
@@ -78,7 +80,7 @@ export default function DamageCoverChoice({
           </ul>
           {limit ? (
             <span className="mt-3 block rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-[13px]">
-              {ksh(addon)} a day vs up to <strong>{ksh(limit)}</strong> in repairs
+              {ksh(addon)} a day vs up to <strong>{limitText}</strong> in repairs
             </span>
           ) : null}
           <span className="mt-2.5 block text-xs leading-snug text-[#595959]">

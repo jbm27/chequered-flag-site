@@ -12,6 +12,9 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Review highlights (src/lib/review.ts) must never show on the live site. VERCEL_ENV is always set by Vercel
+  // when it builds ("production" for the live site), so this is passed to the browser code at build time.
+  env: { REVIEW_HIDE: process.env.VERCEL_ENV === "production" ? "1" : "" },
   poweredByHeader: false, // don't advertise the framework version
   // Old address: staff sign in on the hire desk.
   async redirects() {

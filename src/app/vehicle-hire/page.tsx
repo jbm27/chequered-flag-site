@@ -36,7 +36,7 @@ const KNOW = [
   },
   {
     title: "Drivers",
-    body: "Every driver must be at least 25, hold a valid licence recognised in Kenya and be named on the booking. Add a photo of each driver's licence when you book. ⟦Every driver must present their driving licence and a valid ID or passport at handover.⟧⟪ and bring the licences and ID to collection.⟫",
+    body: "Every driver must ⟪be at least 25, ⟫hold a valid licence recognised in Kenya and be named on the booking.⟦ There is no minimum age.⟧ Add a photo of each driver's licence when you book. ⟦Every driver must present their driving licence and a valid ID or passport at handover.⟧⟪ and bring the licences and ID to collection.⟫",
   },
   {
     title: "Mileage",
@@ -71,7 +71,7 @@ const DIRECTIONS = [
 const FAQ = [
   {
     q: "What do I need to hire a vehicle?",
-    a: "Every driver must be at least 25 and hold a valid driving licence recognised in Kenya for the vehicle. When you book, add a photo of the front of each driver's licence. ⟦Every driver must present their driving licence and a valid ID or passport at handover⟧⟪Bring the licences and your ID or passport when you collect the vehicle: we check them at handover⟫, and ⟦we⟧ can't hand the vehicle over if the checks fail.",
+    a: "Every driver must ⟪be at least 25 and ⟫hold a valid driving licence recognised in Kenya for the vehicle.⟦ There is no minimum age.⟧ When you book, add a photo of the front of each driver's licence. ⟦Every driver must present their driving licence and a valid ID or passport at handover⟧⟪Bring the licences and your ID or passport when you collect the vehicle: we check them at handover⟫, and ⟦we⟧ can't hand the vehicle over if the checks fail.",
   },
   {
     q: "How much do I pay to book, and is there a deposit?",
@@ -115,7 +115,7 @@ const FAQ = [
   },
   {
     q: "Can someone else drive?",
-    a: "Only drivers named on your booking, or approved by us in writing. Add them with + Add driver when you book, with a photo of their licence. They must also be at least 25. You stay responsible for how they use the vehicle.",
+    a: "Only drivers named on your booking, or approved by us in writing. Add them with + Add driver when you book, with a photo of their licence. ⟪They must also be at least 25. ⟫⟦They also need a valid driving licence. ⟧You stay responsible for how they use the vehicle.",
   },
   {
     q: "Where can I take the vehicle?",

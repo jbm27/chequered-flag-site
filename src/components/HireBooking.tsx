@@ -1273,7 +1273,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                         )}
                       </div>
                       <p className="mt-3 text-[13px] text-[#595959]">
-                        Every driver must be at least 25. Please also bring the licences and ID to collection.
+                        <Marked text="⟦Every driver needs a valid driving licence.⟧⟪Every driver must be at least 25.⟫ Please also bring the licences and ID to collection." />
                       </p>
                       {formError && (
                         <p role="alert" className="mt-3 text-sm font-bold text-[#9b1c1c]">
@@ -1495,8 +1495,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                           className="mt-px h-[22px] w-[22px] flex-none"
                         />
                         <label htmlFor="termsBox" className="text-sm leading-normal">
-                          I agree to the Rental Terms. I have read and signed the hire agreement, and every driver named on
-                          this booking is at least 25 with a valid driving licence.
+                          <Marked text="I agree to the Rental Terms. I have read and signed the hire agreement, and every driver named on this booking ⟦has⟧⟪is at least 25 with⟫ a valid driving licence." />
                         </label>
                       </div>
                       {formError && (

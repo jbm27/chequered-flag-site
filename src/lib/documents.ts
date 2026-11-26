@@ -34,6 +34,7 @@ export const MAX_IMAGE_SIDE = 4000;
 // whoever caused it, assessed from invoices or quotes, with "customer-attributable" removed (7.1, 7.2, 8.2); damage
 // limits + VAT (7.2); refunds "will" be made (1.4). Clauses 3.3 (deposit) and 11.2 (admin fee) are unchanged until
 // Homer and James decide. The wording below carries review markers (lib/review.ts); AGREEMENT_TEXT is clean.
+// Also in -f (Homer, 26 Nov 2026): no minimum age. The insurer only requires a valid driving licence (2.1).
 export const AGREEMENT_VERSION = "online-hire-agreement-2026-11-revised-f";
 export const AGREEMENT_TITLE = "Self-drive vehicle hire agreement";
 export const AGREEMENT_MARKED: string[] = [
@@ -48,7 +49,7 @@ export const AGREEMENT_MARKED: string[] = [
   "1.3 The vehicle remains the property of the Company or its lawful owner. No ownership rights pass to the Hirer. Any change to the booking after confirmation requires both parties’ agreement and a revised confirmation.",
   "1.4 Every booking is subject to review by the Company after it is placed. If the booked vehicle becomes unavailable before collection, for example because of a breakdown, accident or damage, and the Company cannot provide an agreed equivalent or better replacement, the Company may cancel the booking. The Company ⟦will⟧⟪shall⟫ tell the Hirer as soon as practicable, and ⟦will refund the Hirer in full for⟧⟪the Hirer shall receive a full refund of⟫ all amounts paid for that booking, as set out in clause 4.5.",
   "# 2. Eligibility and authorised drivers",
-  "2.1 Every driver must be at least 25 years old, hold a valid licence recognised in Kenya for the vehicle class and satisfy the Company’s reasonable identity and licence checks. ⟦Every driver must present their driving licence and a valid national ID or passport at handover.⟧ The Company may refuse handover if the checks fail and ⟦will apply the cancellation and no-show charges in clause 4 of this agreement⟧⟪shall apply any cancellation/no-show charges only as permitted by applicable law⟫.",
+  "2.1 Every driver must ⟪be at least 25 years old, ⟫hold a valid licence recognised in Kenya for the vehicle class and satisfy the Company’s reasonable identity and licence checks. ⟦Every driver must present their driving licence and a valid national ID or passport at handover.⟧ The Company may refuse handover if the checks fail and ⟦will apply the cancellation and no-show charges in clause 4 of this agreement⟧⟪shall apply any cancellation/no-show charges only as permitted by applicable law⟫.",
   "2.2 Only drivers specifically listed in the Booking Schedule or subsequently authorised by the Company in writing may drive. The Hirer remains responsible for ensuring that authorised drivers comply with this agreement.",
   "2.3 The Hirer confirms that information supplied is accurate and shall promptly disclose relevant restrictions, disqualifications or circumstances that legally prevent any proposed driver from operating the vehicle. The Company will not routinely request sensitive medical details unless necessary and lawfully justified.",
   "# 3. Payments, rental periods and deposits",

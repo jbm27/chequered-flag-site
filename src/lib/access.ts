@@ -15,3 +15,11 @@ export const CALENDAR_LINK_USERS = ["homer.johnstone"];
 export function canUseCalendarLink(username: string | null | undefined) {
   return Boolean(username) && CALENDAR_LINK_USERS.includes(String(username).trim().toLowerCase());
 }
+
+// Discount codes (made on the desk, typed in by customers at checkout): only Homer and James (Nov 2026).
+// Checked on the server when codes are listed, made or removed.
+export const DISCOUNT_CODE_USERS = ["homer.johnstone", "james.boyd.moss"];
+
+export function canManageDiscountCodes(username: string | null | undefined) {
+  return Boolean(username) && DISCOUNT_CODE_USERS.includes(String(username).trim().toLowerCase());
+}

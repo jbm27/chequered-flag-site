@@ -169,6 +169,21 @@ async function setup() {
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS overlap_approved boolean NOT NULL DEFAULT false;
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS overlap_note text NOT NULL DEFAULT '';
     ALTER TABLE bookings ADD COLUMN IF NOT EXISTS overlap_by text NOT NULL DEFAULT '';
+    -- Discount codes issued by staff (Homer, Nov 2026). Customers type one in at checkout. kind 'percent' takes
+    -- value % off the hire charge, 'amount' takes value KSh off it (never below 0); the waiver and delivery are
+    -- not discounted. max_uses null = no limit; expires_on null = no expiry (last day the code works).
+    CREATE TABLE IF NOT EXISTS discount_codes (
+      code text PRIMARY KEY,
+      kind text NOT NULL CHECK (kind IN ('percent', 'amount')),
+      value integer NOT NULL CHECK (value > 0),
+      note text NOT NULL DEFAULT '',
+      max_uses integer,
+      uses integer NOT NULL DEFAULT 0,
+      expires_on date,
+      active boolean NOT NULL DEFAULT true,
+      created_by text NOT NULL DEFAULT '',
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
     -- When each staff member last opened the new-bookings bell on the desk.
     CREATE TABLE IF NOT EXISTS staff_seen (
       username text PRIMARY KEY,
@@ -444,6 +459,126 @@ function deliveryDetail(booking: {
 
 // Website bookings call this with no options. The staff desk passes options for bookings added by hand:
 // confirmed (payment already received), a staff note, and an optional email address.
+// ---------- Discount codes ----------
+
+export type DiscountCode = {
+  code: string;
+  kind: "percent" | "amount";
+  value: number;
+  note: string;
+  maxUses: number | null;
+  uses: number;
+  expiresOn: string;
+  active: boolean;
+  createdBy: string;
+  createdAt: string;
+};
+
+export function normaliseDiscountCode(value: unknown) {
+  return String(value ?? "").toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 24);
+}
+
+function discountCodeRow(row: Record<string, unknown>): DiscountCode {
+  return {
+    code: String(row.code),
+    kind: row.kind === "amount" ? "amount" : "percent",
+    value: Number(row.value),
+    note: String(row.note || ""),
+    maxUses: row.max_uses === null || row.max_uses === undefined ? null : Number(row.max_uses),
+    uses: Number(row.uses || 0),
+    expiresOn: row.expires_on ? String(row.expires_on).slice(0, 10) : "",
+    active: Boolean(row.active),
+    createdBy: String(row.created_by || ""),
+    createdAt: row.created_at ? new Date(String(row.created_at)).toISOString() : "",
+  };
+}
+
+// What a code takes off a hire charge, or why it can't be used. Whole shillings, never more than the hire charge.
+function discountFromCode(code: DiscountCode | null, hireTotal: number): { amount: number; label: string } | { error: string } {
+  if (!code || !code.active) return { error: "That discount code isn't valid. Check it and try again." };
+  if (code.expiresOn && code.expiresOn < todayNairobi()) return { error: "That discount code has expired." };
+  if (code.maxUses !== null && code.uses >= code.maxUses) return { error: "That discount code has already been used." };
+  const amount = Math.min(hireTotal, code.kind === "percent" ? Math.round((hireTotal * Math.min(100, code.value)) / 100) : code.value);
+  const label = code.kind === "percent" ? code.value + "% off the hire" : ksh(code.value) + " off the hire";
+  return { amount, label };
+}
+
+// Checkout: what a code would take off this hire, before the customer books. The booking checks it again.
+export async function previewDiscountCode(raw: { code?: unknown; modelId?: unknown; pickup?: unknown; returnOn?: unknown }) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const code = normaliseDiscountCode(raw.code);
+  if (code.length < 3) throw staffError("Enter your discount code.", 400);
+  const model = modelById(String(raw.modelId ?? ""));
+  const pickup = String(raw.pickup ?? "");
+  const returnOn = String(raw.returnOn ?? "");
+  if (!model || dayNumber(pickup) === null || dayNumber(returnOn) === null || returnOn < pickup) {
+    throw staffError("Choose your vehicle and dates first.", 400);
+  }
+  const hireTotal = hireDays(pickup, returnOn) * model.rate;
+  const found = await db.query(`SELECT * FROM discount_codes WHERE code = $1`, [code]);
+  const result = discountFromCode(found.rows[0] ? discountCodeRow(found.rows[0]) : null, hireTotal);
+  if ("error" in result) throw staffError(result.error, 404);
+  return { code, amount: result.amount, label: result.label };
+}
+
+// The active codes: made, not removed and not used yet. A used code drops off the list.
+export async function listDiscountCodes(): Promise<DiscountCode[]> {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const result = await db.query(
+    `SELECT * FROM discount_codes
+     WHERE active = true AND (max_uses IS NULL OR uses < max_uses)
+       AND (expires_on IS NULL OR expires_on >= (now() AT TIME ZONE 'Africa/Nairobi')::date)
+     ORDER BY created_at DESC LIMIT 200`,
+  );
+  return result.rows.map(discountCodeRow);
+}
+
+// Homer or James make a code on the desk. raw: { code, kind, value, note }. Every code works once (Homer, Nov 2026):
+// after one booking uses it, it can't be used again. expiresOn is optional and not offered on the desk for now.
+export async function createDiscountCode(
+  raw: { code?: unknown; kind?: unknown; value?: unknown; note?: unknown; maxUses?: unknown; expiresOn?: unknown },
+  by: string,
+) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const code = normaliseDiscountCode(raw.code);
+  if (code.length < 3) throw staffError("Use a code of at least 3 letters or numbers.", 400);
+  const kind = raw.kind === "amount" ? "amount" : "percent";
+  const value = wholeShillings(raw.value);
+  if (!value || value <= 0) throw staffError(kind === "percent" ? "Enter the percentage off, for example 10." : "Enter the KSh off, for example 2000.", 400);
+  if (kind === "percent" && value > 100) throw staffError("A percentage can't be more than 100.", 400);
+  const note = String(raw.note ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+  const maxUses = 1;
+  const expiresOn = String(raw.expiresOn ?? "").trim();
+  if (expiresOn && dayNumber(expiresOn) === null) throw staffError("Choose a valid expiry date, or leave it blank.", 400);
+  if (expiresOn && expiresOn < todayNairobi()) throw staffError("The expiry date is in the past.", 400);
+  const saved = await db.query(
+    `INSERT INTO discount_codes (code, kind, value, note, max_uses, expires_on, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (code) DO NOTHING
+     RETURNING *`,
+    [code, kind, value, note, maxUses, expiresOn || null, by.slice(0, 60)],
+  );
+  if (!saved.rows[0]) throw staffError("The code " + code + " already exists. Choose another.", 409);
+  return discountCodeRow(saved.rows[0]);
+}
+
+// Turn a code off (it stops working at once) or back on.
+export async function setDiscountCodeActive(codeRaw: unknown, active: boolean) {
+  await ensureReady();
+  const db = pool();
+  if (!db) throw new Error("DATABASE_URL is not set");
+  const code = normaliseDiscountCode(codeRaw);
+  const saved = await db.query(`UPDATE discount_codes SET active = $2 WHERE code = $1 RETURNING *`, [code, active]);
+  if (!saved.rows[0]) throw staffError("That code was not found.", 404);
+  return discountCodeRow(saved.rows[0]);
+}
+
 // A number plate chosen on the desk: an active vehicle of the booking's model (+ Add booking) or of the same
 // class, saloon, SUV or 4x4 (Change vehicle). Returns the references of held or paid bookings it already has on
 // those dates (other than `ignoreId`); none means it is free.
@@ -515,6 +650,21 @@ export async function createBooking(
   const client = await db.connect();
   try {
     await client.query("BEGIN");
+    // A discount code typed in at checkout (website bookings only): checked and counted in this same step,
+    // so a code with one use left can't be used twice at once. It comes off the hire charge.
+    let discount = 0;
+    let discountNote = "";
+    const discountCode = opts?.emailOptional ? "" : normaliseDiscountCode(raw.discountCode);
+    if (discountCode) {
+      const found = await client.query(`SELECT * FROM discount_codes WHERE code = $1 FOR UPDATE`, [discountCode]);
+      const result = discountFromCode(found.rows[0] ? discountCodeRow(found.rows[0]) : null, booking.hireTotal);
+      if ("error" in result) throw staffError(result.error, 400);
+      discount = result.amount;
+      const note = found.rows[0].note ? " (" + String(found.rows[0].note) + ")" : "";
+      discountNote = "Code " + discountCode + ": " + result.label + note;
+      await client.query(`UPDATE discount_codes SET uses = uses + 1 WHERE code = $1`, [discountCode]);
+    }
+    const total = booking.total - discount;
     let vehicleId: string | null = null;
     let overlapping = false;
     if (!booking.manual && model && opts?.vehicleId) {
@@ -602,7 +752,7 @@ export async function createBooking(
             booking.hireTotal,
             booking.insuranceTotal,
             booking.manual ? null : booking.delivery.fee,
-            booking.total,
+            total,
             booking.ooh.any,
             booking.oohNote,
             booking.mpesaCode,
@@ -636,8 +786,8 @@ export async function createBooking(
               reference,
               hirer: { name: booking.customer.name, email: booking.customer.email, phone: booking.customer.phone },
               verification: opts.documents.drivers[0].fromFile
-                ? "Licence photo on file from an earlier booking; checked at handover"
-                : "Licence photo uploaded for each driver; checked at handover",
+                ? "Licence photo on file from an earlier booking; licence and a valid ID or passport to be presented at handover"
+                : "Licence photo uploaded for each driver; licence and a valid ID or passport to be presented at handover",
               drivers: opts.documents.drivers.map((driver) => driver.name),
               vehicle: booking.model.name,
               collect: scheduleWhere(booking, "collect") + ", " + formatDay(booking.pickup) + ", " + booking.pickTime + " EAT",
@@ -646,7 +796,8 @@ export async function createBooking(
                 "Hire " + ksh(booking.hireTotal) +
                 (booking.insuranceTotal ? " + collision damage waiver " + ksh(booking.insuranceTotal) : "") +
                 (booking.manual ? " + delivery (to be quoted)" : booking.delivery.fee ? " + delivery " + ksh(booking.delivery.fee) : "") +
-                " = " + ksh(booking.total) + " (VAT included)",
+                (discount ? " − discount " + ksh(discount) + " (code " + discountCode + ")" : "") +
+                " = " + ksh(total) + " (VAT included)",
               damageLimit: damageLimitFor(booking.model.name, booking.model.category),
               category: booking.model.category,
               waiver: booking.insuranceTotal
@@ -682,6 +833,12 @@ export async function createBooking(
         [bookingId, opts.overlap.note.slice(0, 200), opts.overlap.by.slice(0, 60)],
       );
     }
+    if (discount) {
+      await client.query(
+        `UPDATE bookings SET discount = $2, discount_note = $3, discount_by = 'discount code', discount_at = now() WHERE id = $1`,
+        [bookingId, discount, discountNote.slice(0, 200)],
+      );
+    }
     await client.query(`INSERT INTO reviews (booking_id, token) VALUES ($1, $2)`, [bookingId, reviewToken]);
     await client.query("COMMIT");
     return {
@@ -700,13 +857,14 @@ export async function createBooking(
       hireTotal: booking.hireTotal,
       insuranceTotal: booking.insuranceTotal,
       deliveryFee: booking.manual ? null : booking.delivery.fee,
-      total: booking.total,
+      total,
+      discount,
       email: booking.customer.email,
       phone: booking.customer.phone,
       message: bookingMessage({
         manual: booking.manual,
         reference,
-        total: booking.total,
+        total,
         model: booking.model.name,
       }),
     };

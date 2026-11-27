@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { mpesaCodeHint } from "../lib/payments";
+import Marked from "./Marked";
 import DeskPlateChoice, { clashesFor } from "./DeskPlateChoice";
 import {
   addDays,
@@ -360,7 +361,7 @@ export default function DeskAddBooking({
         )}
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={terms} onChange={(e) => setTerms(e.target.checked)} className="h-5 w-5" />
-          Driver is 25+ and will bring licence and ID
+          <Marked text="Driver ⟦has a valid licence⟧⟪is 25+⟫ and will bring licence and ID" />
         </label>
       </div>
       <div className="mt-3 grid max-w-[660px] gap-3 [grid-template-columns:repeat(auto-fit,minmax(200px,1fr))]">

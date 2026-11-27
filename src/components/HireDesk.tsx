@@ -12,10 +12,11 @@ import DeskDiscount from "./DeskDiscount";
 import DeskAllocate from "./DeskAllocate";
 import { clashesFor } from "./DeskPlateChoice";
 import DeskReviews, { AskForReview } from "./DeskReviews";
+import DeskDiscountCodes from "./DeskDiscountCodes";
 import { bookingCodes, duplicateCodes, looksLikeMpesaCode, normaliseCode } from "../lib/payments";
 import DeskCustomers, { type LicenceOnFileRow } from "./DeskCustomers";
 import DeskPerformance from "./DeskPerformance";
-import { canSeePerformance, canUseCalendarLink } from "../lib/access";
+import { canManageDiscountCodes, canSeePerformance, canUseCalendarLink } from "../lib/access";
 import DeskDocuments from "./DeskDocuments";
 
 // Staff desk laid out like Homer's fleet dashboard design (V1.5).
@@ -42,7 +43,7 @@ export type DeskVehicle = {
 };
 
 type Chip = { label: string; bg: string; fg: string; bd: string };
-type SectionKey = "overview" | "calendar" | "table" | "payments" | "customers" | "performance" | "vehicles" | "compare" | "schedule" | "reviews";
+type SectionKey = "overview" | "calendar" | "table" | "payments" | "customers" | "performance" | "vehicles" | "compare" | "schedule" | "reviews" | "codes";
 
 const WIN = 28;
 // Payment colours (Homer, Nov 2026): dark green paid in full, yellow part paid, red nothing paid yet.
@@ -247,6 +248,7 @@ export default function HireDesk() {
     compare: false,
     schedule: false,
     reviews: false,
+    codes: false,
   });
   const [selectedId, setSelectedId] = useState("");
   const [detailOpen, setDetailOpen] = useState(true);
@@ -559,6 +561,7 @@ export default function HireDesk() {
     compare: chase.length ? plural(chase.length, "booking") + " unpaid at pick-up" : "",
     schedule: "",
     reviews: reviewsWaiting ? plural(reviewsWaiting, "review") + " waiting for approval" : "",
+    codes: "",
   };
 
   // Calendar
@@ -2337,6 +2340,17 @@ export default function HireDesk() {
             )}
           </div>
         </section>
+
+        {/* Discount codes: Homer and James only */}
+        {canManageDiscountCodes(signedIn) && (
+          <section className={card + " mt-[22px] p-[22px]"}>
+            {sectionHead("codes", "Discount codes")}
+            <p className="mb-3.5 mt-1 max-w-[760px] text-sm text-[#595959]">
+              Write a code to share with a customer. They type it in at checkout on the hire page. Each code works once.
+            </p>
+            {open.codes && <DeskDiscountCodes />}
+          </section>
+        )}
 
         {/* Customer reviews */}
         <section className={card + " mt-[22px] p-[22px]"}>

@@ -5,18 +5,23 @@ import { COMPANY, CONTACT } from "../lib/contact";
 import { type LatLng } from "./PinMap";
 import PinPicker from "./PinPicker";
 import PaymentDetails from "./PaymentDetails";
+import DamageCoverChoice from "./DamageCoverChoice";
 import ReviewPrompt, { rememberForReview, reviewUrl, skipReview } from "./ReviewPrompt";
 import { mpesaCodeHint } from "../lib/payments";
 import { LicencePicker, SignatureBox } from "./CheckoutDocuments";
 import { buildBookingPdf, downloadPdf, loadPdfLogo, type BookingPdfData } from "../lib/bookingPdf";
+import Marked, { ReviewKey } from "./Marked";
+import { SHOW_REVIEW_CHANGES } from "../lib/review";
 import {
+  AGREEMENT_MARKED,
   AGREEMENT_TEXT,
   AGREEMENT_TITLE,
   AGREEMENT_VERSION,
   MAX_DRIVERS,
-  CANCELLATION_SUMMARY,
+  CANCELLATION_SUMMARY_MARKED,
   agreementLine,
   bookingSchedule,
+  bookingScheduleMarked,
   damageLimitFor,
   mileageFor,
   type DocImage,
@@ -140,8 +145,17 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [insure, setInsure] = useState(false);
+  // Damage cover: true (collision damage waiver), false (no waiver), null (not chosen yet; required to book).
+  const [insure, setInsure] = useState<boolean | null>(null);
+  useEffect(() => {
+    setInsure(null);
+  }, [selectedId]);
   const [mpesaCode, setMpesaCode] = useState("");
+  // Discount code at checkout
+  const [codeInput, setCodeInput] = useState("");
+  const [codeApplied, setCodeApplied] = useState<{ code: string; amount: number; label: string } | null>(null);
+  const [codeError, setCodeError] = useState("");
+  const [codeBusy, setCodeBusy] = useState(false);
   const [terms, setTerms] = useState(false);
   // Security update: licence photos for every driver, extra drivers, and the signed hire agreement.
   const [mainLicence, setMainLicence] = useState<DocImage | null>(null);
@@ -255,9 +269,12 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
   });
   const days = availability?.days || 0;
   const hireTotal = selected ? days * selected.rate : 0;
-  const insuranceTotal = selected && insure ? days * selected.addon : 0;
+  const insuranceTotal = selected && insure === true ? days * selected.addon : 0;
+  const coverMissing = Boolean(selected && selected.addon > 0 && insure === null);
   const pricedDelivery = deliveryQuote.manual ? 0 : deliveryQuote.fee || 0;
-  const total = hireTotal + insuranceTotal + pricedDelivery;
+  // A discount code (issued by staff) comes off the hire charge only; the server checks it again when booking.
+  const codeOff = codeApplied ? Math.min(codeApplied.amount, hireTotal) : 0;
+  const total = hireTotal + insuranceTotal + pricedDelivery - codeOff;
 
   function bookingInput(acceptTerms: boolean): Partial<BookingInput> {
     return {
@@ -277,14 +294,43 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       address: delivery === "none" ? "" : address,
       directions: delivery === "none" ? "" : directions,
       note: delivery === "none" ? "" : note,
-      insure,
+      insure: insure === true,
       name,
       email,
       phone,
       oohNote,
       mpesaCode: deliveryQuote.manual ? "" : mpesaCode,
       terms: acceptTerms,
+      discountCode: codeApplied ? codeApplied.code : "",
     };
+  }
+
+  // The code's discount depends on the vehicle and dates, so it is checked again when they change.
+  useEffect(() => {
+    setCodeApplied(null);
+    setCodeError("");
+  }, [selectedId, pickup, returnOn]);
+
+  async function applyCode() {
+    const code = codeInput.trim();
+    setCodeError("");
+    if (!code) return setCodeError("Enter your discount code.");
+    setCodeBusy(true);
+    try {
+      const response = await fetch("/api/hire/discount", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, modelId: selectedId, pickup, returnOn }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "That discount code couldn't be checked.");
+      setCodeApplied(body);
+    } catch (error) {
+      setCodeApplied(null);
+      setCodeError(error instanceof Error ? error.message : "That discount code couldn't be checked.");
+    } finally {
+      setCodeBusy(false);
+    }
   }
 
   const selectedLimit = selected ? damageLimitFor(selected.name, selected.category) : null;
@@ -299,8 +345,8 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       reference: "",
       hirer: { name: name.trim(), email: email.trim(), phone: phone.trim() },
       verification: usingOnFile
-        ? "Licence photo on file from an earlier booking; checked at handover"
-        : "Licence photo uploaded for each driver; checked at handover",
+        ? "Licence photo on file from an earlier booking; ⟦licence and a valid ID or passport to be presented at handover⟧⟪checked at handover⟫"
+        : "Licence photo uploaded for each driver; ⟦licence and a valid ID or passport to be presented at handover⟧⟪checked at handover⟫",
       drivers: [name.trim(), ...extraDrivers.map((driver) => driver.name.trim())],
       vehicle: selected ? selected.name : "",
       collect: collectWhere + ", " + when(pickup, pickTime),
@@ -309,6 +355,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
         "Hire " + ksh(hireTotal) +
         (insuranceTotal ? " + collision damage waiver " + ksh(insuranceTotal) : "") +
         (deliveryQuote.manual ? " + delivery (to be quoted)" : pricedDelivery ? " + delivery " + ksh(pricedDelivery) : "") +
+        (codeOff ? " − discount " + ksh(codeOff) + " (code " + (codeApplied?.code || "") + ")" : "") +
         " = " + ksh(total) + " (VAT included)",
       damageLimit: selectedLimit,
       category: selected?.category,
@@ -394,7 +441,12 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
 
   async function submit() {
     if (!selected) return;
-    const problem = check(true) || driversProblem() || signatureProblem() || (terms ? "" : "Tick the box to confirm you have read and signed the hire agreement.");
+    const problem =
+      (coverMissing ? "Choose your damage cover: the collision damage waiver or no waiver." : "") ||
+      check(true) ||
+      driversProblem() ||
+      signatureProblem() ||
+      (terms ? "" : "Tick the box to confirm you have read and signed the hire agreement.");
     if (problem) {
       setFormError(problem);
       return;
@@ -419,6 +471,8 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
       setStep(1);
       setTerms(false);
       setMpesaCode("");
+      setCodeInput("");
+      setCodeApplied(null);
       setRefreshToken((value) => value + 1);
       scrollToId("checkout");
     } catch (error) {
@@ -455,6 +509,9 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
         sub: !booking.manual ? deliveryQuote.breakdown : "",
         amount: booking.manual ? "Quoted before you pay" : booking.deliveryFee ? ksh(booking.deliveryFee) : "Free",
       });
+    }
+    if (booking.discount) {
+      costs.push({ label: "Discount", sub: codeApplied ? "Code " + codeApplied.code : "", qty: "1", amount: "- " + ksh(booking.discount) });
     }
     return {
       reference: booking.reference,
@@ -1216,7 +1273,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                         )}
                       </div>
                       <p className="mt-3 text-[13px] text-[#595959]">
-                        Every driver must be at least 25. Please also bring the licences and ID to collection.
+                        <Marked text="⟦Every driver needs a valid driving licence.⟧⟪Every driver must be at least 25.⟫ Please also bring the licences and ID to collection." />
                       </p>
                       {formError && (
                         <p role="alert" className="mt-3 text-sm font-bold text-[#9b1c1c]">
@@ -1249,27 +1306,16 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                         {manual ? "Send your request" : "Confirm and pay"}
                       </h2>
                       {selected.addon > 0 && (
-                        <div className="mb-5 flex items-start gap-2.5 rounded-lg border border-[#e5e5e5] bg-[#f5f5f3] px-4 py-3.5">
-                          <input
-                            id="insBox"
-                            type="checkbox"
-                            checked={insure}
-                            onChange={(event) => setInsure(event.target.checked)}
-                            className="mt-px h-[22px] w-[22px] flex-none"
-                          />
-                          <label htmlFor="insBox" className="text-sm leading-normal">
-                            <strong>Add the collision damage waiver for {ksh(selected.addon)} a day</strong>
-                            <br />
-                            <span className="text-[#595959]">
-                              {selectedLimit
-                                ? "Without it, you pay for damage to this vehicle up to " + ksh(selectedLimit) + " for the whole hire. "
-                                : ""}
-                              With it, you don&apos;t pay for accident or collision damage. Fines, and damage to the
-                              suspension, tyres or transmission from bad driving, are not covered. Undercarriage damage
-                              is always paid in full.
-                            </span>
-                          </label>
-                        </div>
+                        <DamageCoverChoice
+                          addon={selected.addon}
+                          limit={selectedLimit}
+                          days={days}
+                          choice={insure}
+                          onChoose={(value) => {
+                            setInsure(value);
+                            if (/damage cover/i.test(formError)) setFormError("");
+                          }}
+                        />
                       )}
 
                       {manual ? (
@@ -1280,6 +1326,32 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                         </div>
                       ) : (
                         <div className="rounded-xl border border-[#e5e5e5] bg-[#f5f5f3] p-4">
+                          <dl className="mb-3 grid gap-1 border-b border-[#dcdcd8] pb-3 text-sm">
+                            <div className="flex justify-between gap-3">
+                              <dt className="text-[#3f3f3f]">Rental ({days === 1 ? "1 day" : days + " days"})</dt>
+                              <dd>{ksh(hireTotal)}</dd>
+                            </div>
+                            {selected.addon > 0 && (
+                              <div className="flex justify-between gap-3">
+                                <dt className="text-[#3f3f3f]">Damage cover</dt>
+                                <dd className={insure === null ? "text-[#595959]" : ""}>
+                                  {insure === null ? "Not chosen yet" : insure ? ksh(insuranceTotal) : "No waiver"}
+                                </dd>
+                              </div>
+                            )}
+                            {pricedDelivery > 0 && (
+                              <div className="flex justify-between gap-3">
+                                <dt className="text-[#3f3f3f]">Delivery and collection</dt>
+                                <dd>{ksh(pricedDelivery)}</dd>
+                              </div>
+                            )}
+                            {codeOff > 0 && codeApplied && (
+                              <div className="flex justify-between gap-3">
+                                <dt className="text-[#3f3f3f]">Discount ({codeApplied.code})</dt>
+                                <dd>−{ksh(codeOff)}</dd>
+                              </div>
+                            )}
+                          </dl>
                           <div className="mb-3 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(170px,1fr))]">
                             <div>
                               <div className="text-[13px] text-[#595959]">Amount due in full</div>
@@ -1302,12 +1374,18 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                             <div>
                               <dt className="inline font-bold">Damage liability limit: </dt>
                               <dd className="inline">
-                                {selectedLimit ? ksh(selectedLimit) + " per hire, the most you pay for damage to the vehicle (clause 7)." : "Not set"}
+                                {selectedLimit ? (
+                                  <Marked text={ksh(selectedLimit) + "⟦ + VAT⟧ per hire, the most you pay for damage to the vehicle (clause 7)."} />
+                                ) : (
+                                  "Not set"
+                                )}
                               </dd>
                             </div>
                             <div>
                               <dt className="inline font-bold">Cancellation: </dt>
-                              <dd className="inline">{CANCELLATION_SUMMARY}</dd>
+                              <dd className="inline">
+                                <Marked text={CANCELLATION_SUMMARY_MARKED} />
+                              </dd>
                             </div>
                             <div>
                               <dt className="inline font-bold">Mileage: </dt>
@@ -1357,22 +1435,27 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                               className="h-auto w-[96px] flex-none"
                             />
                           </div>
-                          {AGREEMENT_TEXT.map((paragraph, index) => {
+                          <ReviewKey />
+                          {(SHOW_REVIEW_CHANGES ? AGREEMENT_MARKED : AGREEMENT_TEXT).map((paragraph, index) => {
                             const line = agreementLine(paragraph);
                             if (line.kind === "heading") {
                               return (
                                 <p key={index} className="mb-1.5 mt-4 font-bold text-[#171717]">
-                                  {line.text}
+                                  <Marked text={line.text} />
                                 </p>
                               );
                             }
                             if (line.kind === "schedule") {
                               return (
                                 <dl key={index} className="mb-3 grid gap-px overflow-hidden rounded-md border border-[#e5e5e5] bg-[#e5e5e5] text-[13px]">
-                                  {bookingSchedule(scheduleValues()).map(([label, value]) => (
+                                  {bookingScheduleMarked(scheduleValues()).map(([label, value]) => (
                                     <div key={label} className="grid gap-x-3 bg-white px-3 py-1.5 sm:grid-cols-[190px_minmax(0,1fr)]">
-                                      <dt className="text-[#595959]">{label}</dt>
-                                      <dd className="text-[#171717]">{value}</dd>
+                                      <dt className="text-[#595959]">
+                                        <Marked text={label} />
+                                      </dt>
+                                      <dd className="text-[#171717]">
+                                        <Marked text={value} />
+                                      </dd>
                                     </div>
                                   ))}
                                 </dl>
@@ -1380,7 +1463,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                             }
                             return (
                               <p key={index} className={line.level === 2 ? "mb-1 pl-8" : line.level === 1 ? "mb-2 pl-4" : "mb-2"}>
-                                {line.text}
+                                <Marked text={line.text} />
                               </p>
                             );
                           })}
@@ -1412,8 +1495,7 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                           className="mt-px h-[22px] w-[22px] flex-none"
                         />
                         <label htmlFor="termsBox" className="text-sm leading-normal">
-                          I agree to the Rental Terms. I have read and signed the hire agreement, and every driver named on
-                          this booking is at least 25 with a valid driving licence.
+                          <Marked text="I agree to the Rental Terms. I have read and signed the hire agreement, and every driver named on this booking ⟦has⟧⟪is at least 25 with⟫ a valid driving licence." />
                         </label>
                       </div>
                       {formError && (
@@ -1440,8 +1522,8 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                         <button
                           type="button"
                           onClick={submit}
-                          disabled={submitting || !selected.available}
-                          className={btnDark}
+                          disabled={submitting || !selected.available || coverMissing}
+                          className={btnDark + " disabled:cursor-not-allowed disabled:bg-[#d6d6d2] disabled:text-[#595959]"}
                         >
                           {submitting
                             ? "Sending…"
@@ -1449,6 +1531,23 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                               ? "Send booking request"
                               : "Hold vehicle · " + ksh(total) + " due"}
                         </button>
+                        {/* Why the button is grey: the customer hasn't chosen waiver or no waiver yet. */}
+                        {coverMissing && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cards = document.getElementById("damageCover");
+                              cards?.scrollIntoView({ behavior: "smooth", block: "center" });
+                              (document.getElementById("coverWaiver") as HTMLInputElement | null)?.focus({ preventScroll: true });
+                            }}
+                            className="flex min-h-[46px] max-w-[340px] items-center gap-2 rounded-lg border border-[#e6c97a] bg-[#fff8e1] px-3 py-2 text-left text-[13px] font-semibold leading-snug text-[#5f4b00]"
+                          >
+                            <span aria-hidden="true" className="text-base">↑</span>
+                            <span>
+                              Tick <strong>Collision damage waiver</strong> or <strong>No waiver</strong> above to continue.
+                            </span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1497,11 +1596,68 @@ export default function HireBooking({ modelCount = 9 }: { modelCount?: number })
                         <span>{ksh(insuranceTotal)}</span>
                       </div>
                     )}
+                    {codeOff > 0 && codeApplied && (
+                      <div className="text-[#0d5a2a]">
+                        <div className="flex justify-between gap-2">
+                          <span>Discount ({codeApplied.code})</span>
+                          <span className="whitespace-nowrap">− {ksh(codeOff)}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCodeApplied(null);
+                            setCodeInput("");
+                          }}
+                          className="-mt-1 block text-[12px] font-semibold text-[#595959] underline"
+                        >
+                          Remove code
+                        </button>
+                      </div>
+                    )}
                     <div className="flex justify-between gap-2 font-bold">
                       <span>{manual ? "Hire so far" : "Due in full"}</span>
                       <span>{ksh(total)}</span>
                     </div>
                     <div className="text-[13px] text-[#595959]">Nothing is taken on this page.</div>
+                    {!codeApplied && (
+                      <form
+                        className="mt-2.5 border-t border-[#e5e5e5] pt-2.5"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          applyCode();
+                        }}
+                      >
+                        <label htmlFor="discountCode" className="mb-1 block text-[13px] text-[#595959]">
+                          Have a discount code?
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            id="discountCode"
+                            value={codeInput}
+                            onChange={(e) => {
+                              setCodeInput(e.target.value.toUpperCase());
+                              setCodeError("");
+                            }}
+                            autoComplete="off"
+                            placeholder="Enter code"
+                            className="h-10 min-w-0 flex-1 rounded-lg border border-[#c8c8c8] bg-white px-3 text-sm uppercase text-[#171717]"
+                          />
+                          <button
+                            type="submit"
+                            disabled={codeBusy}
+                            className="h-10 flex-none rounded-lg bg-[#171717] px-4 text-[13px] font-bold uppercase tracking-[1px] text-white disabled:opacity-50"
+                          >
+                            {codeBusy ? "Checking…" : "Apply"}
+                          </button>
+                        </div>
+                        {codeError && (
+                          <p role="alert" className="mt-1.5 text-[13px] font-bold text-[#a50e0e]">
+                            {codeError}
+                          </p>
+                        )}
+                      </form>
+                    )}
+                    {codeApplied && <div className="text-[13px] text-[#0d5a2a]">Code {codeApplied.code}: {codeApplied.label}</div>}
                   </div>
                 </aside>
               </div>

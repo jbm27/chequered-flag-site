@@ -4,6 +4,8 @@ import CustomerReviews from "../../components/CustomerReviews";
 import { CONTACT } from "../../lib/contact";
 import { YARD } from "../../lib/hire";
 import { fleetModels } from "../../lib/fleet";
+import Marked, { ReviewKey } from "../../components/Marked";
+import { SHOW_REVIEW_CHANGES, hasChanges } from "../../lib/review";
 
 // Layout and wording follow Homer's vehicle hire design (V1.5).
 // Payment wording follows the booking rules: paid in full, nothing charged on the website,
@@ -30,11 +32,11 @@ const KNOW = [
   },
   {
     title: "Collection and delivery",
-    body: "Collect from our workshop in Karen, or we deliver to you, and can collect from a different place. Delivery is free within 15 km of the workshop, measured in a straight line. Beyond that, each km over 15 costs KSh 45 for a saloon, KSh 55 for an SUV and KSh 70 for a Prado or 4x4, for each trip. The charge is shown when you book.",
+    body: "Collect from our workshop in Karen, or we deliver to you, and can collect from a different place. Delivery is free within 15 km of the workshop, measured in a straight line. Beyond that, each km over 15 costs KSh 45 for a saloon, KSh 55 for an SUV and KSh 70 for a Prado or 4x4, for each trip. The charge is shown when you book.⟦ Fuel used for delivery and collection is already included in the delivery charge.⟧",
   },
   {
     title: "Drivers",
-    body: "Every driver must be at least 25, hold a valid licence recognised in Kenya and be named on the booking. Add a photo of each driver's licence when you book, and bring the licences and ID to collection.",
+    body: "Every driver must ⟪be at least 25, ⟫hold a valid licence recognised in Kenya and be named on the booking.⟦ There is no minimum age.⟧ Add a photo of each driver's licence when you book. ⟦Every driver must present their driving licence and a valid ID or passport at handover.⟧⟪ and bring the licences and ID to collection.⟫",
   },
   {
     title: "Mileage",
@@ -42,7 +44,7 @@ const KNOW = [
   },
   {
     title: "Damage liability limit",
-    body: "If the vehicle is damaged during your hire, you pay the evidenced repair cost up to a limit for the whole hire: KSh 90,000 for a saloon, KSh 150,000 for the X-Trail, and KSh 200,000 for a Prado or Land Cruiser. Damage to the undercarriage is paid in full, with no limit. You don't pay for genuine mechanical faults or normal wear and tear. Add the optional collision damage waiver (KSh 1,500 a day for saloons, KSh 2,000 for SUVs and 4x4s) and you don't pay for accident or collision damage. Your agreement shows the limit for the vehicle you book.",
+    body: "If the vehicle is damaged during your hire, you pay the ⟪evidenced⟫ repair cost⟦, whoever caused the damage,⟧ up to a limit for the whole hire: KSh 90,000⟦ + VAT⟧ for a saloon, KSh 150,000⟦ + VAT⟧ for the X-Trail, and KSh 200,000⟦ + VAT⟧ for a Prado or Land Cruiser. Damage to the undercarriage is paid in full, with no limit. You don't pay for genuine mechanical faults or normal wear and tear. Add the optional collision damage waiver (KSh 1,500 a day for saloons, KSh 2,000 for SUVs and 4x4s) and you don't pay for accident or collision damage. Your agreement shows the limit for the vehicle you book.",
   },
   {
     title: "Fuel",
@@ -50,11 +52,11 @@ const KNOW = [
   },
   {
     title: "Hire days and late returns",
-    body: "A hire day is 24 hours from your collection time. If you return after your agreed time, an extra day may be charged. Open Monday to Friday 08:00–17:00 and Saturday 08:00–13:00; pick-ups and returns outside these hours are by arrangement.",
+    body: "A hire day is 24 hours from your collection time. If you return after your agreed time, an extra ⟦24 hours will be charged for each 24 hours, or part of 24 hours, you are late⟧⟪day may be charged⟫. Open Monday to Friday 08:00–17:00 and Saturday 08:00–13:00; pick-ups and returns outside these hours are by arrangement.",
   },
   {
     title: "Cancellations",
-    body: "Cancel at least 14 days before collection for a full refund. After that, and for no-shows, we keep 20% of the booking price and refund 80%. If your vehicle becomes unavailable and we can't offer an equivalent, we may cancel and refund you in full.",
+    body: "Cancel at least 14 days before collection for a full refund. After that, and for no-shows, we keep 20% of the booking price and refund 80%. If your vehicle becomes unavailable and we can't offer an equivalent, we ⟦will⟧⟪may⟫ cancel and refund you in full.",
   },
   { title: "Prices", body: "All rates include VAT." },
 ];
@@ -69,11 +71,11 @@ const DIRECTIONS = [
 const FAQ = [
   {
     q: "What do I need to hire a vehicle?",
-    a: "Every driver must be at least 25 and hold a valid driving licence recognised in Kenya for the vehicle. When you book, add a photo of the front of each driver's licence. Bring the licences and your ID or passport when you collect the vehicle: we check them at handover, and can't hand the vehicle over if the checks fail.",
+    a: "Every driver must ⟪be at least 25 and ⟫hold a valid driving licence recognised in Kenya for the vehicle.⟦ There is no minimum age.⟧ When you book, add a photo of the front of each driver's licence. ⟦Every driver must present their driving licence and a valid ID or passport at handover⟧⟪Bring the licences and your ID or passport when you collect the vehicle: we check them at handover⟫, and ⟦we⟧ can't hand the vehicle over if the checks fail.",
   },
   {
     q: "How much do I pay to book, and is there a deposit?",
-    a: "The full booking price is due when you book, including the optional collision damage waiver and any delivery charge. There is no security deposit. Your booking is confirmed once we have received the full payment and sent you confirmation. Nothing is added after you pay unless you agree to it.",
+    a: "The full booking price is due when you book, including the optional collision damage waiver and any delivery charge. There is no security deposit. Your booking is confirmed once we have received the full payment and sent you confirmation. ⟦Charges set out in the hire agreement, such as fuel, extra mileage, late returns, fines and the cancellation fee, are charged as they arise.⟧⟪Nothing is added after you pay unless you agree to it.⟫",
   },
   {
     q: "How can I pay?",
@@ -81,7 +83,7 @@ const FAQ = [
   },
   {
     q: "What happens if the vehicle is damaged?",
-    a: "Every vehicle is insured as the law requires. If the vehicle is damaged during your hire, for example in a collision, by a tyre blowout or to the windscreen or wheels, you pay the evidenced repair and recovery cost up to the damage liability limit: KSh 90,000 for a saloon, KSh 150,000 for the X-Trail, and KSh 200,000 for a Prado or Land Cruiser. The limit applies once to the whole hire, not to each incident, and it is not a fee taken in advance. We give you an itemised statement with evidence for any claim. Damage to the undercarriage (the underside of the vehicle) is different: it is paid in full, with no limit, and the collision damage waiver doesn't cover it. You don't pay for genuine mechanical or electrical faults or normal wear and tear. Your booking agreement shows the limit for the vehicle you book.",
+    a: "Every vehicle is insured as the law requires. If the vehicle is damaged during your hire, for example in a collision, by a tyre blowout or to the windscreen or wheels, you pay the ⟪evidenced⟫ repair and recovery cost⟦, whoever caused the damage,⟧ up to the damage liability limit: KSh 90,000⟦ + VAT⟧ for a saloon, KSh 150,000⟦ + VAT⟧ for the X-Trail, and KSh 200,000⟦ + VAT⟧ for a Prado or Land Cruiser. The limit applies once to the whole hire, not to each incident, and it is not a fee taken in advance. We give you an itemised statement with evidence for any claim⟦, and if we recover the cost from another driver's insurer, we refund you⟧. Damage to the undercarriage (the underside of the vehicle) is different: it is paid in full, with no limit, and the collision damage waiver doesn't cover it. You don't pay for genuine mechanical or electrical faults or normal wear and tear. Your booking agreement shows the limit for the vehicle you book.",
   },
   {
     q: "What does the collision damage waiver cover?",
@@ -89,7 +91,7 @@ const FAQ = [
   },
   {
     q: "What should I check when I collect the vehicle?",
-    a: "Look the vehicle over before you drive away and tell us about any damage or missing accessories, with photos. We record the condition, fuel level and odometer reading at handover. Damage recorded before you drive away is never charged to you.",
+    a: "⟦You and our representative look the vehicle over together before you drive away, and note any damage, missing accessories, the fuel level and the odometer reading on the paper handover form, which you both sign.⟧⟪Look the vehicle over before you drive away and tell us about any damage or missing accessories, with photos. We record the condition, fuel level and odometer reading at handover.⟫ Damage ⟦noted on the form⟧⟪recorded before you drive away⟫ is never charged to you⟦; damage that isn't on the form is treated as having happened during your hire. Please bring your driving licence and a valid ID or passport⟧.",
   },
   {
     q: "Is there a mileage limit?",
@@ -97,11 +99,11 @@ const FAQ = [
   },
   {
     q: "What is the fuel policy?",
-    a: "All our hire vehicles run on petrol. Return the vehicle with at least the fuel level it had at collection; we record it at handover. Less fuel than at collection: we charge for the shortfall at our refuelling rate. More fuel than at collection: the extra fuel is at your own cost, and we don't refund or credit it.",
+    a: "All our hire vehicles run on petrol. Return the vehicle with at least the fuel level it had at collection; we record it at handover. Less fuel than at collection: we charge for the shortfall at our refuelling rate. More fuel than at collection: the extra fuel is at your own cost, and we don't refund or credit it.⟦ If we deliver or collect the vehicle, the fuel used for that is already included in the delivery charge.⟧",
   },
   {
     q: "Can you deliver the vehicle to me?",
-    a: "Yes. Choose a delivery option in Find your vehicle, then search for your address or drop a pin on the map. You can also have it collected from a different place. Delivery is free within 15 km of our workshop in Karen, measured in a straight line to your pin. Beyond that, each km over 15 costs KSh 45 for a saloon, KSh 55 for an SUV and KSh 70 for a Prado or 4x4, for each trip. The charge is shown and added to the full amount when you book.",
+    a: "Yes. Choose a delivery option in Find your vehicle, then search for your address or drop a pin on the map. You can also have it collected from a different place. Delivery is free within 15 km of our workshop in Karen, measured in a straight line to your pin. Beyond that, each km over 15 costs KSh 45 for a saloon, KSh 55 for an SUV and KSh 70 for a Prado or 4x4, for each trip. The charge is shown and added to the full amount when you book.⟦ Fuel for delivery and collection is already included in the delivery charge.⟧",
   },
   {
     q: "Can I collect or return outside opening hours?",
@@ -109,15 +111,15 @@ const FAQ = [
   },
   {
     q: "What if I return the vehicle late?",
-    a: "A hire day is 24 hours from your collection time. If you return after your agreed time, an extra day may be charged. Call or WhatsApp us as soon as you know you'll be late: a late return doesn't automatically extend your insurance or permission to drive.",
+    a: "A hire day is 24 hours from your collection time. If you return after your agreed time, an extra ⟦24 hours will be charged for each 24 hours, or part of 24 hours, you are late⟧⟪day may be charged⟫. Call or WhatsApp us as soon as you know you'll be late: a late return doesn't automatically extend your insurance or permission to drive.",
   },
   {
     q: "Can someone else drive?",
-    a: "Only drivers named on your booking, or approved by us in writing. Add them with + Add driver when you book, with a photo of their licence. They must also be at least 25. You stay responsible for how they use the vehicle.",
+    a: "Only drivers named on your booking, or approved by us in writing. Add them with + Add driver when you book, with a photo of their licence. ⟪They must also be at least 25. ⟫⟦They also need a valid driving licence. ⟧You stay responsible for how they use the vehicle.",
   },
   {
     q: "Where can I take the vehicle?",
-    a: "Anywhere in Kenya, on roads and tracks suitable for the vehicle. Off-road motorsport is strictly prohibited: no rallies (such as the Rhino Charge), racing, speed trials or competitive events, in any of our vehicles, including the 4x4s. Saloon cars and the Nissan X-Trail must not be taken into national parks, game parks or game reserves. Travel outside Kenya needs our written consent and confirmed insurance first. The vehicle must not be used for towing, carrying passengers or goods for payment, or driven under the influence of alcohol or drugs.",
+    a: "Anywhere in Kenya, on roads and tracks suitable for the vehicle. Off-road motorsport is strictly prohibited: no rallies (such as the Rhino Charge), racing, speed trials or competitive events, in any of our vehicles, including the 4x4s. Saloon cars and the Nissan X-Trail must not be taken into national parks, game parks⟦, game reserves or wildlife conservancies⟧⟪ or game reserves⟫. Travel outside Kenya needs our written consent and confirmed insurance first. The vehicle must not be used for towing, carrying passengers or goods for payment, or driven under the influence of alcohol or drugs.",
   },
   {
     q: "What happens if the vehicle breaks down or I have an accident?",
@@ -125,7 +127,7 @@ const FAQ = [
   },
   {
     q: "Do I need a police abstract after an accident?",
-    a: "Yes. After any accident, theft or vandalism involving the vehicle, you must report it at the nearest police station as soon as you reasonably can and get a police abstract. Send us a photo of it straight away and hand over the original when you return the vehicle. Our insurer needs the police abstract to handle any claim.",
+    a: "Yes. After any accident, theft or vandalism involving the vehicle, you must report it at the nearest police station as soon as you reasonably can and get a police abstract. Send us a photo of it straight away and hand over the original when you return the vehicle. Our insurer needs the police abstract to handle any claim. ⟦In the event of an accident it is very important to get the police abstract, to make sure you have full insurance cover as the hirer.⟧",
   },
   {
     q: "Who pays traffic fines, parking and tolls?",
@@ -133,7 +135,7 @@ const FAQ = [
   },
   {
     q: "Can I cancel or change my booking?",
-    a: "Cancel at least 14 days before collection for a full refund. After that, and for no-shows, we keep 20% of the booking price and refund 80%. Refunds go back to the way you paid within 7 business days. Every booking is reviewed after it is placed: if your vehicle becomes unavailable before collection (for example after a breakdown or accident) and we can't offer you an equivalent or better one, we may cancel the booking and you get a full refund. To change a booking, contact us as early as possible; changes after confirmation need both of us to agree.",
+    a: "Cancel at least 14 days before collection for a full refund. After that, and for no-shows, we keep 20% of the booking price and refund 80%. Refunds go back to the way you paid within 7 business days. Every booking is reviewed after it is placed: if your vehicle becomes unavailable before collection (for example after a breakdown or accident) and we can't offer you an equivalent or better one, we ⟦will⟧⟪may⟫ cancel the booking and ⟦refund you in full⟧⟪you get a full refund⟫. To change a booking, contact us as early as possible; changes after confirmation need both of us to agree.",
   },
   {
     q: "What do you do with my information?",
@@ -193,11 +195,14 @@ export default function VehicleHirePage() {
       <section id="terms" className={sectionWrap}>
         <div data-reveal className={eyebrow}>Before you book</div>
         <h2 data-reveal className={h2 + " mb-[18px]"}>What you need to know</h2>
+        <ReviewKey />
         <div data-reveal-stagger className="grid gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
           {KNOW.map((item) => (
             <div key={item.title} className={card}>
               <strong>{item.title}</strong>
-              <p className="mt-1.5 text-sm text-[#3f3f3f]">{item.body}</p>
+              <p className="mt-1.5 text-sm text-[#3f3f3f]">
+                <Marked text={item.body} />
+              </p>
             </div>
           ))}
         </div>
@@ -314,11 +319,23 @@ export default function VehicleHirePage() {
       <section id="faq" className={sectionWrap}>
         <div data-reveal className={eyebrow}>Good to know</div>
         <h2 data-reveal className={h2 + " mb-3"}>Frequently asked questions</h2>
+        <ReviewKey />
         <div data-reveal className="rounded-xl border border-[#e5e5e5] bg-white px-5 py-1">
           {FAQ.map((item) => (
-            <details key={item.q} className="border-b border-[#e5e5e5] last:border-b-0">
-              <summary className="min-h-[24px] cursor-pointer px-1 py-4 text-base font-semibold">{item.q}</summary>
-              <p className="mx-1 mb-[18px] text-[15px] leading-[1.65] text-[#3f3f3f]">{item.a}</p>
+            <details
+              key={item.q}
+              open={SHOW_REVIEW_CHANGES && hasChanges(item.a)}
+              className="border-b border-[#e5e5e5] last:border-b-0"
+            >
+              <summary className="min-h-[24px] cursor-pointer px-1 py-4 text-base font-semibold">
+                {item.q}
+                {SHOW_REVIEW_CHANGES && hasChanges(item.a) && (
+                  <span className="ml-2 rounded-md bg-[#fff1a8] px-1.5 py-0.5 align-middle text-xs font-bold text-[#5f4b00]">Changed</span>
+                )}
+              </summary>
+              <p className="mx-1 mb-[18px] text-[15px] leading-[1.65] text-[#3f3f3f]">
+                <Marked text={item.a} />
+              </p>
             </details>
           ))}
         </div>
